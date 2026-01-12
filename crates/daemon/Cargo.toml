@@ -1,0 +1,13 @@
+[package]
+name = "daemon"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+trace = { path = "../trace" }
+storage = { path = "../storage" }
+api = { path = "../api" }
+memfs = { path = "../memfs" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

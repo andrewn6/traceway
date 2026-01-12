@@ -1,0 +1,10 @@
+[package]
+name = "memfs"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+trace = { path = "../trace" }
+storage = { path = "../storage" }
+tokio.workspace = true
+thiserror.workspace = true
