@@ -5,5 +5,3 @@ edition.workspace = true
 
 [dependencies]
 trace = { path = "../trace" }
-tokio.workspace = true
-thiserror.workspace = true

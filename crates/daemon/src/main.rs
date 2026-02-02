@@ -44,10 +44,18 @@ async fn main() {
         info!(traces = r.trace_count(), spans = r.span_count(), "store stats");
     }
     
-    info!("daemon ready");
+    // Start API server
+    let api_store = store.clone();
+    let api_handle = tokio::spawn(async move {
+        if let Err(e) = api::serve(api_store, "127.0.0.1:3000").await {
+            tracing::error!("api server error: {}", e);
+        }
+    });
+
+    info!("daemon ready - api at http://127.0.0.1:3000");
 
     tokio::signal::ctrl_c().await.ok();
-    info!("shutting down")
+    info!("shutting down");
 
-
+    api_handle.abort();
 }

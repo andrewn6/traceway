@@ -61,4 +61,13 @@ impl Span {
         }
     }
 
+    pub fn fail(&mut self, error: impl Into<String>) {
+        if let SpanStatus::Running { started_at } = self.status {
+            self.status = SpanStatus::Failed {
+                started_at,
+                ended_at: Utc::now(),
+                error: error.into(),
+            };
+        }
+    }
 }

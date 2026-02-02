@@ -57,6 +57,7 @@ impl TraceFs {
             ino, 
             size,
             blocks: 1,
+            atime: SystemTime::UNIX_EPOCH,
             mtime: SystemTime::UNIX_EPOCH,
             ctime: SystemTime::UNIX_EPOCH,
             crtime: SystemTime::UNIX_EPOCH,
@@ -107,7 +108,7 @@ impl Filesystem for TraceFs {
                 (ROOT_INO, FileType::Directory, "..")
             ],
             _ => {
-                reply.error(libc:ENOENT);
+                reply.error(libc::ENOENT);
                 return;
             } 
         };
