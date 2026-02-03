@@ -3,16 +3,50 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use storage::SpanStore;
-use trace::{Span, SpanId, TraceId};
+use trace::{Span, SpanId, SpanMetadata, TraceId};
 
 pub type SharedStore = Arc<RwLock<SpanStore>>;
+
+// Request types
+
+#[derive(Deserialize)]
+struct CreateSpan {
+    trace_id: TraceId,
+    parent_id: Option<SpanId>,
+    name: String,
+    #[serde(default)]
+    metadata: SpanMetadata,
+}
+
+#[derive(Deserialize)]
+struct FailSpan {
+    error: String,
+}
+
+#[derive(Deserialize)]
+struct UpdateMetadata {
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    input_tokens: Option<u64>,
+    #[serde(default)]
+    output_tokens: Option<u64>,
+}
+
+// Response types
+
+#[derive(Serialize)]
+struct CreatedSpan {
+    id: SpanId,
+    trace_id: TraceId,
+}
 
 #[derive(Serialize)]
 struct TraceList {
@@ -75,12 +109,86 @@ async fn get_stats(State(store): State<SharedStore>) -> Json<Stats> {
     })
 }
 
+// POST handlers
+
+async fn create_span(
+    State(store): State<SharedStore>,
+    Json(req): Json<CreateSpan>,
+) -> (StatusCode, Json<CreatedSpan>) {
+    let mut span = Span::new(req.trace_id, req.parent_id, req.name);
+    span.metadata = req.metadata;
+    let id = span.id;
+    let trace_id = span.trace_id;
+
+    let mut w = store.write().await;
+    w.insert(span);
+
+    tracing::debug!(%id, %trace_id, "span created");
+    (StatusCode::CREATED, Json(CreatedSpan { id, trace_id }))
+}
+
+async fn complete_span(
+    State(store): State<SharedStore>,
+    Path(span_id): Path<SpanId>,
+) -> StatusCode {
+    let mut w = store.write().await;
+    if w.complete(span_id) {
+        tracing::debug!(%span_id, "span completed");
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
+async fn fail_span(
+    State(store): State<SharedStore>,
+    Path(span_id): Path<SpanId>,
+    Json(req): Json<FailSpan>,
+) -> StatusCode {
+    let mut w = store.write().await;
+    if w.fail(span_id, req.error) {
+        tracing::debug!(%span_id, "span failed");
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
+async fn update_span_metadata(
+    State(store): State<SharedStore>,
+    Path(span_id): Path<SpanId>,
+    Json(req): Json<UpdateMetadata>,
+) -> StatusCode {
+    let mut w = store.write().await;
+    if let Some(span) = w.get_mut(span_id) {
+        if let Some(model) = req.model {
+            span.metadata.model = Some(model);
+        }
+        if let Some(input) = req.input_tokens {
+            span.metadata.input_tokens = Some(input);
+        }
+        if let Some(output) = req.output_tokens {
+            span.metadata.output_tokens = Some(output);
+        }
+        tracing::debug!(%span_id, "span metadata updated");
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
 pub fn router(store: SharedStore) -> Router {
     Router::new()
+        // Read
         .route("/traces", get(list_traces))
-        .route("/traces/{trace_id}", get(get_trace))
-        .route("/spans/{span_id}", get(get_span))
+        .route("/traces/:trace_id", get(get_trace))
+        .route("/spans/:span_id", get(get_span))
         .route("/stats", get(get_stats))
+        // Write
+        .route("/spans", post(create_span))
+        .route("/spans/:span_id/complete", post(complete_span))
+        .route("/spans/:span_id/fail", post(fail_span))
+        .route("/spans/:span_id/metadata", post(update_span_metadata))
         .with_state(store)
 }
 
