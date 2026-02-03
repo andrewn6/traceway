@@ -1,17 +1,34 @@
 use std::sync::Arc;
 
+use clap::Parser;
 use tokio::sync::RwLock;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
-use uuid::Uuid;
 
 use storage::SpanStore;
-use trace::Span;
 
 pub type SharedStore = Arc<RwLock<SpanStore>>;
 
+#[derive(Parser, Debug)]
+#[command(name = "llmtrace", about = "LLM trace daemon with Ollama proxy")]
+struct Args {
+    /// API server address
+    #[arg(long, default_value = "127.0.0.1:3000")]
+    api_addr: String,
+
+    /// Proxy server address
+    #[arg(long, default_value = "127.0.0.1:3001")]
+    proxy_addr: String,
+
+    /// Ollama server URL
+    #[arg(long, default_value = "http://localhost:11434")]
+    ollama_url: String,
+}
+
 #[tokio::main]
 async fn main() {
+    let args = Args::parse();
+
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::INFO)
         .finish();
@@ -21,41 +38,33 @@ async fn main() {
 
     let store: SharedStore = Arc::new(RwLock::new(SpanStore::new()));
 
-    {
-        let trace_id = Uuid::new_v4();
-        let mut w = store.write().await;
-
-        let span = Span::new(trace_id, None, "agent-run");
-        let parent_id = span.id;
-        w.insert(span);
-        info!(%trace_id, "created trace");
-
-        let child = Span::new(trace_id, Some(parent_id), "llm-call");
-        let child_id = child.id;
-        w.insert(child);
-
-        w.complete(child_id);
-        w.complete(parent_id);
-        info!("completed spans");
-    }
-
-    {
-        let r = store.read().await;
-        info!(traces = r.trace_count(), spans = r.span_count(), "store stats");
-    }
-    
     // Start API server
     let api_store = store.clone();
+    let api_addr = args.api_addr.clone();
     let api_handle = tokio::spawn(async move {
-        if let Err(e) = api::serve(api_store, "127.0.0.1:3000").await {
+        if let Err(e) = api::serve(api_store, &api_addr).await {
             tracing::error!("api server error: {}", e);
         }
     });
 
-    info!("daemon ready - api at http://127.0.0.1:3000");
+    // Start Proxy server
+    let proxy_store = store.clone();
+    let proxy_addr = args.proxy_addr.clone();
+    let ollama_url = args.ollama_url.clone();
+    let proxy_handle = tokio::spawn(async move {
+        if let Err(e) = proxy::serve(proxy_store, &proxy_addr, &ollama_url).await {
+            tracing::error!("proxy server error: {}", e);
+        }
+    });
+
+    info!(
+        "daemon ready - api at http://{}, proxy at http://{} -> {}",
+        args.api_addr, args.proxy_addr, args.ollama_url
+    );
 
     tokio::signal::ctrl_c().await.ok();
     info!("shutting down");
 
     api_handle.abort();
+    proxy_handle.abort();
 }

@@ -1,15 +1,16 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use storage::SpanStore;
+use storage::{SpanFilter, SpanStore};
 use trace::{Span, SpanId, SpanMetadata, TraceId};
 
 pub type SharedStore = Arc<RwLock<SpanStore>>;
@@ -40,6 +41,15 @@ struct UpdateMetadata {
     output_tokens: Option<u64>,
 }
 
+#[derive(Deserialize)]
+struct SpanQueryParams {
+    model: Option<String>,
+    status: Option<String>,
+    since: Option<DateTime<Utc>>,
+    until: Option<DateTime<Utc>>,
+    name_contains: Option<String>,
+}
+
 // Response types
 
 #[derive(Serialize)]
@@ -64,6 +74,17 @@ struct SpanList {
 struct Stats {
     trace_count: usize,
     span_count: usize,
+}
+
+#[derive(Serialize)]
+struct DeletedTrace {
+    trace_id: TraceId,
+    spans_deleted: usize,
+}
+
+#[derive(Serialize)]
+struct ClearedAll {
+    message: String,
 }
 
 async fn list_traces(State(store): State<SharedStore>) -> Json<TraceList> {
@@ -177,18 +198,79 @@ async fn update_span_metadata(
     }
 }
 
+async fn list_spans(
+    State(store): State<SharedStore>,
+    Query(params): Query<SpanQueryParams>,
+) -> Json<SpanList> {
+    let r = store.read().await;
+    let filter = SpanFilter {
+        model: params.model,
+        status: params.status,
+        since: params.since,
+        until: params.until,
+        name_contains: params.name_contains,
+    };
+    let spans: Vec<Span> = r.filter_spans(&filter).into_iter().cloned().collect();
+    let count = spans.len();
+    Json(SpanList { spans, count })
+}
+
+async fn delete_span(
+    State(store): State<SharedStore>,
+    Path(span_id): Path<SpanId>,
+) -> StatusCode {
+    let mut w = store.write().await;
+    if w.delete_span(span_id) {
+        tracing::debug!(%span_id, "span deleted");
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
+async fn delete_trace(
+    State(store): State<SharedStore>,
+    Path(trace_id): Path<TraceId>,
+) -> Result<Json<DeletedTrace>, StatusCode> {
+    let mut w = store.write().await;
+    let spans_deleted = w.delete_trace(trace_id);
+    if spans_deleted > 0 {
+        tracing::debug!(%trace_id, %spans_deleted, "trace deleted");
+        Ok(Json(DeletedTrace {
+            trace_id,
+            spans_deleted,
+        }))
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
+}
+
+async fn clear_all_traces(State(store): State<SharedStore>) -> Json<ClearedAll> {
+    let mut w = store.write().await;
+    w.clear();
+    tracing::debug!("all traces cleared");
+    Json(ClearedAll {
+        message: "All traces cleared".to_string(),
+    })
+}
+
 pub fn router(store: SharedStore) -> Router {
     Router::new()
         // Read
         .route("/traces", get(list_traces))
-        .route("/traces/:trace_id", get(get_trace))
-        .route("/spans/:span_id", get(get_span))
+        .route("/traces/{trace_id}", get(get_trace))
+        .route("/spans", get(list_spans))
+        .route("/spans/{span_id}", get(get_span))
         .route("/stats", get(get_stats))
         // Write
         .route("/spans", post(create_span))
-        .route("/spans/:span_id/complete", post(complete_span))
-        .route("/spans/:span_id/fail", post(fail_span))
-        .route("/spans/:span_id/metadata", post(update_span_metadata))
+        .route("/spans/{span_id}/complete", post(complete_span))
+        .route("/spans/{span_id}/fail", post(fail_span))
+        .route("/spans/{span_id}/metadata", post(update_span_metadata))
+        // Delete
+        .route("/spans/{span_id}", delete(delete_span))
+        .route("/traces/{trace_id}", delete(delete_trace))
+        .route("/traces", delete(clear_all_traces))
         .with_state(store)
 }
 
