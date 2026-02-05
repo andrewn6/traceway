@@ -1,237 +1,194 @@
 use api::SharedStore;
 use axum::{
+    body::Body,
     extract::State,
-    http::StatusCode,
+    http::Request,
     response::{IntoResponse, Response},
-    routing::post,
-    Json, Router,
+    Router,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use trace::{Span, SpanMetadata};
+use trace::Span;
 use uuid::Uuid;
 
 #[derive(Clone)]
 struct ProxyState {
     store: SharedStore,
-    ollama_url: String,
+    target_url: String,
     client: reqwest::Client,
 }
 
-// Ollama request/response types
-
-#[derive(Debug, Deserialize, Serialize)]
-struct GenerateRequest {
-    model: String,
-    prompt: String,
-    #[serde(default)]
-    stream: Option<bool>,
-    #[serde(flatten)]
-    extra: Value,
+/// Try to extract model name from a JSON body (common field across LLM APIs)
+fn extract_model(body: &Value) -> Option<String> {
+    body.get("model").and_then(|v| v.as_str()).map(String::from)
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct ChatRequest {
-    model: String,
-    messages: Vec<ChatMessage>,
-    #[serde(default)]
-    stream: Option<bool>,
-    #[serde(flatten)]
-    extra: Value,
+/// Try to extract token counts from response (varies by provider)
+fn extract_tokens(body: &Value) -> (Option<u64>, Option<u64>) {
+    // Ollama style
+    let input = body
+        .get("prompt_eval_count")
+        .and_then(|v| v.as_u64())
+        // OpenAI style
+        .or_else(|| {
+            body.get("usage")
+                .and_then(|u| u.get("prompt_tokens"))
+                .and_then(|v| v.as_u64())
+        });
+
+    let output = body
+        .get("eval_count")
+        .and_then(|v| v.as_u64())
+        // OpenAI style
+        .or_else(|| {
+            body.get("usage")
+                .and_then(|u| u.get("completion_tokens"))
+                .and_then(|v| v.as_u64())
+        });
+
+    (input, output)
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct ChatMessage {
-    role: String,
-    content: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct GenerateResponse {
-    #[serde(default)]
-    response: String,
-    #[serde(default)]
-    prompt_eval_count: Option<u64>,
-    #[serde(default)]
-    eval_count: Option<u64>,
-    #[serde(flatten)]
-    extra: Value,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct ChatResponse {
-    message: Option<ChatMessage>,
-    #[serde(default)]
-    prompt_eval_count: Option<u64>,
-    #[serde(default)]
-    eval_count: Option<u64>,
-    #[serde(flatten)]
-    extra: Value,
-}
-
-async fn proxy_generate(
+async fn proxy_handler(
     State(state): State<ProxyState>,
-    Json(req): Json<GenerateRequest>,
-) -> Result<Response, StatusCode> {
-    let trace_id = Uuid::new_v4();
-    let model = req.model.clone();
+    req: Request<Body>,
+) -> Response {
+    let method = req.method().clone();
+    let path = req
+        .uri()
+        .path_and_query()
+        .map(|pq| pq.to_string())
+        .unwrap_or_else(|| "/".to_string());
+    let span_name = format!("{} {}", method, path);
 
-    // Create span before making request
-    let mut span = Span::new(trace_id, None, "ollama-generate");
-    span.metadata = SpanMetadata {
-        model: Some(model.clone()),
-        input_tokens: None,
-        output_tokens: None,
-    };
+    let trace_id = Uuid::new_v4();
+    let mut span = Span::new(trace_id, None, &span_name);
     let span_id = span.id;
 
-    {
-        let mut store = state.store.write().await;
-        store.insert(span);
+    // Read request body
+    let (parts, body) = req.into_parts();
+    let body_bytes = match axum::body::to_bytes(body, 10 * 1024 * 1024).await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!("failed to read request body: {}", e);
+            return (axum::http::StatusCode::BAD_REQUEST, "Failed to read body").into_response();
+        }
+    };
+
+    // Try to parse as JSON to extract model
+    if let Ok(json) = serde_json::from_slice::<Value>(&body_bytes) {
+        if let Some(model) = extract_model(&json) {
+            span.metadata.model = Some(model);
+        }
     }
 
-    tracing::info!(%trace_id, %span_id, model = %model, "proxying generate request");
+    // Insert span
+    {
+        let mut store = state.store.write().await;
+        store.insert(span).await;
+    }
 
-    // Force non-streaming for simplicity
-    let mut request_body = serde_json::to_value(&req).unwrap();
-    request_body["stream"] = serde_json::Value::Bool(false);
+    tracing::info!(%trace_id, %span_id, %span_name, "proxying request");
 
-    let url = format!("{}/api/generate", state.ollama_url);
-    let result = state.client.post(&url).json(&request_body).send().await;
+    // Build target URL
+    let target_url = format!("{}{}", state.target_url, path);
+
+    // Build request to target
+    let mut target_req = state.client.request(method, &target_url);
+
+    // Forward headers (except host)
+    for (name, value) in parts.headers.iter() {
+        if name != "host" {
+            target_req = target_req.header(name, value);
+        }
+    }
+
+    // Send request
+    let result = target_req.body(body_bytes.to_vec()).send().await;
 
     match result {
         Ok(response) => {
             let status = response.status();
-            if status.is_success() {
-                match response.json::<GenerateResponse>().await {
-                    Ok(gen_resp) => {
-                        // Complete span with token counts
-                        {
-                            let mut store = state.store.write().await;
-                            if let Some(s) = store.get_mut(span_id) {
-                                s.metadata.input_tokens = gen_resp.prompt_eval_count;
-                                s.metadata.output_tokens = gen_resp.eval_count;
-                                s.complete();
-                            }
-                        }
-                        tracing::info!(%span_id, "generate completed");
+            let headers = response.headers().clone();
 
-                        // Return full response
-                        let resp_json = serde_json::to_value(&gen_resp).unwrap();
-                        Ok(Json(resp_json).into_response())
+            match response.bytes().await {
+                Ok(resp_bytes) => {
+                    // Try to extract tokens from response
+                    let (input, output) =
+                        if let Ok(json) = serde_json::from_slice::<Value>(&resp_bytes) {
+                            extract_tokens(&json)
+                        } else {
+                            (None, None)
+                        };
+
+                    {
+                        let mut store = state.store.write().await;
+                        if let Some(s) = store.get_mut(span_id) {
+                            s.metadata.input_tokens = input;
+                            s.metadata.output_tokens = output;
+                        }
+                        if status.is_success() {
+                            store.complete(span_id).await;
+                        } else {
+                            store.fail(span_id, format!("HTTP {}", status)).await;
+                        }
                     }
-                    Err(e) => {
-                        fail_span(&state.store, span_id, &format!("Failed to parse response: {}", e)).await;
-                        Err(StatusCode::BAD_GATEWAY)
+
+                    tracing::info!(%span_id, %status, "request completed");
+
+                    // Build response
+                    let mut builder = Response::builder().status(status);
+                    for (name, value) in headers.iter() {
+                        builder = builder.header(name, value);
                     }
+                    builder.body(Body::from(resp_bytes)).unwrap()
                 }
-            } else {
-                let error_text = response.text().await.unwrap_or_default();
-                fail_span(&state.store, span_id, &format!("Ollama error {}: {}", status, error_text)).await;
-                Err(StatusCode::BAD_GATEWAY)
+                Err(e) => {
+                    fail_span(&state.store, span_id, &format!("Failed to read response: {}", e))
+                        .await;
+                    (
+                        axum::http::StatusCode::BAD_GATEWAY,
+                        "Failed to read response",
+                    )
+                        .into_response()
+                }
             }
         }
         Err(e) => {
-            fail_span(&state.store, span_id, &format!("Request failed: {}", e)).await;
-            Err(StatusCode::BAD_GATEWAY)
-        }
-    }
-}
-
-async fn proxy_chat(
-    State(state): State<ProxyState>,
-    Json(req): Json<ChatRequest>,
-) -> Result<Response, StatusCode> {
-    let trace_id = Uuid::new_v4();
-    let model = req.model.clone();
-
-    // Create span before making request
-    let mut span = Span::new(trace_id, None, "ollama-chat");
-    span.metadata = SpanMetadata {
-        model: Some(model.clone()),
-        input_tokens: None,
-        output_tokens: None,
-    };
-    let span_id = span.id;
-
-    {
-        let mut store = state.store.write().await;
-        store.insert(span);
-    }
-
-    tracing::info!(%trace_id, %span_id, model = %model, "proxying chat request");
-
-    // Force non-streaming for simplicity
-    let mut request_body = serde_json::to_value(&req).unwrap();
-    request_body["stream"] = serde_json::Value::Bool(false);
-
-    let url = format!("{}/api/chat", state.ollama_url);
-    let result = state.client.post(&url).json(&request_body).send().await;
-
-    match result {
-        Ok(response) => {
-            let status = response.status();
-            if status.is_success() {
-                match response.json::<ChatResponse>().await {
-                    Ok(chat_resp) => {
-                        // Complete span with token counts
-                        {
-                            let mut store = state.store.write().await;
-                            if let Some(s) = store.get_mut(span_id) {
-                                s.metadata.input_tokens = chat_resp.prompt_eval_count;
-                                s.metadata.output_tokens = chat_resp.eval_count;
-                                s.complete();
-                            }
-                        }
-                        tracing::info!(%span_id, "chat completed");
-
-                        // Return full response
-                        let resp_json = serde_json::to_value(&chat_resp).unwrap();
-                        Ok(Json(resp_json).into_response())
-                    }
-                    Err(e) => {
-                        fail_span(&state.store, span_id, &format!("Failed to parse response: {}", e)).await;
-                        Err(StatusCode::BAD_GATEWAY)
-                    }
-                }
-            } else {
-                let error_text = response.text().await.unwrap_or_default();
-                fail_span(&state.store, span_id, &format!("Ollama error {}: {}", status, error_text)).await;
-                Err(StatusCode::BAD_GATEWAY)
-            }
-        }
-        Err(e) => {
-            fail_span(&state.store, span_id, &format!("Request failed: {}", e)).await;
-            Err(StatusCode::BAD_GATEWAY)
+            fail_span(
+                &state.store,
+                span_id,
+                &format!("Request failed: {}", e),
+            )
+            .await;
+            (
+                axum::http::StatusCode::BAD_GATEWAY,
+                format!("Proxy error: {}", e),
+            )
+                .into_response()
         }
     }
 }
 
 async fn fail_span(store: &SharedStore, span_id: trace::SpanId, error: &str) {
     let mut w = store.write().await;
-    if let Some(s) = w.get_mut(span_id) {
-        s.fail(error);
-    }
+    w.fail(span_id, error).await;
     tracing::warn!(%span_id, %error, "span failed");
 }
 
-pub fn router(store: SharedStore, ollama_url: String) -> Router {
+pub fn router(store: SharedStore, target_url: String) -> Router {
     let state = ProxyState {
         store,
-        ollama_url,
+        target_url,
         client: reqwest::Client::new(),
     };
 
-    Router::new()
-        .route("/api/generate", post(proxy_generate))
-        .route("/api/chat", post(proxy_chat))
-        .with_state(state)
+    Router::new().fallback(proxy_handler).with_state(state)
 }
 
-pub async fn serve(store: SharedStore, addr: &str, ollama_url: &str) -> std::io::Result<()> {
-    let app = router(store, ollama_url.to_string());
+pub async fn serve(store: SharedStore, addr: &str, target_url: &str) -> std::io::Result<()> {
+    let app = router(store, target_url.to_string());
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!("proxy listening on {} -> {}", addr, ollama_url);
+    tracing::info!("proxy listening on {} -> {}", addr, target_url);
     axum::serve(listener, app)
         .await
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))

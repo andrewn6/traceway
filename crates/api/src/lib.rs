@@ -10,10 +10,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use storage::{SpanFilter, SpanStore};
+use storage::{PersistentStore, SpanFilter, SqliteBackend};
 use trace::{Span, SpanId, SpanMetadata, TraceId};
 
-pub type SharedStore = Arc<RwLock<SpanStore>>;
+pub type SharedStore = Arc<RwLock<PersistentStore<SqliteBackend>>>;
 
 // Request types
 
@@ -142,7 +142,7 @@ async fn create_span(
     let trace_id = span.trace_id;
 
     let mut w = store.write().await;
-    w.insert(span);
+    w.insert(span).await;
 
     tracing::debug!(%id, %trace_id, "span created");
     (StatusCode::CREATED, Json(CreatedSpan { id, trace_id }))
@@ -153,7 +153,7 @@ async fn complete_span(
     Path(span_id): Path<SpanId>,
 ) -> StatusCode {
     let mut w = store.write().await;
-    if w.complete(span_id) {
+    if w.complete(span_id).await {
         tracing::debug!(%span_id, "span completed");
         StatusCode::OK
     } else {
@@ -167,7 +167,7 @@ async fn fail_span(
     Json(req): Json<FailSpan>,
 ) -> StatusCode {
     let mut w = store.write().await;
-    if w.fail(span_id, req.error) {
+    if w.fail(span_id, req.error).await {
         tracing::debug!(%span_id, "span failed");
         StatusCode::OK
     } else {
@@ -192,6 +192,8 @@ async fn update_span_metadata(
             span.metadata.output_tokens = Some(output);
         }
         tracing::debug!(%span_id, "span metadata updated");
+        // Persist the metadata change
+        w.save(span_id).await;
         StatusCode::OK
     } else {
         StatusCode::NOT_FOUND
@@ -220,7 +222,7 @@ async fn delete_span(
     Path(span_id): Path<SpanId>,
 ) -> StatusCode {
     let mut w = store.write().await;
-    if w.delete_span(span_id) {
+    if w.delete_span(span_id).await {
         tracing::debug!(%span_id, "span deleted");
         StatusCode::OK
     } else {
@@ -233,7 +235,7 @@ async fn delete_trace(
     Path(trace_id): Path<TraceId>,
 ) -> Result<Json<DeletedTrace>, StatusCode> {
     let mut w = store.write().await;
-    let spans_deleted = w.delete_trace(trace_id);
+    let spans_deleted = w.delete_trace(trace_id).await;
     if spans_deleted > 0 {
         tracing::debug!(%trace_id, %spans_deleted, "trace deleted");
         Ok(Json(DeletedTrace {
@@ -247,7 +249,7 @@ async fn delete_trace(
 
 async fn clear_all_traces(State(store): State<SharedStore>) -> Json<ClearedAll> {
     let mut w = store.write().await;
-    w.clear();
+    w.clear().await;
     tracing::debug!("all traces cleared");
     Json(ClearedAll {
         message: "All traces cleared".to_string(),

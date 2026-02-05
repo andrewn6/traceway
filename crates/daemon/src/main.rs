@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
@@ -5,12 +6,10 @@ use tokio::sync::RwLock;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
-use storage::SpanStore;
-
-pub type SharedStore = Arc<RwLock<SpanStore>>;
+use storage::{PersistentStore, SqliteBackend};
 
 #[derive(Parser, Debug)]
-#[command(name = "llmtrace", about = "LLM trace daemon with Ollama proxy")]
+#[command(name = "llmtrace", about = "LLM trace daemon with transparent proxy")]
 struct Args {
     /// API server address
     #[arg(long, default_value = "127.0.0.1:3000")]
@@ -20,9 +19,20 @@ struct Args {
     #[arg(long, default_value = "127.0.0.1:3001")]
     proxy_addr: String,
 
-    /// Ollama server URL
+    /// Target LLM server URL (Ollama, OpenAI-compatible, etc.)
     #[arg(long, default_value = "http://localhost:11434")]
-    ollama_url: String,
+    target_url: String,
+
+    /// Path to SQLite database file
+    #[arg(long)]
+    db_path: Option<String>,
+}
+
+fn default_db_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".llmtrace")
+        .join("traces.db")
 }
 
 #[tokio::main]
@@ -36,7 +46,19 @@ async fn main() {
 
     info!("LLM trace daemon starting");
 
-    let store: SharedStore = Arc::new(RwLock::new(SpanStore::new()));
+    let db_path = args
+        .db_path
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(default_db_path);
+
+    info!(path = %db_path.display(), "opening database");
+
+    let backend = SqliteBackend::open(&db_path).expect("Failed to open database");
+    let persistent = PersistentStore::open(backend)
+        .await
+        .expect("Failed to load data from database");
+    let store = Arc::new(RwLock::new(persistent));
 
     // Start API server
     let api_store = store.clone();
@@ -50,16 +72,16 @@ async fn main() {
     // Start Proxy server
     let proxy_store = store.clone();
     let proxy_addr = args.proxy_addr.clone();
-    let ollama_url = args.ollama_url.clone();
+    let target_url = args.target_url.clone();
     let proxy_handle = tokio::spawn(async move {
-        if let Err(e) = proxy::serve(proxy_store, &proxy_addr, &ollama_url).await {
+        if let Err(e) = proxy::serve(proxy_store, &proxy_addr, &target_url).await {
             tracing::error!("proxy server error: {}", e);
         }
     });
 
     info!(
         "daemon ready - api at http://{}, proxy at http://{} -> {}",
-        args.api_addr, args.proxy_addr, args.ollama_url
+        args.api_addr, args.proxy_addr, args.target_url
     );
 
     tokio::signal::ctrl_c().await.ok();
