@@ -295,10 +295,20 @@ pub fn router(store: SharedStore, target_url: String) -> Router {
 }
 
 pub async fn serve(store: SharedStore, addr: &str, target_url: &str) -> std::io::Result<()> {
+    serve_with_shutdown(store, addr, target_url, std::future::pending()).await
+}
+
+pub async fn serve_with_shutdown(
+    store: SharedStore,
+    addr: &str,
+    target_url: &str,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
     let app = router(store, target_url.to_string());
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("proxy listening on {} -> {}", addr, target_url);
     axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown)
         .await
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
 }

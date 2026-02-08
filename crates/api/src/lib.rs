@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::{
     extract::{Path, Query, State},
@@ -45,6 +46,7 @@ pub enum SystemEvent {
 pub struct AppState {
     pub store: Arc<RwLock<PersistentStore<SqliteBackend>>>,
     pub events_tx: broadcast::Sender<SystemEvent>,
+    pub start_time: Instant,
 }
 
 pub type SharedStore = Arc<RwLock<PersistentStore<SqliteBackend>>>;
@@ -454,11 +456,45 @@ async fn clear_all_traces(State(state): State<AppState>) -> Json<ClearedAll> {
     })
 }
 
+// --- Health handler ---
+
+#[derive(Serialize)]
+struct HealthResponse {
+    status: String,
+    uptime_secs: u64,
+    version: String,
+    storage: StorageHealth,
+}
+
+#[derive(Serialize)]
+struct StorageHealth {
+    trace_count: usize,
+    span_count: usize,
+}
+
+async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
+    let uptime = state.start_time.elapsed().as_secs();
+    let r = state.store.read().await;
+    Json(HealthResponse {
+        status: "ok".to_string(),
+        uptime_secs: uptime,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        storage: StorageHealth {
+            trace_count: r.trace_count(),
+            span_count: r.span_count(),
+        },
+    })
+}
+
 // --- Router ---
 
 pub fn router(store: SharedStore) -> Router {
+    router_with_start_time(store, Instant::now())
+}
+
+pub fn router_with_start_time(store: SharedStore, start_time: Instant) -> Router {
     let (events_tx, _) = broadcast::channel(256);
-    let state = AppState { store, events_tx };
+    let state = AppState { store, events_tx, start_time };
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -480,6 +516,8 @@ pub fn router(store: SharedStore) -> Router {
         // Stats & Export
         .route("/stats", get(get_stats))
         .route("/export/json", get(export_json))
+        // Health
+        .route("/health", get(health))
         // SSE
         .route("/events", get(events))
         .layer(cors)
@@ -487,10 +525,20 @@ pub fn router(store: SharedStore) -> Router {
 }
 
 pub async fn serve(store: SharedStore, addr: &str) -> std::io::Result<()> {
-    let app = router(store);
+    serve_with_shutdown(store, addr, Instant::now(), std::future::pending()).await
+}
+
+pub async fn serve_with_shutdown(
+    store: SharedStore,
+    addr: &str,
+    start_time: Instant,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
+    let app = router_with_start_time(store, start_time);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("api listening on {}", addr);
     axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown)
         .await
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
 }
