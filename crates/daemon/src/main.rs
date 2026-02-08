@@ -1,92 +1,465 @@
+mod config;
+mod pid;
+
+use std::net::TcpListener as StdTcpListener;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use clap::Parser;
-use tokio::sync::RwLock;
-use tracing::{info, Level};
-use tracing_subscriber::FmtSubscriber;
+use tokio::sync::{watch, RwLock};
+use tracing::{error, info, warn};
 
 use storage::{PersistentStore, SqliteBackend};
+
+use crate::config::Config;
+use crate::pid::PidFile;
+
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_COMPONENT_RESTARTS: u32 = 3;
 
 #[derive(Parser, Debug)]
 #[command(name = "llmtrace", about = "LLM trace daemon with transparent proxy")]
 struct Args {
     /// API server address
-    #[arg(long, default_value = "127.0.0.1:3000")]
-    api_addr: String,
+    #[arg(long)]
+    api_addr: Option<String>,
 
     /// Proxy server address
-    #[arg(long, default_value = "127.0.0.1:3001")]
-    proxy_addr: String,
+    #[arg(long)]
+    proxy_addr: Option<String>,
 
     /// Target LLM server URL (Ollama, OpenAI-compatible, etc.)
-    #[arg(long, default_value = "http://localhost:11434")]
-    target_url: String,
+    #[arg(long)]
+    target_url: Option<String>,
 
     /// Path to SQLite database file
     #[arg(long)]
     db_path: Option<String>,
+
+    /// Log level (trace, debug, info, warn, error)
+    #[arg(long)]
+    log_level: Option<String>,
+
+    /// Run in foreground (don't daemonize)
+    #[arg(long)]
+    foreground: bool,
+
+    /// Daemonize (fork to background)
+    #[arg(long, short = 'd')]
+    daemon: bool,
+
+    /// Path to config file
+    #[arg(long)]
+    config: Option<String>,
 }
 
-fn default_db_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".llmtrace")
-        .join("traces.db")
+/// Resolved configuration merging CLI args over config file over defaults.
+struct ResolvedConfig {
+    api_addr: String,
+    proxy_addr: String,
+    target_url: String,
+    db_path: PathBuf,
+    log_level: String,
+    foreground: bool,
+}
+
+impl ResolvedConfig {
+    fn from_args_and_config(args: &Args, config: &Config) -> Self {
+        Self {
+            api_addr: args
+                .api_addr
+                .clone()
+                .unwrap_or_else(|| config.api.addr.clone()),
+            proxy_addr: args
+                .proxy_addr
+                .clone()
+                .unwrap_or_else(|| config.proxy.addr.clone()),
+            target_url: args
+                .target_url
+                .clone()
+                .unwrap_or_else(|| config.proxy.target.clone()),
+            db_path: args
+                .db_path
+                .as_ref()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| config.db_path()),
+            log_level: args
+                .log_level
+                .clone()
+                .or_else(|| std::env::var("LLMTRACE_LOG").ok())
+                .unwrap_or_else(|| config.logging.level.clone()),
+            foreground: !args.daemon,
+        }
+    }
+}
+
+fn setup_logging(log_level: &str, foreground: bool) {
+    use tracing_subscriber::fmt;
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::EnvFilter;
+
+    let filter = EnvFilter::try_new(log_level)
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    let log_dir = Config::log_dir();
+    std::fs::create_dir_all(&log_dir).ok();
+
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "daemon.log");
+
+    if foreground {
+        // Log to both file and stdout
+        let stdout_layer = fmt::layer()
+            .with_target(false)
+            .with_thread_ids(false);
+        let file_layer = fmt::layer()
+            .json()
+            .with_writer(file_appender);
+
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(stdout_layer)
+            .with(file_layer)
+            .init();
+    } else {
+        // Log to file only (daemonized)
+        let file_layer = fmt::layer()
+            .json()
+            .with_writer(file_appender);
+
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(file_layer)
+            .init();
+    }
+}
+
+/// Check if a port is available by attempting to bind.
+fn check_port_available(addr: &str) -> Result<(), String> {
+    match StdTcpListener::bind(addr) {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            Err(format!(
+                "port {} is already in use. Another daemon may be running.\n\
+                 Check with: lsof -i :{}\n\
+                 Or update the address in ~/.llmtrace/config.toml",
+                addr,
+                addr.split(':').last().unwrap_or(addr)
+            ))
+        }
+        Err(e) => Err(format!("cannot bind to {}: {}", addr, e)),
+    }
+}
+
+/// Create shutdown signal listener (SIGINT + SIGTERM).
+async fn shutdown_signal(mut shutdown_rx: watch::Receiver<bool>) {
+    shutdown_rx.changed().await.ok();
+}
+
+/// Run the API server with supervision (restart on crash).
+async fn run_api_supervised(
+    store: Arc<RwLock<PersistentStore<SqliteBackend>>>,
+    addr: String,
+    start_time: Instant,
+    shutdown_rx: watch::Receiver<bool>,
+) {
+    let mut restarts = 0u32;
+    let mut backoff = Duration::from_secs(1);
+
+    loop {
+        let api_store = store.clone();
+        let api_addr = addr.clone();
+        let api_start_time = start_time;
+        let rx = shutdown_rx.clone();
+
+        info!("starting api server on {}", api_addr);
+
+        let result = tokio::spawn(async move {
+            api::serve_with_shutdown(api_store, &api_addr, api_start_time, shutdown_signal(rx)).await
+        })
+        .await;
+
+        // Check if we've been asked to shut down
+        if *shutdown_rx.borrow() {
+            info!("api server stopped (shutdown requested)");
+            return;
+        }
+
+        match result {
+            Ok(Ok(())) => {
+                info!("api server exited cleanly");
+                return;
+            }
+            Ok(Err(e)) => {
+                error!("api server error: {}", e);
+            }
+            Err(e) => {
+                error!("api server panicked: {}", e);
+            }
+        }
+
+        restarts += 1;
+        if restarts > MAX_COMPONENT_RESTARTS {
+            error!("api server exceeded max restarts ({}), giving up", MAX_COMPONENT_RESTARTS);
+            return;
+        }
+
+        warn!(
+            restarts,
+            backoff_secs = backoff.as_secs(),
+            "restarting api server after failure"
+        );
+        tokio::time::sleep(backoff).await;
+        backoff = (backoff * 2).min(Duration::from_secs(30));
+    }
+}
+
+/// Run the proxy server with supervision (restart on crash).
+async fn run_proxy_supervised(
+    store: Arc<RwLock<PersistentStore<SqliteBackend>>>,
+    addr: String,
+    target_url: String,
+    shutdown_rx: watch::Receiver<bool>,
+) {
+    let mut restarts = 0u32;
+    let mut backoff = Duration::from_secs(1);
+
+    loop {
+        let proxy_store = store.clone();
+        let proxy_addr = addr.clone();
+        let proxy_target = target_url.clone();
+        let rx = shutdown_rx.clone();
+
+        info!("starting proxy server on {} -> {}", proxy_addr, proxy_target);
+
+        let result = tokio::spawn(async move {
+            proxy::serve_with_shutdown(proxy_store, &proxy_addr, &proxy_target, shutdown_signal(rx))
+                .await
+        })
+        .await;
+
+        // Check if we've been asked to shut down
+        if *shutdown_rx.borrow() {
+            info!("proxy server stopped (shutdown requested)");
+            return;
+        }
+
+        match result {
+            Ok(Ok(())) => {
+                info!("proxy server exited cleanly");
+                return;
+            }
+            Ok(Err(e)) => {
+                error!("proxy server error: {}", e);
+            }
+            Err(e) => {
+                error!("proxy server panicked: {}", e);
+            }
+        }
+
+        restarts += 1;
+        if restarts > MAX_COMPONENT_RESTARTS {
+            error!(
+                "proxy server exceeded max restarts ({}), giving up",
+                MAX_COMPONENT_RESTARTS
+            );
+            return;
+        }
+
+        warn!(
+            restarts,
+            backoff_secs = backoff.as_secs(),
+            "restarting proxy server after failure"
+        );
+        tokio::time::sleep(backoff).await;
+        backoff = (backoff * 2).min(Duration::from_secs(30));
+    }
+}
+
+/// Daemonize by re-executing the current binary with --foreground in the background.
+/// This avoids the complexity of fork() after tokio runtime starts.
+fn daemonize(args: &Args) -> ! {
+    use std::process::Command;
+
+    let exe = std::env::current_exe().expect("failed to get current executable path");
+
+    let mut cmd = Command::new(exe);
+    cmd.arg("--foreground");
+
+    if let Some(ref addr) = args.api_addr {
+        cmd.arg("--api-addr").arg(addr);
+    }
+    if let Some(ref addr) = args.proxy_addr {
+        cmd.arg("--proxy-addr").arg(addr);
+    }
+    if let Some(ref url) = args.target_url {
+        cmd.arg("--target-url").arg(url);
+    }
+    if let Some(ref path) = args.db_path {
+        cmd.arg("--db-path").arg(path);
+    }
+    if let Some(ref level) = args.log_level {
+        cmd.arg("--log-level").arg(level);
+    }
+    if let Some(ref config) = args.config {
+        cmd.arg("--config").arg(config);
+    }
+
+    // Redirect stdio to /dev/null for the background process
+    use std::process::Stdio;
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::null());
+
+    match cmd.spawn() {
+        Ok(child) => {
+            eprintln!("daemon started (pid {})", child.id());
+            eprintln!("logs: {}", Config::log_dir().display());
+            eprintln!("pid file: {}", Config::pid_path().display());
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("failed to daemonize: {}", e);
+            std::process::exit(1);
+        }
+    }
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
 
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("Setting default subscriber");
+    // Load config file
+    let config = match &args.config {
+        Some(path) => Config::load_from(std::path::Path::new(path)),
+        None => Config::load(),
+    };
 
-    info!("LLM trace daemon starting");
+    let resolved = ResolvedConfig::from_args_and_config(&args, &config);
 
-    let db_path = args
-        .db_path
-        .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(default_db_path);
+    // --- Daemonize (re-exec with --foreground in background) ---
+    if !resolved.foreground {
+        daemonize(&args);
+    }
 
-    info!(path = %db_path.display(), "opening database");
+    // Setup logging (needs to happen before any tracing calls)
+    setup_logging(&resolved.log_level, resolved.foreground);
 
-    let backend = SqliteBackend::open(&db_path).expect("Failed to open database");
-    let persistent = PersistentStore::open(backend)
-        .await
-        .expect("Failed to load data from database");
+    info!("llmtrace daemon starting");
+
+    // --- PID file ---
+    let pid_file = PidFile::new(Config::pid_path());
+    if let Err(e) = pid_file.acquire() {
+        error!("{}", e);
+        std::process::exit(1);
+    }
+    // Keep pid_file alive — it removes itself on Drop
+
+    // --- Port conflict detection ---
+    if let Err(e) = check_port_available(&resolved.api_addr) {
+        error!("api: {}", e);
+        std::process::exit(1);
+    }
+    if let Err(e) = check_port_available(&resolved.proxy_addr) {
+        error!("proxy: {}", e);
+        std::process::exit(1);
+    }
+
+    // --- Ordered startup ---
+    let start_time = Instant::now();
+
+    // 1. Storage
+    info!(path = %resolved.db_path.display(), "opening database");
+    if let Some(parent) = resolved.db_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let backend = match SqliteBackend::open(&resolved.db_path) {
+        Ok(b) => b,
+        Err(e) => {
+            error!("failed to open database: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let persistent = match PersistentStore::open(backend).await {
+        Ok(p) => p,
+        Err(e) => {
+            error!("failed to load data: {}", e);
+            std::process::exit(1);
+        }
+    };
     let store = Arc::new(RwLock::new(persistent));
+    info!("storage ready");
 
-    // Start API server
-    let api_store = store.clone();
-    let api_addr = args.api_addr.clone();
-    let api_handle = tokio::spawn(async move {
-        if let Err(e) = api::serve(api_store, &api_addr).await {
-            tracing::error!("api server error: {}", e);
-        }
-    });
+    // 2. Shutdown signal channel
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-    // Start Proxy server
-    let proxy_store = store.clone();
-    let proxy_addr = args.proxy_addr.clone();
-    let target_url = args.target_url.clone();
-    let proxy_handle = tokio::spawn(async move {
-        if let Err(e) = proxy::serve(proxy_store, &proxy_addr, &target_url).await {
-            tracing::error!("proxy server error: {}", e);
-        }
-    });
+    // 3. API server (supervised)
+    let api_handle = tokio::spawn(run_api_supervised(
+        store.clone(),
+        resolved.api_addr.clone(),
+        start_time,
+        shutdown_rx.clone(),
+    ));
+
+    // Small delay to let API bind before proxy
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // 4. Proxy server (supervised)
+    let proxy_handle = tokio::spawn(run_proxy_supervised(
+        store.clone(),
+        resolved.proxy_addr.clone(),
+        resolved.target_url.clone(),
+        shutdown_rx.clone(),
+    ));
 
     info!(
-        "daemon ready - api at http://{}, proxy at http://{} -> {}",
-        args.api_addr, args.proxy_addr, args.target_url
+        "daemon ready — api http://{} | proxy http://{} -> {}",
+        resolved.api_addr, resolved.proxy_addr, resolved.target_url
     );
 
-    tokio::signal::ctrl_c().await.ok();
-    info!("shutting down");
+    // --- Wait for shutdown signal ---
+    let ctrl_c = async {
+        tokio::signal::ctrl_c().await.ok();
+    };
 
-    api_handle.abort();
-    proxy_handle.abort();
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => info!("received SIGINT"),
+        _ = terminate => info!("received SIGTERM"),
+    }
+
+    // --- Graceful shutdown ---
+    info!("initiating graceful shutdown");
+
+    // Signal all components to stop
+    let _ = shutdown_tx.send(true);
+
+    // Wait for components with timeout
+    let shutdown_result = tokio::time::timeout(
+        SHUTDOWN_TIMEOUT,
+        async {
+            let _ = tokio::join!(api_handle, proxy_handle);
+        },
+    )
+    .await;
+
+    match shutdown_result {
+        Ok(()) => info!("all components stopped gracefully"),
+        Err(_) => warn!("shutdown timed out after {} seconds, forcing exit", SHUTDOWN_TIMEOUT.as_secs()),
+    }
+
+    // PID file is removed by Drop on pid_file
+    drop(pid_file);
+
+    info!("daemon stopped");
 }
