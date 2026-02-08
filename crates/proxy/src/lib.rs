@@ -7,51 +7,94 @@ use axum::{
     Router,
 };
 use serde_json::Value;
-use trace::Span;
-use uuid::Uuid;
+use trace::{SpanBuilder, SpanKind};
+
+/// Payload capture mode
+#[derive(Debug, Clone)]
+pub enum CaptureMode {
+    Off,
+    Preview(usize), // max chars
+    Full,
+}
+
+impl Default for CaptureMode {
+    fn default() -> Self {
+        CaptureMode::Full
+    }
+}
 
 #[derive(Clone)]
 struct ProxyState {
     store: SharedStore,
     target_url: String,
     client: reqwest::Client,
+    capture_mode: CaptureMode,
 }
 
-/// Try to extract model name from a JSON body (common field across LLM APIs)
+/// Detect provider from target URL
+fn detect_provider(url: &str) -> Option<String> {
+    if url.contains("localhost:11434") || url.contains("ollama") {
+        Some("ollama".to_string())
+    } else if url.contains("api.openai.com") {
+        Some("openai".to_string())
+    } else if url.contains("api.anthropic.com") {
+        Some("anthropic".to_string())
+    } else {
+        None
+    }
+}
+
+/// Extract model name from a JSON body
 fn extract_model(body: &Value) -> Option<String> {
     body.get("model").and_then(|v| v.as_str()).map(String::from)
 }
 
-/// Try to extract token counts from response (varies by provider)
-fn extract_tokens(body: &Value) -> (Option<u64>, Option<u64>) {
-    // Ollama style
-    let input = body
-        .get("prompt_eval_count")
-        .and_then(|v| v.as_u64())
-        // OpenAI style
-        .or_else(|| {
-            body.get("usage")
+/// Extract token counts from response (provider-aware)
+fn extract_tokens(body: &Value, provider: Option<&str>) -> (Option<u64>, Option<u64>) {
+    match provider {
+        Some("anthropic") => {
+            let input = body
+                .get("usage")
+                .and_then(|u| u.get("input_tokens"))
+                .and_then(|v| v.as_u64());
+            let output = body
+                .get("usage")
+                .and_then(|u| u.get("output_tokens"))
+                .and_then(|v| v.as_u64());
+            (input, output)
+        }
+        Some("ollama") => {
+            let input = body.get("prompt_eval_count").and_then(|v| v.as_u64());
+            let output = body.get("eval_count").and_then(|v| v.as_u64());
+            (input, output)
+        }
+        _ => {
+            // OpenAI / generic
+            let input = body
+                .get("usage")
                 .and_then(|u| u.get("prompt_tokens"))
                 .and_then(|v| v.as_u64())
-        });
-
-    let output = body
-        .get("eval_count")
-        .and_then(|v| v.as_u64())
-        // OpenAI style
-        .or_else(|| {
-            body.get("usage")
+                .or_else(|| body.get("prompt_eval_count").and_then(|v| v.as_u64()));
+            let output = body
+                .get("usage")
                 .and_then(|u| u.get("completion_tokens"))
                 .and_then(|v| v.as_u64())
-        });
-
-    (input, output)
+                .or_else(|| body.get("eval_count").and_then(|v| v.as_u64()));
+            (input, output)
+        }
+    }
 }
 
-async fn proxy_handler(
-    State(state): State<ProxyState>,
-    req: Request<Body>,
-) -> Response {
+/// Truncate a string for preview mode
+fn preview_string(s: &str, max_chars: usize) -> String {
+    if s.len() <= max_chars {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_chars])
+    }
+}
+
+async fn proxy_handler(State(state): State<ProxyState>, req: Request<Body>) -> Response {
     let method = req.method().clone();
     let path = req
         .uri()
@@ -60,9 +103,7 @@ async fn proxy_handler(
         .unwrap_or_else(|| "/".to_string());
     let span_name = format!("{} {}", method, path);
 
-    let trace_id = Uuid::new_v4();
-    let mut span = Span::new(trace_id, None, &span_name);
-    let span_id = span.id;
+    let provider = detect_provider(&state.target_url);
 
     // Read request body
     let (parts, body) = req.into_parts();
@@ -74,35 +115,68 @@ async fn proxy_handler(
         }
     };
 
-    // Try to parse as JSON to extract model
-    if let Ok(json) = serde_json::from_slice::<Value>(&body_bytes) {
-        if let Some(model) = extract_model(&json) {
-            span.metadata.model = Some(model);
-        }
-    }
+    // Parse request JSON for model extraction
+    let req_json = serde_json::from_slice::<Value>(&body_bytes).ok();
+    let model = req_json
+        .as_ref()
+        .and_then(extract_model)
+        .unwrap_or_else(|| "unknown".to_string());
 
-    // Insert span
+    // Build input preview
+    let input_preview = match &state.capture_mode {
+        CaptureMode::Off => None,
+        CaptureMode::Preview(max) => {
+            let raw = String::from_utf8_lossy(&body_bytes);
+            Some(preview_string(&raw, *max))
+        }
+        CaptureMode::Full => Some(String::from_utf8_lossy(&body_bytes).to_string()),
+    };
+
+    // Build span kind
+    let kind = SpanKind::LlmCall {
+        model: model.clone(),
+        provider: provider.clone(),
+        input_tokens: None,
+        output_tokens: None,
+        input_preview: input_preview.clone(),
+        output_preview: None,
+    };
+
+    // Build input payload
+    let input_payload = match &state.capture_mode {
+        CaptureMode::Off => None,
+        _ => req_json.clone(),
+    };
+
+    // Create and insert span
+    let mut builder = SpanBuilder::new(
+        trace::Trace::new(Some(span_name.clone())).id,
+        &span_name,
+        kind,
+    );
+    if let Some(input) = input_payload {
+        builder = builder.input(input);
+    }
+    let span = builder.build();
+    let span_id = span.id();
+    let trace_id = span.trace_id();
+
     {
         let mut store = state.store.write().await;
         store.insert(span).await;
     }
 
-    tracing::info!(%trace_id, %span_id, %span_name, "proxying request");
+    tracing::info!(%trace_id, %span_id, %span_name, %model, "proxying request");
 
-    // Build target URL
+    // Build target URL and request
     let target_url = format!("{}{}", state.target_url, path);
-
-    // Build request to target
     let mut target_req = state.client.request(method, &target_url);
-
-    // Forward headers (except host)
     for (name, value) in parts.headers.iter() {
         if name != "host" {
             target_req = target_req.header(name, value);
         }
     }
 
-    // Send request
     let result = target_req.body(body_bytes.to_vec()).send().await;
 
     match result {
@@ -112,30 +186,60 @@ async fn proxy_handler(
 
             match response.bytes().await {
                 Ok(resp_bytes) => {
-                    // Try to extract tokens from response
-                    let (input, output) =
-                        if let Ok(json) = serde_json::from_slice::<Value>(&resp_bytes) {
-                            extract_tokens(&json)
-                        } else {
-                            (None, None)
-                        };
+                    let resp_json = serde_json::from_slice::<Value>(&resp_bytes).ok();
+
+                    // Extract tokens
+                    let (input_tokens, output_tokens) = resp_json
+                        .as_ref()
+                        .map(|j| extract_tokens(j, provider.as_deref()))
+                        .unwrap_or((None, None));
+
+                    // Build output payload
+                    let output_payload = match &state.capture_mode {
+                        CaptureMode::Off => None,
+                        CaptureMode::Preview(_) => resp_json.as_ref().map(|j| {
+                            serde_json::json!({
+                                "preview": preview_string(&j.to_string(), 500)
+                            })
+                        }),
+                        CaptureMode::Full => resp_json.clone(),
+                    };
+
+                    // Build updated kind with token counts
+                    // We need to complete the span with the output payload
+                    // The span kind was set at creation; token counts go into kind
+                    // but since spans are immutable, we capture tokens via the output field
+                    let output_with_tokens = output_payload.map(|mut v| {
+                        if let Some(obj) = v.as_object_mut() {
+                            if let Some(it) = input_tokens {
+                                obj.insert(
+                                    "_input_tokens".to_string(),
+                                    serde_json::Value::from(it),
+                                );
+                            }
+                            if let Some(ot) = output_tokens {
+                                obj.insert(
+                                    "_output_tokens".to_string(),
+                                    serde_json::Value::from(ot),
+                                );
+                            }
+                        }
+                        v
+                    });
 
                     {
                         let mut store = state.store.write().await;
-                        if let Some(s) = store.get_mut(span_id) {
-                            s.metadata.input_tokens = input;
-                            s.metadata.output_tokens = output;
-                        }
                         if status.is_success() {
-                            store.complete(span_id).await;
+                            store.complete_span(span_id, output_with_tokens).await;
                         } else {
-                            store.fail(span_id, format!("HTTP {}", status)).await;
+                            store
+                                .fail_span(span_id, format!("HTTP {}", status))
+                                .await;
                         }
                     }
 
-                    tracing::info!(%span_id, %status, "request completed");
+                    tracing::info!(%span_id, %status, ?input_tokens, ?output_tokens, "request completed");
 
-                    // Build response
                     let mut builder = Response::builder().status(status);
                     for (name, value) in headers.iter() {
                         builder = builder.header(name, value);
@@ -143,8 +247,12 @@ async fn proxy_handler(
                     builder.body(Body::from(resp_bytes)).unwrap()
                 }
                 Err(e) => {
-                    fail_span(&state.store, span_id, &format!("Failed to read response: {}", e))
-                        .await;
+                    fail_span_helper(
+                        &state.store,
+                        span_id,
+                        &format!("Failed to read response: {}", e),
+                    )
+                    .await;
                     (
                         axum::http::StatusCode::BAD_GATEWAY,
                         "Failed to read response",
@@ -154,7 +262,7 @@ async fn proxy_handler(
             }
         }
         Err(e) => {
-            fail_span(
+            fail_span_helper(
                 &state.store,
                 span_id,
                 &format!("Request failed: {}", e),
@@ -169,9 +277,9 @@ async fn proxy_handler(
     }
 }
 
-async fn fail_span(store: &SharedStore, span_id: trace::SpanId, error: &str) {
+async fn fail_span_helper(store: &SharedStore, span_id: trace::SpanId, error: &str) {
     let mut w = store.write().await;
-    w.fail(span_id, error).await;
+    w.fail_span(span_id, error).await;
     tracing::warn!(%span_id, %error, "span failed");
 }
 
@@ -180,6 +288,7 @@ pub fn router(store: SharedStore, target_url: String) -> Router {
         store,
         target_url,
         client: reqwest::Client::new(),
+        capture_mode: CaptureMode::default(),
     };
 
     Router::new().fallback(proxy_handler).with_state(state)
