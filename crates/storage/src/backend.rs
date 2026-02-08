@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use thiserror::Error;
-use trace::{Span, SpanId, TraceId};
+use trace::{FileVersion, Span, SpanId, Trace, TraceId};
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -30,23 +30,23 @@ impl From<serde_json::Error> for StorageError {
 }
 
 /// Trait for pluggable storage backends.
-///
-/// Implementations can store spans in SQLite, Turso, S3, or any other backend.
-/// All methods are async to support both local and remote storage.
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
-    /// Load all spans from storage.
-    async fn load_all(&self) -> Result<Vec<Span>, StorageError>;
-
-    /// Save a span (insert or update).
+    // Span operations
+    async fn load_all_spans(&self) -> Result<Vec<Span>, StorageError>;
     async fn save_span(&self, span: &Span) -> Result<(), StorageError>;
-
-    /// Delete a span by ID. Returns true if the span existed.
     async fn delete_span(&self, id: SpanId) -> Result<bool, StorageError>;
+    async fn delete_trace_spans(&self, trace_id: TraceId) -> Result<usize, StorageError>;
+    async fn clear_spans(&self) -> Result<(), StorageError>;
 
-    /// Delete all spans for a trace. Returns number of spans deleted.
-    async fn delete_trace(&self, trace_id: TraceId) -> Result<usize, StorageError>;
+    // Trace operations
+    async fn load_all_traces(&self) -> Result<Vec<Trace>, StorageError>;
+    async fn save_trace(&self, trace: &Trace) -> Result<(), StorageError>;
+    async fn delete_trace(&self, trace_id: TraceId) -> Result<bool, StorageError>;
 
-    /// Delete all spans.
-    async fn clear(&self) -> Result<(), StorageError>;
+    // File operations
+    async fn load_all_files(&self) -> Result<Vec<FileVersion>, StorageError>;
+    async fn save_file_version(&self, version: &FileVersion) -> Result<(), StorageError>;
+    async fn save_file_content(&self, hash: &str, content: &[u8]) -> Result<(), StorageError>;
+    async fn load_file_content(&self, hash: &str) -> Result<Vec<u8>, StorageError>;
 }
