@@ -37,3 +37,5 @@ sha2 = "0.10"
 toml = "0.8"
 tracing-appender = "0.2"
 nix = { version = "0.29", features = ["signal", "process"] }
+rust-embed = "8"
+mime_guess = "2"
