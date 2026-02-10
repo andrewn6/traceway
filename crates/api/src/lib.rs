@@ -5,14 +5,15 @@ use std::time::Instant;
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{header, StatusCode, Uri},
     response::{
         sse::{Event, KeepAlive},
-        Sse,
+        Html, IntoResponse, Response, Sse,
     },
     routing::{get, post},
     Json, Router,
 };
+use rust_embed::Embed;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, RwLock};
@@ -486,6 +487,33 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     })
 }
 
+// --- Embedded UI ---
+
+#[derive(Embed)]
+#[folder = "../../ui/build"]
+struct UiAssets;
+
+async fn serve_ui(uri: Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+
+    // Try the exact path first
+    if let Some(file) = UiAssets::get(path) {
+        let mime = mime_guess::from_path(path).first_or_octet_stream();
+        return (
+            [(header::CONTENT_TYPE, mime.as_ref())],
+            file.data,
+        )
+            .into_response();
+    }
+
+    // SPA fallback: serve index.html for any non-file path
+    if let Some(index) = UiAssets::get("index.html") {
+        return Html(index.data).into_response();
+    }
+
+    StatusCode::NOT_FOUND.into_response()
+}
+
 // --- Router ---
 
 pub fn router(store: SharedStore) -> Router {
@@ -520,6 +548,8 @@ pub fn router_with_start_time(store: SharedStore, start_time: Instant) -> Router
         .route("/health", get(health))
         // SSE
         .route("/events", get(events))
+        // Embedded UI (SPA fallback)
+        .fallback(serve_ui)
         .layer(cors)
         .with_state(state)
 }
