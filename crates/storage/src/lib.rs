@@ -4,7 +4,10 @@ pub mod sqlite;
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use trace::{FileVersion, Span, SpanId, Trace, TraceId};
+use trace::{
+    Datapoint, DatapointId, Dataset, DatasetId, FileVersion, QueueItem, QueueItemId,
+    QueueItemStatus, Span, SpanId, Trace, TraceId,
+};
 
 pub use backend::{StorageBackend, StorageError};
 pub use sqlite::SqliteBackend;
@@ -187,6 +190,9 @@ pub struct PersistentStore<B: StorageBackend> {
     memory: SpanStore,
     trace_meta: HashMap<TraceId, Trace>,
     file_versions: Vec<FileVersion>,
+    datasets: HashMap<DatasetId, Dataset>,
+    datapoints: HashMap<DatapointId, Datapoint>,
+    queue_items: HashMap<QueueItemId, QueueItem>,
     backend: B,
 }
 
@@ -210,10 +216,31 @@ impl<B: StorageBackend> PersistentStore<B> {
 
         let file_versions = backend.load_all_files().await?;
 
+        let ds_list = backend.load_all_datasets().await?;
+        let mut datasets = HashMap::new();
+        for ds in ds_list {
+            datasets.insert(ds.id, ds);
+        }
+
+        let dp_list = backend.load_all_datapoints().await?;
+        let mut datapoints = HashMap::new();
+        for dp in dp_list {
+            datapoints.insert(dp.id, dp);
+        }
+
+        let qi_list = backend.load_all_queue_items().await?;
+        let mut queue_items = HashMap::new();
+        for qi in qi_list {
+            queue_items.insert(qi.id, qi);
+        }
+
         Ok(Self {
             memory,
             trace_meta,
             file_versions,
+            datasets,
+            datapoints,
+            queue_items,
             backend,
         })
     }
@@ -323,6 +350,9 @@ impl<B: StorageBackend> PersistentStore<B> {
         self.memory.clear();
         self.trace_meta.clear();
         self.file_versions.clear();
+        self.datasets.clear();
+        self.datapoints.clear();
+        self.queue_items.clear();
         if let Err(e) = self.backend.clear_spans().await {
             tracing::error!("failed to persist clear: {}", e);
         }
@@ -393,5 +423,158 @@ impl<B: StorageBackend> PersistentStore<B> {
             .iter()
             .filter(|fv| fv.path == path)
             .collect()
+    }
+
+    // --- Dataset methods ---
+
+    pub async fn save_dataset(&mut self, dataset: Dataset) {
+        if let Err(e) = self.backend.save_dataset(&dataset).await {
+            tracing::error!("failed to persist dataset: {}", e);
+        }
+        self.datasets.insert(dataset.id, dataset);
+    }
+
+    pub fn get_dataset(&self, id: DatasetId) -> Option<&Dataset> {
+        self.datasets.get(&id)
+    }
+
+    pub fn all_datasets(&self) -> impl Iterator<Item = &Dataset> {
+        self.datasets.values()
+    }
+
+    pub async fn delete_dataset(&mut self, id: DatasetId) -> bool {
+        if self.datasets.remove(&id).is_some() {
+            // Remove associated datapoints from memory
+            let dp_ids: Vec<DatapointId> = self
+                .datapoints
+                .values()
+                .filter(|dp| dp.dataset_id == id)
+                .map(|dp| dp.id)
+                .collect();
+            for dp_id in &dp_ids {
+                self.datapoints.remove(dp_id);
+            }
+            // Remove associated queue items from memory
+            let qi_ids: Vec<QueueItemId> = self
+                .queue_items
+                .values()
+                .filter(|qi| qi.dataset_id == id)
+                .map(|qi| qi.id)
+                .collect();
+            for qi_id in &qi_ids {
+                self.queue_items.remove(qi_id);
+            }
+            // Cascade delete handled by FK in SQLite, just delete the dataset
+            let _ = self.backend.delete_dataset(id).await;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn dataset_count(&self) -> usize {
+        self.datasets.len()
+    }
+
+    // --- Datapoint methods ---
+
+    pub async fn save_datapoint(&mut self, dp: Datapoint) {
+        if let Err(e) = self.backend.save_datapoint(&dp).await {
+            tracing::error!("failed to persist datapoint: {}", e);
+        }
+        self.datapoints.insert(dp.id, dp);
+    }
+
+    pub fn get_datapoint(&self, id: DatapointId) -> Option<&Datapoint> {
+        self.datapoints.get(&id)
+    }
+
+    pub fn datapoints_for_dataset(&self, dataset_id: DatasetId) -> Vec<&Datapoint> {
+        self.datapoints
+            .values()
+            .filter(|dp| dp.dataset_id == dataset_id)
+            .collect()
+    }
+
+    pub fn datapoint_count_for_dataset(&self, dataset_id: DatasetId) -> usize {
+        self.datapoints
+            .values()
+            .filter(|dp| dp.dataset_id == dataset_id)
+            .count()
+    }
+
+    pub async fn delete_datapoint(&mut self, id: DatapointId) -> bool {
+        if self.datapoints.remove(&id).is_some() {
+            // Remove queue items referencing this datapoint
+            let qi_ids: Vec<QueueItemId> = self
+                .queue_items
+                .values()
+                .filter(|qi| qi.datapoint_id == id)
+                .map(|qi| qi.id)
+                .collect();
+            for qi_id in &qi_ids {
+                self.queue_items.remove(qi_id);
+            }
+            let _ = self.backend.delete_datapoint(id).await;
+            true
+        } else {
+            false
+        }
+    }
+
+    // --- Queue methods ---
+
+    pub async fn save_queue_item(&mut self, item: QueueItem) {
+        if let Err(e) = self.backend.save_queue_item(&item).await {
+            tracing::error!("failed to persist queue item: {}", e);
+        }
+        self.queue_items.insert(item.id, item);
+    }
+
+    pub fn get_queue_item(&self, id: QueueItemId) -> Option<&QueueItem> {
+        self.queue_items.get(&id)
+    }
+
+    pub fn queue_items_for_dataset(&self, dataset_id: DatasetId) -> Vec<&QueueItem> {
+        self.queue_items
+            .values()
+            .filter(|qi| qi.dataset_id == dataset_id)
+            .collect()
+    }
+
+    pub async fn claim_queue_item(
+        &mut self,
+        id: QueueItemId,
+        claimed_by: impl Into<String>,
+    ) -> Option<QueueItem> {
+        let item = self.queue_items.remove(&id)?;
+        if item.status != QueueItemStatus::Pending {
+            self.queue_items.insert(id, item);
+            return None;
+        }
+        let claimed = item.claim(claimed_by);
+        if let Err(e) = self.backend.save_queue_item(&claimed).await {
+            tracing::error!("failed to persist queue item claim: {}", e);
+        }
+        self.queue_items.insert(id, claimed.clone());
+        Some(claimed)
+    }
+
+    pub async fn complete_queue_item(
+        &mut self,
+        id: QueueItemId,
+        edited_data: Option<serde_json::Value>,
+    ) -> Option<QueueItem> {
+        let item = self.queue_items.remove(&id)?;
+        if item.status != QueueItemStatus::Claimed {
+            self.queue_items.insert(id, item);
+            return None;
+        }
+        let completed = item.complete(edited_data);
+        if let Err(e) = self.backend.save_queue_item(&completed).await {
+            tracing::error!("failed to persist queue item completion: {}", e);
+        }
+        self.queue_items.insert(id, completed.clone());
+        Some(completed)
     }
 }

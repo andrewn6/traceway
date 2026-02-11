@@ -4,7 +4,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection};
 use tokio::sync::Mutex;
-use trace::{FileVersion, Span, SpanId, SpanKind, SpanStatus, Trace, TraceId};
+use trace::{
+    Datapoint, DatapointId, Dataset, DatasetId, FileVersion, QueueItem, QueueItemId, Span, SpanId,
+    SpanKind, SpanStatus, Trace, TraceId,
+};
 
 use crate::backend::{StorageBackend, StorageError};
 
@@ -55,6 +58,42 @@ const MIGRATIONS: &[&str] = &[
         hash TEXT PRIMARY KEY,
         content BLOB NOT NULL
     );
+    "#,
+    // v2: datasets, datapoints, queue_items
+    r#"
+    CREATE TABLE IF NOT EXISTS datasets (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS datapoints (
+        id TEXT PRIMARY KEY,
+        dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+        kind_json TEXT NOT NULL,
+        source TEXT NOT NULL,
+        source_span_id TEXT,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_datapoints_dataset_id ON datapoints(dataset_id);
+    CREATE INDEX IF NOT EXISTS idx_datapoints_created_at ON datapoints(created_at);
+
+    CREATE TABLE IF NOT EXISTS queue_items (
+        id TEXT PRIMARY KEY,
+        dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+        datapoint_id TEXT NOT NULL REFERENCES datapoints(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'pending',
+        claimed_by TEXT,
+        claimed_at TEXT,
+        original_data_json TEXT,
+        edited_data_json TEXT,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_queue_items_dataset_id ON queue_items(dataset_id);
+    CREATE INDEX IF NOT EXISTS idx_queue_items_status ON queue_items(status);
+    CREATE INDEX IF NOT EXISTS idx_queue_items_created_at ON queue_items(created_at);
     "#,
 ];
 
@@ -481,5 +520,271 @@ impl StorageBackend for SqliteBackend {
             rusqlite::Error::QueryReturnedNoRows => StorageError::NotFound,
             other => StorageError::Database(other.to_string()),
         })
+    }
+
+    // --- Dataset operations ---
+
+    async fn load_all_datasets(&self) -> Result<Vec<Dataset>, StorageError> {
+        let conn = self.conn.lock().await;
+        let mut stmt =
+            conn.prepare("SELECT id, name, description, created_at, updated_at FROM datasets")?;
+        let rows = stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            let description: Option<String> = row.get(2)?;
+            let created_at: String = row.get(3)?;
+            let updated_at: String = row.get(4)?;
+            Ok((id, name, description, created_at, updated_at))
+        })?;
+
+        let mut datasets = Vec::new();
+        for row_result in rows {
+            let (id_str, name, description, created_at_str, updated_at_str) = row_result?;
+            let id: DatasetId = id_str
+                .parse()
+                .map_err(|e| StorageError::Database(format!("invalid dataset id: {}", e)))?;
+            let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+                .map_err(|e| StorageError::Database(format!("invalid created_at: {}", e)))?
+                .with_timezone(&Utc);
+            let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
+                .map_err(|e| StorageError::Database(format!("invalid updated_at: {}", e)))?
+                .with_timezone(&Utc);
+            datasets.push(Dataset {
+                id,
+                name,
+                description,
+                created_at,
+                updated_at,
+            });
+        }
+        Ok(datasets)
+    }
+
+    async fn save_dataset(&self, dataset: &Dataset) -> Result<(), StorageError> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT OR REPLACE INTO datasets (id, name, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                dataset.id.to_string(),
+                dataset.name,
+                dataset.description,
+                dataset.created_at.to_rfc3339(),
+                dataset.updated_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    async fn delete_dataset(&self, id: DatasetId) -> Result<bool, StorageError> {
+        let conn = self.conn.lock().await;
+        let deleted =
+            conn.execute("DELETE FROM datasets WHERE id = ?1", params![id.to_string()])?;
+        Ok(deleted > 0)
+    }
+
+    // --- Datapoint operations ---
+
+    async fn load_all_datapoints(&self) -> Result<Vec<Datapoint>, StorageError> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, dataset_id, kind_json, source, source_span_id, created_at FROM datapoints",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let dataset_id: String = row.get(1)?;
+            let kind_json: String = row.get(2)?;
+            let source: String = row.get(3)?;
+            let source_span_id: Option<String> = row.get(4)?;
+            let created_at: String = row.get(5)?;
+            Ok((id, dataset_id, kind_json, source, source_span_id, created_at))
+        })?;
+
+        let mut datapoints = Vec::new();
+        for row_result in rows {
+            let (id_str, dataset_id_str, kind_json, source_str, source_span_id_str, created_at_str) =
+                row_result?;
+            let id: DatapointId = id_str
+                .parse()
+                .map_err(|e| StorageError::Database(format!("invalid datapoint id: {}", e)))?;
+            let dataset_id: DatasetId = dataset_id_str
+                .parse()
+                .map_err(|e| StorageError::Database(format!("invalid dataset id: {}", e)))?;
+            let kind = serde_json::from_str(&kind_json)?;
+            let source = serde_json::from_value(serde_json::Value::String(source_str))?;
+            let source_span_id: Option<SpanId> = source_span_id_str
+                .map(|s| {
+                    s.parse()
+                        .map_err(|e| StorageError::Database(format!("invalid span id: {}", e)))
+                })
+                .transpose()?;
+            let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+                .map_err(|e| StorageError::Database(format!("invalid created_at: {}", e)))?
+                .with_timezone(&Utc);
+            datapoints.push(Datapoint {
+                id,
+                dataset_id,
+                kind,
+                source,
+                source_span_id,
+                created_at,
+            });
+        }
+        Ok(datapoints)
+    }
+
+    async fn save_datapoint(&self, dp: &Datapoint) -> Result<(), StorageError> {
+        let conn = self.conn.lock().await;
+        let kind_json = serde_json::to_string(&dp.kind)?;
+        let source_str = serde_json::to_value(&dp.source)?;
+        let source_str = source_str.as_str().unwrap_or("manual");
+        conn.execute(
+            "INSERT OR REPLACE INTO datapoints (id, dataset_id, kind_json, source, source_span_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                dp.id.to_string(),
+                dp.dataset_id.to_string(),
+                kind_json,
+                source_str,
+                dp.source_span_id.map(|id| id.to_string()),
+                dp.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    async fn delete_datapoint(&self, id: DatapointId) -> Result<bool, StorageError> {
+        let conn = self.conn.lock().await;
+        let deleted =
+            conn.execute("DELETE FROM datapoints WHERE id = ?1", params![id.to_string()])?;
+        Ok(deleted > 0)
+    }
+
+    async fn delete_dataset_datapoints(
+        &self,
+        dataset_id: DatasetId,
+    ) -> Result<usize, StorageError> {
+        let conn = self.conn.lock().await;
+        let deleted = conn.execute(
+            "DELETE FROM datapoints WHERE dataset_id = ?1",
+            params![dataset_id.to_string()],
+        )?;
+        Ok(deleted)
+    }
+
+    // --- Queue operations ---
+
+    async fn load_all_queue_items(&self) -> Result<Vec<QueueItem>, StorageError> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, dataset_id, datapoint_id, status, claimed_by, claimed_at, original_data_json, edited_data_json, created_at FROM queue_items",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let dataset_id: String = row.get(1)?;
+            let datapoint_id: String = row.get(2)?;
+            let status: String = row.get(3)?;
+            let claimed_by: Option<String> = row.get(4)?;
+            let claimed_at: Option<String> = row.get(5)?;
+            let original_data_json: Option<String> = row.get(6)?;
+            let edited_data_json: Option<String> = row.get(7)?;
+            let created_at: String = row.get(8)?;
+            Ok((
+                id,
+                dataset_id,
+                datapoint_id,
+                status,
+                claimed_by,
+                claimed_at,
+                original_data_json,
+                edited_data_json,
+                created_at,
+            ))
+        })?;
+
+        let mut items = Vec::new();
+        for row_result in rows {
+            let (
+                id_str,
+                dataset_id_str,
+                datapoint_id_str,
+                status_str,
+                claimed_by,
+                claimed_at_str,
+                original_data_json,
+                edited_data_json,
+                created_at_str,
+            ) = row_result?;
+            let id: QueueItemId = id_str
+                .parse()
+                .map_err(|e| StorageError::Database(format!("invalid queue item id: {}", e)))?;
+            let dataset_id: DatasetId = dataset_id_str
+                .parse()
+                .map_err(|e| StorageError::Database(format!("invalid dataset id: {}", e)))?;
+            let datapoint_id: DatapointId = datapoint_id_str
+                .parse()
+                .map_err(|e| StorageError::Database(format!("invalid datapoint id: {}", e)))?;
+            let status = serde_json::from_value(serde_json::Value::String(status_str))?;
+            let claimed_at = claimed_at_str
+                .map(|s| {
+                    DateTime::parse_from_rfc3339(&s)
+                        .map_err(|e| StorageError::Database(format!("invalid claimed_at: {}", e)))
+                        .map(|t| t.with_timezone(&Utc))
+                })
+                .transpose()?;
+            let original_data: Option<serde_json::Value> =
+                original_data_json.map(|s| serde_json::from_str(&s)).transpose()?;
+            let edited_data: Option<serde_json::Value> =
+                edited_data_json.map(|s| serde_json::from_str(&s)).transpose()?;
+            let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+                .map_err(|e| StorageError::Database(format!("invalid created_at: {}", e)))?
+                .with_timezone(&Utc);
+            items.push(QueueItem {
+                id,
+                dataset_id,
+                datapoint_id,
+                status,
+                claimed_by,
+                claimed_at,
+                original_data,
+                edited_data,
+                created_at,
+            });
+        }
+        Ok(items)
+    }
+
+    async fn save_queue_item(&self, item: &QueueItem) -> Result<(), StorageError> {
+        let conn = self.conn.lock().await;
+        let original_data_json = item
+            .original_data
+            .as_ref()
+            .map(|v| serde_json::to_string(v))
+            .transpose()?;
+        let edited_data_json = item
+            .edited_data
+            .as_ref()
+            .map(|v| serde_json::to_string(v))
+            .transpose()?;
+        conn.execute(
+            "INSERT OR REPLACE INTO queue_items (id, dataset_id, datapoint_id, status, claimed_by, claimed_at, original_data_json, edited_data_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                item.id.to_string(),
+                item.dataset_id.to_string(),
+                item.datapoint_id.to_string(),
+                item.status.as_str(),
+                item.claimed_by,
+                item.claimed_at.map(|t| t.to_rfc3339()),
+                original_data_json,
+                edited_data_json,
+                item.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    async fn delete_queue_item(&self, id: QueueItemId) -> Result<bool, StorageError> {
+        let conn = self.conn.lock().await;
+        let deleted =
+            conn.execute("DELETE FROM queue_items WHERE id = ?1", params![id.to_string()])?;
+        Ok(deleted > 0)
     }
 }

@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use thiserror::Error;
-use trace::{FileVersion, Span, SpanId, Trace, TraceId};
+use trace::{
+    Datapoint, DatapointId, Dataset, DatasetId, FileVersion, QueueItem, QueueItemId, Span, SpanId,
+    Trace, TraceId,
+};
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -49,4 +52,20 @@ pub trait StorageBackend: Send + Sync {
     async fn save_file_version(&self, version: &FileVersion) -> Result<(), StorageError>;
     async fn save_file_content(&self, hash: &str, content: &[u8]) -> Result<(), StorageError>;
     async fn load_file_content(&self, hash: &str) -> Result<Vec<u8>, StorageError>;
+
+    // Dataset operations
+    async fn load_all_datasets(&self) -> Result<Vec<Dataset>, StorageError>;
+    async fn save_dataset(&self, dataset: &Dataset) -> Result<(), StorageError>;
+    async fn delete_dataset(&self, id: DatasetId) -> Result<bool, StorageError>;
+
+    // Datapoint operations
+    async fn load_all_datapoints(&self) -> Result<Vec<Datapoint>, StorageError>;
+    async fn save_datapoint(&self, datapoint: &Datapoint) -> Result<(), StorageError>;
+    async fn delete_datapoint(&self, id: DatapointId) -> Result<bool, StorageError>;
+    async fn delete_dataset_datapoints(&self, dataset_id: DatasetId) -> Result<usize, StorageError>;
+
+    // Queue operations
+    async fn load_all_queue_items(&self) -> Result<Vec<QueueItem>, StorageError>;
+    async fn save_queue_item(&self, item: &QueueItem) -> Result<(), StorageError>;
+    async fn delete_queue_item(&self, id: QueueItemId) -> Result<bool, StorageError>;
 }
