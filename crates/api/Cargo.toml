@@ -16,3 +16,6 @@ tower-http.workspace = true
 tracing.workspace = true
 rust-embed.workspace = true
 mime_guess.workspace = true
+csv.workspace = true
+axum-extra.workspace = true
+uuid.workspace = true

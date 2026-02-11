@@ -10,9 +10,10 @@ use axum::{
         sse::{Event, KeepAlive},
         Html, IntoResponse, Response, Sse,
     },
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
+use axum_extra::extract::Multipart;
 use rust_embed::Embed;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -22,7 +23,9 @@ use tower_http::cors::{Any, CorsLayer};
 
 use storage::{FileFilter, PersistentStore, SpanFilter, SqliteBackend};
 use trace::{
-    FileVersion, Span, SpanBuilder, SpanId, SpanKind, Trace, TraceId,
+    Datapoint, DatapointId, DatapointKind, DatapointSource, Dataset, DatasetId, FileVersion,
+    Message, QueueItem, QueueItemId, QueueItemStatus, Span, SpanBuilder, SpanId, SpanKind, Trace,
+    TraceId,
 };
 
 // --- Events ---
@@ -38,6 +41,10 @@ pub enum SystemEvent {
     FileVersionCreated { file: FileVersion },
     SpanDeleted { span_id: SpanId },
     TraceDeleted { trace_id: TraceId },
+    DatasetCreated { dataset: Dataset },
+    DatasetDeleted { dataset_id: DatasetId },
+    DatapointCreated { datapoint: Datapoint },
+    QueueItemUpdated { item: QueueItem },
     Cleared,
 }
 
@@ -108,6 +115,49 @@ struct ExportParams {
     trace_id: Option<TraceId>,
 }
 
+// --- Dataset request types ---
+
+#[derive(Deserialize)]
+struct CreateDatasetRequest {
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateDatasetRequest {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreateDatapointRequest {
+    kind: DatapointKind,
+}
+
+#[derive(Deserialize)]
+struct ExportSpanRequest {
+    span_id: SpanId,
+}
+
+#[derive(Deserialize)]
+struct EnqueueRequest {
+    datapoint_ids: Vec<DatapointId>,
+}
+
+#[derive(Deserialize)]
+struct ClaimRequest {
+    claimed_by: String,
+}
+
+#[derive(Deserialize)]
+struct SubmitRequest {
+    #[serde(default)]
+    edited_data: Option<serde_json::Value>,
+}
+
 // --- Response types ---
 
 #[derive(Serialize)]
@@ -161,6 +211,51 @@ struct FileVersionsResponse {
     path: String,
     versions: Vec<FileVersion>,
     count: usize,
+}
+
+// --- Dataset response types ---
+
+#[derive(Serialize)]
+struct DatasetResponse {
+    #[serde(flatten)]
+    dataset: Dataset,
+    datapoint_count: usize,
+}
+
+#[derive(Serialize)]
+struct DatasetListResponse {
+    datasets: Vec<DatasetResponse>,
+    count: usize,
+}
+
+#[derive(Serialize)]
+struct DatapointListResponse {
+    datapoints: Vec<Datapoint>,
+    count: usize,
+}
+
+#[derive(Serialize)]
+struct ImportResponse {
+    imported: usize,
+    dataset_id: DatasetId,
+}
+
+#[derive(Serialize)]
+struct QueueListResponse {
+    items: Vec<QueueItem>,
+    counts: QueueCounts,
+}
+
+#[derive(Serialize)]
+struct QueueCounts {
+    pending: usize,
+    claimed: usize,
+    completed: usize,
+}
+
+#[derive(Serialize)]
+struct EnqueueResponse {
+    enqueued: usize,
 }
 
 // --- Trace handlers ---
@@ -487,6 +582,440 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     })
 }
 
+// --- Dataset handlers ---
+
+async fn list_datasets(State(state): State<AppState>) -> Json<DatasetListResponse> {
+    let r = state.store.read().await;
+    let datasets: Vec<DatasetResponse> = r
+        .all_datasets()
+        .map(|ds| DatasetResponse {
+            datapoint_count: r.datapoint_count_for_dataset(ds.id),
+            dataset: ds.clone(),
+        })
+        .collect();
+    let count = datasets.len();
+    Json(DatasetListResponse { datasets, count })
+}
+
+async fn create_dataset(
+    State(state): State<AppState>,
+    Json(req): Json<CreateDatasetRequest>,
+) -> (StatusCode, Json<Dataset>) {
+    let dataset = Dataset::new(req.name, req.description);
+    let mut w = state.store.write().await;
+    w.save_dataset(dataset.clone()).await;
+    drop(w);
+    let _ = state
+        .events_tx
+        .send(SystemEvent::DatasetCreated { dataset: dataset.clone() });
+    (StatusCode::CREATED, Json(dataset))
+}
+
+async fn get_dataset(
+    State(state): State<AppState>,
+    Path(dataset_id): Path<DatasetId>,
+) -> Result<Json<DatasetResponse>, StatusCode> {
+    let r = state.store.read().await;
+    let ds = r.get_dataset(dataset_id).ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(DatasetResponse {
+        datapoint_count: r.datapoint_count_for_dataset(ds.id),
+        dataset: ds.clone(),
+    }))
+}
+
+async fn update_dataset(
+    State(state): State<AppState>,
+    Path(dataset_id): Path<DatasetId>,
+    Json(req): Json<UpdateDatasetRequest>,
+) -> Result<Json<Dataset>, StatusCode> {
+    let mut w = state.store.write().await;
+    let ds = w.get_dataset(dataset_id).ok_or(StatusCode::NOT_FOUND)?.clone();
+    let mut updated = ds;
+    if let Some(name) = req.name {
+        updated.name = name;
+    }
+    if let Some(desc) = req.description {
+        updated.description = Some(desc);
+    }
+    updated.updated_at = chrono::Utc::now();
+    w.save_dataset(updated.clone()).await;
+    Ok(Json(updated))
+}
+
+async fn delete_dataset_handler(
+    State(state): State<AppState>,
+    Path(dataset_id): Path<DatasetId>,
+) -> StatusCode {
+    let mut w = state.store.write().await;
+    if w.delete_dataset(dataset_id).await {
+        drop(w);
+        let _ = state
+            .events_tx
+            .send(SystemEvent::DatasetDeleted { dataset_id });
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
+// --- Datapoint handlers ---
+
+async fn list_datapoints(
+    State(state): State<AppState>,
+    Path(dataset_id): Path<DatasetId>,
+) -> Result<Json<DatapointListResponse>, StatusCode> {
+    let r = state.store.read().await;
+    if r.get_dataset(dataset_id).is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let datapoints: Vec<Datapoint> = r
+        .datapoints_for_dataset(dataset_id)
+        .into_iter()
+        .cloned()
+        .collect();
+    let count = datapoints.len();
+    Ok(Json(DatapointListResponse { datapoints, count }))
+}
+
+async fn create_datapoint(
+    State(state): State<AppState>,
+    Path(dataset_id): Path<DatasetId>,
+    Json(req): Json<CreateDatapointRequest>,
+) -> Result<(StatusCode, Json<Datapoint>), StatusCode> {
+    let mut w = state.store.write().await;
+    if w.get_dataset(dataset_id).is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let dp = Datapoint::new(dataset_id, req.kind, DatapointSource::Manual);
+    w.save_datapoint(dp.clone()).await;
+    drop(w);
+    let _ = state
+        .events_tx
+        .send(SystemEvent::DatapointCreated { datapoint: dp.clone() });
+    Ok((StatusCode::CREATED, Json(dp)))
+}
+
+async fn delete_datapoint_handler(
+    State(state): State<AppState>,
+    Path((dataset_id, dp_id)): Path<(DatasetId, DatapointId)>,
+) -> StatusCode {
+    let mut w = state.store.write().await;
+    // Verify the datapoint belongs to this dataset
+    if let Some(dp) = w.get_datapoint(dp_id) {
+        if dp.dataset_id != dataset_id {
+            return StatusCode::NOT_FOUND;
+        }
+    } else {
+        return StatusCode::NOT_FOUND;
+    }
+    if w.delete_datapoint(dp_id).await {
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
+// --- Export span → datapoint ---
+
+async fn export_span_to_dataset(
+    State(state): State<AppState>,
+    Path(dataset_id): Path<DatasetId>,
+    Json(req): Json<ExportSpanRequest>,
+) -> Result<(StatusCode, Json<Datapoint>), StatusCode> {
+    let mut w = state.store.write().await;
+    if w.get_dataset(dataset_id).is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let span = w.get(req.span_id).ok_or(StatusCode::NOT_FOUND)?.clone();
+
+    let kind = DatapointKind::Generic {
+        input: span.input().cloned().unwrap_or(serde_json::Value::Null),
+        expected_output: span.output().cloned(),
+        actual_output: None,
+        score: None,
+        metadata: HashMap::new(),
+    };
+
+    let dp = Datapoint::new(dataset_id, kind, DatapointSource::SpanExport)
+        .with_source_span(req.span_id);
+    w.save_datapoint(dp.clone()).await;
+    drop(w);
+    let _ = state
+        .events_tx
+        .send(SystemEvent::DatapointCreated { datapoint: dp.clone() });
+    Ok((StatusCode::CREATED, Json(dp)))
+}
+
+// --- File import (CSV/JSON/JSONL) ---
+
+fn map_object_to_datapoint_kind(obj: &serde_json::Value) -> DatapointKind {
+    if let Some(messages) = obj.get("messages") {
+        if let Ok(msgs) = serde_json::from_value::<Vec<Message>>(messages.clone()) {
+            let expected = obj
+                .get("expected")
+                .and_then(|v| serde_json::from_value::<Message>(v.clone()).ok());
+            let metadata: HashMap<String, serde_json::Value> = obj
+                .get("metadata")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+            return DatapointKind::LlmConversation {
+                messages: msgs,
+                expected,
+                metadata,
+            };
+        }
+    }
+
+    let input = obj
+        .get("input")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let expected_output = obj
+        .get("expected_output")
+        .or_else(|| obj.get("target"))
+        .cloned();
+    let actual_output = obj.get("actual_output").cloned();
+    let score = obj.get("score").and_then(|v| v.as_f64());
+    let metadata: HashMap<String, serde_json::Value> = obj
+        .get("metadata")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    DatapointKind::Generic {
+        input,
+        expected_output,
+        actual_output,
+        score,
+        metadata,
+    }
+}
+
+fn parse_json_import(data: &[u8]) -> Result<Vec<DatapointKind>, String> {
+    // Try as Vec<DatapointKind> first
+    if let Ok(kinds) = serde_json::from_slice::<Vec<DatapointKind>>(data) {
+        return Ok(kinds);
+    }
+    // Try as Vec<Value> and map fields
+    let arr: Vec<serde_json::Value> =
+        serde_json::from_slice(data).map_err(|e| format!("invalid JSON: {}", e))?;
+    Ok(arr.iter().map(map_object_to_datapoint_kind).collect())
+}
+
+fn parse_jsonl_import(data: &[u8]) -> Result<Vec<DatapointKind>, String> {
+    let text = std::str::from_utf8(data).map_err(|e| format!("invalid UTF-8: {}", e))?;
+    let mut kinds = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        // Try as DatapointKind first
+        if let Ok(kind) = serde_json::from_str::<DatapointKind>(line) {
+            kinds.push(kind);
+            continue;
+        }
+        let obj: serde_json::Value = serde_json::from_str(line)
+            .map_err(|e| format!("invalid JSON on line {}: {}", i + 1, e))?;
+        kinds.push(map_object_to_datapoint_kind(&obj));
+    }
+    Ok(kinds)
+}
+
+fn parse_csv_import(data: &[u8]) -> Result<Vec<DatapointKind>, String> {
+    let mut reader = csv::Reader::from_reader(data);
+    let headers = reader
+        .headers()
+        .map_err(|e| format!("invalid CSV headers: {}", e))?
+        .clone();
+
+    let mut kinds = Vec::new();
+    for result in reader.records() {
+        let record = result.map_err(|e| format!("CSV parse error: {}", e))?;
+        let mut obj = serde_json::Map::new();
+        for (header, value) in headers.iter().zip(record.iter()) {
+            // Try parsing as JSON, fall back to string
+            let json_val = serde_json::from_str(value)
+                .unwrap_or_else(|_| serde_json::Value::String(value.to_string()));
+            obj.insert(header.to_string(), json_val);
+        }
+        kinds.push(map_object_to_datapoint_kind(&serde_json::Value::Object(obj)));
+    }
+    Ok(kinds)
+}
+
+async fn import_file(
+    State(state): State<AppState>,
+    Path(dataset_id): Path<DatasetId>,
+    mut multipart: Multipart,
+) -> Result<(StatusCode, Json<ImportResponse>), (StatusCode, String)> {
+    // Verify dataset exists
+    {
+        let r = state.store.read().await;
+        if r.get_dataset(dataset_id).is_none() {
+            return Err((StatusCode::NOT_FOUND, "dataset not found".to_string()));
+        }
+    }
+
+    let mut imported = 0usize;
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("multipart error: {}", e)))?
+    {
+        let filename = field.file_name().unwrap_or("data").to_string();
+        let data = field
+            .bytes()
+            .await
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("read error: {}", e)))?;
+
+        let kinds = if filename.ends_with(".csv") {
+            parse_csv_import(&data)
+        } else if filename.ends_with(".jsonl") {
+            parse_jsonl_import(&data)
+        } else {
+            parse_json_import(&data)
+        }
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+        let mut w = state.store.write().await;
+        for kind in kinds {
+            let dp = Datapoint::new(dataset_id, kind, DatapointSource::FileUpload);
+            let _ = state
+                .events_tx
+                .send(SystemEvent::DatapointCreated { datapoint: dp.clone() });
+            w.save_datapoint(dp).await;
+            imported += 1;
+        }
+    }
+
+    Ok((
+        StatusCode::CREATED,
+        Json(ImportResponse {
+            imported,
+            dataset_id,
+        }),
+    ))
+}
+
+// --- Queue handlers ---
+
+async fn list_queue(
+    State(state): State<AppState>,
+    Path(dataset_id): Path<DatasetId>,
+) -> Result<Json<QueueListResponse>, StatusCode> {
+    let r = state.store.read().await;
+    if r.get_dataset(dataset_id).is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let items: Vec<QueueItem> = r
+        .queue_items_for_dataset(dataset_id)
+        .into_iter()
+        .cloned()
+        .collect();
+    let counts = QueueCounts {
+        pending: items
+            .iter()
+            .filter(|i| i.status == QueueItemStatus::Pending)
+            .count(),
+        claimed: items
+            .iter()
+            .filter(|i| i.status == QueueItemStatus::Claimed)
+            .count(),
+        completed: items
+            .iter()
+            .filter(|i| i.status == QueueItemStatus::Completed)
+            .count(),
+    };
+    Ok(Json(QueueListResponse { items, counts }))
+}
+
+async fn enqueue_datapoints(
+    State(state): State<AppState>,
+    Path(dataset_id): Path<DatasetId>,
+    Json(req): Json<EnqueueRequest>,
+) -> Result<(StatusCode, Json<EnqueueResponse>), StatusCode> {
+    let mut w = state.store.write().await;
+    if w.get_dataset(dataset_id).is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let mut enqueued = 0;
+    for dp_id in req.datapoint_ids {
+        if let Some(dp) = w.get_datapoint(dp_id) {
+            if dp.dataset_id != dataset_id {
+                continue;
+            }
+            let original_data = serde_json::to_value(&dp.kind).ok();
+            let item = QueueItem::new(dataset_id, dp_id, original_data);
+            let _ = state
+                .events_tx
+                .send(SystemEvent::QueueItemUpdated { item: item.clone() });
+            w.save_queue_item(item).await;
+            enqueued += 1;
+        }
+    }
+    Ok((StatusCode::CREATED, Json(EnqueueResponse { enqueued })))
+}
+
+async fn claim_queue_item(
+    State(state): State<AppState>,
+    Path(item_id): Path<QueueItemId>,
+    Json(req): Json<ClaimRequest>,
+) -> Result<Json<QueueItem>, StatusCode> {
+    let mut w = state.store.write().await;
+    let item = w
+        .claim_queue_item(item_id, req.claimed_by)
+        .await
+        .ok_or(StatusCode::CONFLICT)?;
+    drop(w);
+    let _ = state
+        .events_tx
+        .send(SystemEvent::QueueItemUpdated { item: item.clone() });
+    Ok(Json(item))
+}
+
+async fn submit_queue_item(
+    State(state): State<AppState>,
+    Path(item_id): Path<QueueItemId>,
+    Json(req): Json<SubmitRequest>,
+) -> Result<Json<QueueItem>, StatusCode> {
+    let mut w = state.store.write().await;
+
+    // Get the queue item to find the datapoint
+    let qi = w.get_queue_item(item_id).ok_or(StatusCode::NOT_FOUND)?.clone();
+    if qi.status != QueueItemStatus::Claimed {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    // If edited_data provided, update the datapoint's kind
+    if let Some(ref edited) = req.edited_data {
+        if let Some(dp) = w.get_datapoint(qi.datapoint_id).cloned() {
+            let new_kind = if let Ok(kind) = serde_json::from_value::<DatapointKind>(edited.clone())
+            {
+                kind
+            } else {
+                map_object_to_datapoint_kind(edited)
+            };
+            let updated_dp = Datapoint {
+                kind: new_kind,
+                ..dp
+            };
+            w.save_datapoint(updated_dp).await;
+        }
+    }
+
+    let item = w
+        .complete_queue_item(item_id, req.edited_data)
+        .await
+        .ok_or(StatusCode::CONFLICT)?;
+    drop(w);
+    let _ = state
+        .events_tx
+        .send(SystemEvent::QueueItemUpdated { item: item.clone() });
+    Ok(Json(item))
+}
+
 // --- Embedded UI ---
 
 #[derive(Embed)]
@@ -541,6 +1070,16 @@ pub fn router_with_start_time(store: SharedStore, start_time: Instant) -> Router
         // Files
         .route("/files", get(list_files))
         .route("/files/*path", get(get_file_versions))
+        // Datasets
+        .route("/datasets", get(list_datasets).post(create_dataset))
+        .route("/datasets/:id", get(get_dataset).put(update_dataset).delete(delete_dataset_handler))
+        .route("/datasets/:id/datapoints", get(list_datapoints).post(create_datapoint))
+        .route("/datasets/:id/datapoints/:dp_id", delete(delete_datapoint_handler))
+        .route("/datasets/:id/export-span", post(export_span_to_dataset))
+        .route("/datasets/:id/import", post(import_file))
+        .route("/datasets/:id/queue", get(list_queue).post(enqueue_datapoints))
+        .route("/queue/:item_id/claim", post(claim_queue_item))
+        .route("/queue/:item_id/submit", post(submit_queue_item))
         // Stats & Export
         .route("/stats", get(get_stats))
         .route("/export/json", get(export_json))
