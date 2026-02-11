@@ -1,12 +1,46 @@
 <script lang="ts">
-	import type { Span } from '$lib/api';
-	import { spanStatus, spanStartedAt, spanEndedAt, spanDurationMs, spanError, spanKindLabel, shortId } from '$lib/api';
+	import type { Span, DatasetWithCount } from '$lib/api';
+	import { spanStatus, spanStartedAt, spanEndedAt, spanDurationMs, spanError, spanKindLabel, shortId, getDatasets, exportSpanToDataset } from '$lib/api';
 	import StatusBadge from './StatusBadge.svelte';
 	import SpanKindIcon from './SpanKindIcon.svelte';
 
 	let { span }: { span: Span | null } = $props();
 
 	let activePayloadTab: 'input' | 'output' = $state('input');
+
+	// Export to dataset
+	let showExportDropdown = $state(false);
+	let exportDatasets: DatasetWithCount[] = $state([]);
+	let exportLoading = $state(false);
+	let exportSuccess = $state('');
+
+	async function openExportDropdown() {
+		showExportDropdown = !showExportDropdown;
+		if (showExportDropdown) {
+			try {
+				const result = await getDatasets();
+				exportDatasets = result.datasets;
+			} catch {
+				exportDatasets = [];
+			}
+		}
+	}
+
+	async function doExport(datasetId: string) {
+		if (!span) return;
+		exportLoading = true;
+		exportSuccess = '';
+		try {
+			await exportSpanToDataset(datasetId, span.id);
+			const ds = exportDatasets.find((d) => d.id === datasetId);
+			exportSuccess = `Exported to ${ds?.name ?? shortId(datasetId)}`;
+			showExportDropdown = false;
+		} catch {
+			exportSuccess = 'Export failed';
+		}
+		exportLoading = false;
+		setTimeout(() => (exportSuccess = ''), 3000);
+	}
 
 	function formatJson(value: unknown): string {
 		if (value === null || value === undefined) return '(none)';
@@ -51,6 +85,34 @@
 		<div class="flex items-center gap-2">
 			<SpanKindIcon {span} />
 			<h3 class="text-text font-semibold text-base flex-1">{span.name}</h3>
+			<!-- Export to Dataset -->
+			<div class="relative">
+				<button
+					class="px-2 py-1 text-xs bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded hover:bg-amber-400/20 transition-colors"
+					onclick={openExportDropdown}
+				>Export to Dataset</button>
+				{#if showExportDropdown}
+					<div class="absolute right-0 top-full mt-1 w-56 bg-bg-secondary border border-border rounded shadow-lg z-10">
+						{#if exportDatasets.length === 0}
+							<div class="px-3 py-2 text-xs text-text-muted">No datasets. Create one first.</div>
+						{:else}
+							{#each exportDatasets as ds (ds.id)}
+								<button
+									class="w-full text-left px-3 py-2 text-xs hover:bg-bg-tertiary transition-colors text-text-secondary"
+									disabled={exportLoading}
+									onclick={() => doExport(ds.id)}
+								>
+									<div class="text-text">{ds.name}</div>
+									<div class="text-text-muted">{ds.datapoint_count} datapoints</div>
+								</button>
+							{/each}
+						{/if}
+					</div>
+				{/if}
+			</div>
+			{#if exportSuccess}
+				<span class="text-xs text-success">{exportSuccess}</span>
+			{/if}
 			<StatusBadge status={spanStatus(span)} />
 		</div>
 
