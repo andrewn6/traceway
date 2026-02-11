@@ -6,6 +6,9 @@ use uuid::Uuid;
 
 pub type SpanId = Uuid;
 pub type TraceId = Uuid;
+pub type DatasetId = Uuid;
+pub type DatapointId = Uuid;
+pub type QueueItemId = Uuid;
 
 // --- SpanKind: typed span variants ---
 
@@ -297,4 +300,163 @@ pub fn content_hash(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     format!("{:x}", hasher.finalize())
+}
+
+// --- Dataset types ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Message {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DatapointKind {
+    LlmConversation {
+        messages: Vec<Message>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected: Option<Message>,
+        #[serde(default)]
+        metadata: HashMap<String, serde_json::Value>,
+    },
+    Generic {
+        input: serde_json::Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_output: Option<serde_json::Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        actual_output: Option<serde_json::Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        score: Option<f64>,
+        #[serde(default)]
+        metadata: HashMap<String, serde_json::Value>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DatapointSource {
+    Manual,
+    SpanExport,
+    FileUpload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Dataset {
+    pub id: DatasetId,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Dataset {
+    pub fn new(name: impl Into<String>, description: Option<String>) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::now_v7(),
+            name: name.into(),
+            description,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Datapoint {
+    pub id: DatapointId,
+    pub dataset_id: DatasetId,
+    pub kind: DatapointKind,
+    pub source: DatapointSource,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_span_id: Option<SpanId>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl Datapoint {
+    pub fn new(dataset_id: DatasetId, kind: DatapointKind, source: DatapointSource) -> Self {
+        Self {
+            id: Uuid::now_v7(),
+            dataset_id,
+            kind,
+            source,
+            source_span_id: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    pub fn with_source_span(mut self, span_id: SpanId) -> Self {
+        self.source_span_id = Some(span_id);
+        self
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueItemStatus {
+    Pending,
+    Claimed,
+    Completed,
+}
+
+impl QueueItemStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            QueueItemStatus::Pending => "pending",
+            QueueItemStatus::Claimed => "claimed",
+            QueueItemStatus::Completed => "completed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueItem {
+    pub id: QueueItemId,
+    pub dataset_id: DatasetId,
+    pub datapoint_id: DatapointId,
+    pub status: QueueItemStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claimed_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claimed_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_data: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edited_data: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl QueueItem {
+    pub fn new(
+        dataset_id: DatasetId,
+        datapoint_id: DatapointId,
+        original_data: Option<serde_json::Value>,
+    ) -> Self {
+        Self {
+            id: Uuid::now_v7(),
+            dataset_id,
+            datapoint_id,
+            status: QueueItemStatus::Pending,
+            claimed_by: None,
+            claimed_at: None,
+            original_data,
+            edited_data: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    pub fn claim(mut self, claimed_by: impl Into<String>) -> Self {
+        self.status = QueueItemStatus::Claimed;
+        self.claimed_by = Some(claimed_by.into());
+        self.claimed_at = Some(Utc::now());
+        self
+    }
+
+    pub fn complete(mut self, edited_data: Option<serde_json::Value>) -> Self {
+        self.status = QueueItemStatus::Completed;
+        self.edited_data = edited_data;
+        self
+    }
 }
