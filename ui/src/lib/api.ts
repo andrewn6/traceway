@@ -105,6 +105,62 @@ export interface TraceDiff {
 	files_diff: { path: string; version_a?: string; version_b?: string }[];
 }
 
+// ─── Dataset Types ───────────────────────────────────────────────────
+
+export type DatapointKind =
+	| { type: 'llm_conversation'; messages: { role: string; content: string }[]; expected?: { role: string; content: string }; metadata: Record<string, unknown> }
+	| { type: 'generic'; input: unknown; expected_output?: unknown; actual_output?: unknown; score?: number; metadata: Record<string, unknown> };
+
+export type DatapointSource = 'manual' | 'span_export' | 'file_upload';
+
+export interface Dataset {
+	id: string;
+	name: string;
+	description?: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface DatasetWithCount extends Dataset {
+	datapoint_count: number;
+}
+
+export interface Datapoint {
+	id: string;
+	dataset_id: string;
+	kind: DatapointKind;
+	source: DatapointSource;
+	source_span_id?: string;
+	created_at: string;
+}
+
+export interface QueueItem {
+	id: string;
+	dataset_id: string;
+	datapoint_id: string;
+	status: 'pending' | 'claimed' | 'completed';
+	claimed_by?: string;
+	claimed_at?: string;
+	original_data?: unknown;
+	edited_data?: unknown;
+	created_at: string;
+}
+
+export interface DatasetList {
+	datasets: DatasetWithCount[];
+	count: number;
+}
+
+export interface DatapointList {
+	datapoints: Datapoint[];
+	count: number;
+}
+
+export interface QueueList {
+	items: QueueItem[];
+	counts: { pending: number; claimed: number; completed: number };
+}
+
 // ─── Events ──────────────────────────────────────────────────────────
 
 export type SpanEvent =
@@ -113,6 +169,10 @@ export type SpanEvent =
 	| { type: 'span_deleted'; span_id: string }
 	| { type: 'trace_deleted'; trace_id: string }
 	| { type: 'file_version_created'; file: TrackedFile; version: FileVersion }
+	| { type: 'dataset_created'; dataset: DatasetWithCount }
+	| { type: 'dataset_deleted'; dataset_id: string }
+	| { type: 'datapoint_created'; datapoint: Datapoint }
+	| { type: 'queue_item_updated'; item: QueueItem }
 	| { type: 'cleared' };
 
 // ─── HTTP Helpers ────────────────────────────────────────────────────
@@ -147,9 +207,28 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 	return res.json();
 }
 
+async function put<T>(path: string, body?: unknown): Promise<T> {
+	const res = await fetch(`${API_BASE}${path}`, {
+		method: 'PUT',
+		headers: body ? { 'Content-Type': 'application/json' } : {},
+		body: body ? JSON.stringify(body) : undefined
+	});
+	if (!res.ok) throw new Error(`PUT ${path}: ${res.status}`);
+	return res.json();
+}
+
 async function del<T>(path: string): Promise<T> {
 	const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE' });
 	if (!res.ok) throw new Error(`DELETE ${path}: ${res.status}`);
+	return res.json();
+}
+
+async function postMultipart<T>(path: string, form: FormData): Promise<T> {
+	const res = await fetch(`${API_BASE}${path}`, {
+		method: 'POST',
+		body: form
+	});
+	if (!res.ok) throw new Error(`POST ${path}: ${res.status}`);
 	return res.json();
 }
 
@@ -189,6 +268,41 @@ export const getFileImpact = (path: string) =>
 
 export const getUnusedContext = (traceId: string) =>
 	get<{ unused_files: { path: string; bytes_read: number }[] }>(`/analysis/unused-context${qs({ trace_id: traceId })}`);
+
+// ─── Dataset Endpoints ───────────────────────────────────────────────
+
+export const getDatasets = () => get<DatasetList>('/datasets');
+export const createDataset = (name: string, description?: string) =>
+	post<DatasetWithCount>('/datasets', { name, description });
+export const getDataset = (id: string) => get<DatasetWithCount>(`/datasets/${id}`);
+export const updateDataset = (id: string, body: { name?: string; description?: string }) =>
+	put<DatasetWithCount>(`/datasets/${id}`, body);
+export const deleteDataset = (id: string) => del<unknown>(`/datasets/${id}`);
+
+export const getDatapoints = (datasetId: string) =>
+	get<DatapointList>(`/datasets/${datasetId}/datapoints`);
+export const createDatapoint = (datasetId: string, kind: DatapointKind) =>
+	post<Datapoint>(`/datasets/${datasetId}/datapoints`, { kind });
+export const deleteDatapoint = (datasetId: string, dpId: string) =>
+	del<unknown>(`/datasets/${datasetId}/datapoints/${dpId}`);
+
+export const exportSpanToDataset = (datasetId: string, spanId: string) =>
+	post<Datapoint>(`/datasets/${datasetId}/export-span`, { span_id: spanId });
+
+export function importFile(datasetId: string, file: File): Promise<{ imported: number }> {
+	const form = new FormData();
+	form.append('file', file);
+	return postMultipart(`/datasets/${datasetId}/import`, form);
+}
+
+export const getQueue = (datasetId: string) =>
+	get<QueueList>(`/datasets/${datasetId}/queue`);
+export const enqueueDatapoints = (datasetId: string, datapointIds: string[]) =>
+	post<unknown>(`/datasets/${datasetId}/queue`, { datapoint_ids: datapointIds });
+export const claimQueueItem = (itemId: string, claimedBy: string) =>
+	post<QueueItem>(`/queue/${itemId}/claim`, { claimed_by: claimedBy });
+export const submitQueueItem = (itemId: string, editedData?: unknown) =>
+	post<QueueItem>(`/queue/${itemId}/submit`, { edited_data: editedData });
 
 // ─── Export ──────────────────────────────────────────────────────────
 
