@@ -1,3 +1,4 @@
+pub mod analytics;
 pub mod backend;
 pub mod sqlite;
 
@@ -6,7 +7,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use trace::{
     Datapoint, DatapointId, Dataset, DatasetId, FileVersion, QueueItem, QueueItemId,
-    QueueItemStatus, Span, SpanId, Trace, TraceId,
+    QueueItemStatus, Span, SpanId, SpanKind, Trace, TraceId,
 };
 
 pub use backend::{StorageBackend, StorageError};
@@ -18,6 +19,7 @@ pub use sqlite::SqliteBackend;
 pub struct SpanFilter {
     pub kind: Option<String>,
     pub model: Option<String>,
+    pub provider: Option<String>,
     pub status: Option<String>,
     pub since: Option<DateTime<Utc>>,
     pub until: Option<DateTime<Utc>>,
@@ -137,6 +139,13 @@ impl SpanStore {
                 if let Some(ref model) = filter.model {
                     match span.kind().model() {
                         Some(m) if m == model => {}
+                        _ => return false,
+                    }
+                }
+
+                if let Some(ref provider) = filter.provider {
+                    match span.kind().provider() {
+                        Some(p) if p == provider => {}
                         _ => return false,
                     }
                 }
@@ -304,6 +313,39 @@ impl<B: StorageBackend> PersistentStore<B> {
         self.memory.replace(completed.clone());
         if let Err(e) = self.backend.save_span(&completed).await {
             tracing::error!(%id, "failed to persist span completion: {}", e);
+        }
+        Some(completed)
+    }
+
+    /// Complete a span with an updated SpanKind (e.g. to populate token counts).
+    /// Uses serde JSON round-trip to reconstruct with new kind, same pattern as SqliteBackend::deserialize_span.
+    pub async fn complete_span_with_kind(
+        &mut self,
+        id: SpanId,
+        kind: SpanKind,
+        output: Option<serde_json::Value>,
+    ) -> Option<Span> {
+        let span = self.memory.remove(id)?;
+        if span.status().is_terminal() {
+            self.memory.replace(span);
+            return None;
+        }
+        // Serialize the span to JSON, patch in the new kind, then deserialize back
+        let mut json = serde_json::to_value(&span).ok()?;
+        let kind_json = serde_json::to_value(&kind).ok()?;
+        json.as_object_mut()?.insert("kind".to_string(), kind_json);
+        json.as_object_mut()?
+            .insert("status".to_string(), serde_json::Value::String("completed".to_string()));
+        json.as_object_mut()?
+            .insert("ended_at".to_string(), serde_json::to_value(chrono::Utc::now()).ok()?);
+        if let Some(out) = &output {
+            json.as_object_mut()?
+                .insert("output".to_string(), out.clone());
+        }
+        let completed: Span = serde_json::from_value(json).ok()?;
+        self.memory.replace(completed.clone());
+        if let Err(e) = self.backend.save_span(&completed).await {
+            tracing::error!(%id, "failed to persist span completion with kind: {}", e);
         }
         Some(completed)
     }
