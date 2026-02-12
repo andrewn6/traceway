@@ -138,6 +138,7 @@ async fn proxy_handler(State(state): State<ProxyState>, req: Request<Body>) -> R
         provider: provider.clone(),
         input_tokens: None,
         output_tokens: None,
+        cost: None,
         input_preview: input_preview.clone(),
         output_preview: None,
     };
@@ -205,32 +206,34 @@ async fn proxy_handler(State(state): State<ProxyState>, req: Request<Body>) -> R
                         CaptureMode::Full => resp_json.clone(),
                     };
 
-                    // Build updated kind with token counts
-                    // We need to complete the span with the output payload
-                    // The span kind was set at creation; token counts go into kind
-                    // but since spans are immutable, we capture tokens via the output field
-                    let output_with_tokens = output_payload.map(|mut v| {
-                        if let Some(obj) = v.as_object_mut() {
-                            if let Some(it) = input_tokens {
-                                obj.insert(
-                                    "_input_tokens".to_string(),
-                                    serde_json::Value::from(it),
-                                );
-                            }
-                            if let Some(ot) = output_tokens {
-                                obj.insert(
-                                    "_output_tokens".to_string(),
-                                    serde_json::Value::from(ot),
-                                );
-                            }
-                        }
-                        v
-                    });
+                    // Build output preview for the updated kind
+                    let output_preview = match &state.capture_mode {
+                        CaptureMode::Off => None,
+                        CaptureMode::Preview(max) => resp_json
+                            .as_ref()
+                            .map(|j| preview_string(&j.to_string(), *max)),
+                        CaptureMode::Full => resp_json
+                            .as_ref()
+                            .map(|j| j.to_string()),
+                    };
+
+                    // Build updated SpanKind with actual token counts
+                    let updated_kind = SpanKind::LlmCall {
+                        model: model.clone(),
+                        provider: provider.clone(),
+                        input_tokens,
+                        output_tokens,
+                        cost: None,
+                        input_preview: input_preview.clone(),
+                        output_preview,
+                    };
 
                     {
                         let mut store = state.store.write().await;
                         if status.is_success() {
-                            store.complete_span(span_id, output_with_tokens).await;
+                            store
+                                .complete_span_with_kind(span_id, updated_kind, output_payload)
+                                .await;
                         } else {
                             store
                                 .fail_span(span_id, format!("HTTP {}", status))

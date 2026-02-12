@@ -35,6 +35,9 @@ pub enum SpanKind {
         #[serde(skip_serializing_if = "Option::is_none")]
         output_tokens: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        cost: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         input_preview: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         output_preview: Option<String>,
@@ -66,6 +69,43 @@ impl SpanKind {
     pub fn path(&self) -> Option<&str> {
         match self {
             SpanKind::FsRead { path, .. } | SpanKind::FsWrite { path, .. } => Some(path),
+            _ => None,
+        }
+    }
+
+    pub fn provider(&self) -> Option<&str> {
+        match self {
+            SpanKind::LlmCall { provider, .. } => provider.as_deref(),
+            _ => None,
+        }
+    }
+
+    pub fn input_tokens(&self) -> Option<u64> {
+        match self {
+            SpanKind::LlmCall { input_tokens, .. } => *input_tokens,
+            _ => None,
+        }
+    }
+
+    pub fn output_tokens(&self) -> Option<u64> {
+        match self {
+            SpanKind::LlmCall { output_tokens, .. } => *output_tokens,
+            _ => None,
+        }
+    }
+
+    pub fn total_tokens(&self) -> Option<u64> {
+        match (self.input_tokens(), self.output_tokens()) {
+            (Some(i), Some(o)) => Some(i + o),
+            (Some(i), None) => Some(i),
+            (None, Some(o)) => Some(o),
+            (None, None) => None,
+        }
+    }
+
+    pub fn cost(&self) -> Option<f64> {
+        match self {
+            SpanKind::LlmCall { cost, .. } => *cost,
             _ => None,
         }
     }
@@ -459,4 +499,117 @@ impl QueueItem {
         self.edited_data = edited_data;
         self
     }
+}
+
+// --- Analytics types ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsQuery {
+    pub metrics: Vec<AnalyticsMetric>,
+    #[serde(default)]
+    pub group_by: Vec<GroupByField>,
+    #[serde(default)]
+    pub filter: AnalyticsFilter,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalyticsMetric {
+    TotalCost,
+    TotalInputTokens,
+    TotalOutputTokens,
+    TotalTokens,
+    AvgLatencyMs,
+    SpanCount,
+    ErrorCount,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GroupByField {
+    Model,
+    Provider,
+    Kind,
+    Status,
+    Trace,
+    Day,
+    Hour,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AnalyticsFilter {
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub since: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub until: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub trace_id: Option<TraceId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsResponse {
+    pub groups: Vec<AnalyticsGroup>,
+    pub totals: MetricValues,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsGroup {
+    pub key: HashMap<String, String>,
+    pub metrics: MetricValues,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MetricValues {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_cost: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_output_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avg_latency_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsSummary {
+    pub total_traces: usize,
+    pub total_spans: usize,
+    pub total_llm_calls: usize,
+    pub total_cost: f64,
+    pub total_tokens: u64,
+    pub avg_latency_ms: f64,
+    pub error_count: usize,
+    pub models_used: Vec<String>,
+    pub providers_used: Vec<String>,
+    pub cost_by_model: Vec<ModelCost>,
+    pub tokens_by_model: Vec<ModelTokens>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelCost {
+    pub model: String,
+    pub cost: f64,
+    pub span_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelTokens {
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: u64,
 }
