@@ -21,11 +21,11 @@ use tokio::sync::{broadcast, RwLock};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use tower_http::cors::{Any, CorsLayer};
 
-use storage::{FileFilter, PersistentStore, SpanFilter, SqliteBackend};
+use storage::{analytics, FileFilter, PersistentStore, SpanFilter, SqliteBackend};
 use trace::{
-    Datapoint, DatapointId, DatapointKind, DatapointSource, Dataset, DatasetId, FileVersion,
-    Message, QueueItem, QueueItemId, QueueItemStatus, Span, SpanBuilder, SpanId, SpanKind, Trace,
-    TraceId,
+    AnalyticsQuery, AnalyticsResponse, AnalyticsSummary, Datapoint, DatapointId, DatapointKind,
+    DatapointSource, Dataset, DatasetId, FileVersion, Message, QueueItem, QueueItemId,
+    QueueItemStatus, Span, SpanBuilder, SpanId, SpanKind, Trace, TraceId,
 };
 
 // --- Events ---
@@ -87,6 +87,7 @@ struct FailSpanRequest {
 struct SpanQueryParams {
     kind: Option<String>,
     model: Option<String>,
+    provider: Option<String>,
     status: Option<String>,
     since: Option<DateTime<Utc>>,
     until: Option<DateTime<Utc>>,
@@ -311,6 +312,7 @@ async fn list_spans(
     let filter = SpanFilter {
         kind: params.kind,
         model: params.model,
+        provider: params.provider,
         status: params.status,
         since: params.since,
         until: params.until,
@@ -1016,6 +1018,36 @@ async fn submit_queue_item(
     Ok(Json(item))
 }
 
+// --- Analytics handlers ---
+
+async fn post_analytics(
+    State(state): State<AppState>,
+    Json(query): Json<AnalyticsQuery>,
+) -> Json<AnalyticsResponse> {
+    let r = state.store.read().await;
+    let filter = SpanFilter {
+        kind: query.filter.kind.clone(),
+        model: query.filter.model.clone(),
+        provider: query.filter.provider.clone(),
+        status: query.filter.status.clone(),
+        since: query.filter.since,
+        until: query.filter.until,
+        trace_id: query.filter.trace_id,
+        ..Default::default()
+    };
+    let spans = r.filter_spans(&filter);
+    let response = analytics::compute_analytics(&spans, &query);
+    Json(response)
+}
+
+async fn analytics_summary(State(state): State<AppState>) -> Json<AnalyticsSummary> {
+    let r = state.store.read().await;
+    let spans: Vec<&trace::Span> = r.all_spans().collect();
+    let trace_count = r.trace_count();
+    let summary = analytics::compute_summary(&spans, trace_count);
+    Json(summary)
+}
+
 // --- Embedded UI ---
 
 #[derive(Embed)]
@@ -1080,6 +1112,9 @@ pub fn router_with_start_time(store: SharedStore, start_time: Instant) -> Router
         .route("/datasets/:id/queue", get(list_queue).post(enqueue_datapoints))
         .route("/queue/:item_id/claim", post(claim_queue_item))
         .route("/queue/:item_id/submit", post(submit_queue_item))
+        // Analytics
+        .route("/analytics", post(post_analytics))
+        .route("/analytics/summary", get(analytics_summary))
         // Stats & Export
         .route("/stats", get(get_stats))
         .route("/export/json", get(export_json))
