@@ -86,32 +86,32 @@
 
 	function kindMeta(s: Span): Record<string, string> {
 		if (!s.kind) return {};
-		if ('FsRead' in s.kind) {
-			return {
-				'Path': s.kind.FsRead.path,
-				'Version': s.kind.FsRead.file_version ?? '-',
-				'Bytes': s.kind.FsRead.bytes_read.toLocaleString(),
-			};
+		switch (s.kind.type) {
+			case 'fs_read':
+				return {
+					'Path': s.kind.path,
+					'Version': s.kind.file_version ?? '-',
+					'Bytes': s.kind.bytes_read.toLocaleString(),
+				};
+			case 'fs_write':
+				return {
+					'Path': s.kind.path,
+					'Version': s.kind.file_version,
+					'Bytes': s.kind.bytes_written.toLocaleString(),
+				};
+			case 'llm_call': {
+				const meta: Record<string, string> = { 'Model': s.kind.model };
+				if (s.kind.provider) meta['Provider'] = s.kind.provider;
+				if (s.kind.input_tokens != null) meta['Input tokens'] = s.kind.input_tokens.toLocaleString();
+				if (s.kind.output_tokens != null) meta['Output tokens'] = s.kind.output_tokens.toLocaleString();
+				if (s.kind.cost != null) meta['Cost'] = `$${s.kind.cost.toFixed(6)}`;
+				return meta;
+			}
+			case 'custom':
+				return { 'Kind': s.kind.kind };
+			default:
+				return {};
 		}
-		if ('FsWrite' in s.kind) {
-			return {
-				'Path': s.kind.FsWrite.path,
-				'Version': s.kind.FsWrite.file_version,
-				'Bytes': s.kind.FsWrite.bytes_written.toLocaleString(),
-			};
-		}
-		if ('LlmCall' in s.kind) {
-			const k = s.kind.LlmCall;
-			const meta: Record<string, string> = { 'Model': k.model };
-			if (k.provider) meta['Provider'] = k.provider;
-			if (k.input_tokens != null) meta['Input tokens'] = k.input_tokens.toLocaleString();
-			if (k.output_tokens != null) meta['Output tokens'] = k.output_tokens.toLocaleString();
-			return meta;
-		}
-		if ('Custom' in s.kind) {
-			return { 'Kind': s.kind.Custom.kind };
-		}
-		return {};
 	}
 </script>
 

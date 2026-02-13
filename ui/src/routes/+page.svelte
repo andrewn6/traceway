@@ -34,8 +34,9 @@
 			let dur = 0;
 			let completed = 0;
 			for (const s of spans) {
-				if (s.metadata.model) {
-					m.set(s.metadata.model, (m.get(s.metadata.model) ?? 0) + 1);
+				const modelName = s.kind?.type === 'llm_call' ? s.kind.model : s.metadata.model;
+				if (modelName) {
+					m.set(modelName, (m.get(modelName) ?? 0) + 1);
 				}
 				if (spanStatus(s) === 'failed') errors++;
 				const d = spanDurationMs(s);
@@ -61,8 +62,9 @@
 				spanCount++;
 				addActivity(`Span created: ${event.span.name}`);
 				recentSpans = [event.span, ...recentSpans.slice(0, 19)];
-				if (event.span.metadata.model) {
-					models.set(event.span.metadata.model, (models.get(event.span.metadata.model) ?? 0) + 1);
+				const evtModel = event.span.kind?.type === 'llm_call' ? event.span.kind.model : event.span.metadata.model;
+				if (evtModel) {
+					models.set(evtModel, (models.get(evtModel) ?? 0) + 1);
 					models = new Map(models);
 				}
 			} else if (event.type === 'span_updated') {
@@ -194,7 +196,9 @@ await span.complete({`{ result: "done" }`});</pre>
 								{shortId(span.trace_id)}
 							</a>
 							<span class="text-text truncate flex-1">{span.name}</span>
-							{#if span.metadata.model}
+							{#if span.kind?.type === 'llm_call'}
+								<span class="text-text-muted">{span.kind.model}</span>
+							{:else if span.metadata.model}
 								<span class="text-text-muted">{span.metadata.model}</span>
 							{/if}
 						</div>

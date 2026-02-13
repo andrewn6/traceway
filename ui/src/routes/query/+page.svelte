@@ -354,7 +354,7 @@
 											<span class="text-text-muted">-</span>
 										{/if}
 									</td>
-									<td class="px-3 py-2 text-text-secondary font-mono text-xs">{span.metadata.model ?? '-'}</td>
+									<td class="px-3 py-2 text-text-secondary font-mono text-xs">{span.kind?.type === 'llm_call' ? span.kind.model : (span.metadata.model ?? '-')}</td>
 									<td class="px-3 py-2">
 										<StatusBadge status={spanStatus(span)} />
 									</td>

@@ -11,7 +11,15 @@
 		if (spans.some((s) => spanStatus(s) === 'running')) return 'running';
 		return 'completed';
 	});
-	const model = $derived(spans.find((s) => s.metadata.model)?.metadata.model ?? null);
+	const model = $derived.by(() => {
+		for (const s of spans) {
+			if (s.kind?.type === 'llm_call') return s.kind.model;
+		}
+		for (const s of spans) {
+			if (s.metadata.model) return s.metadata.model;
+		}
+		return null;
+	});
 	const started = $derived(
 		firstSpan ? new Date(spanStartedAt(firstSpan)).toLocaleString() : ''
 	);

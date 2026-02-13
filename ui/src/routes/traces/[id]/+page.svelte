@@ -14,7 +14,7 @@
 	// Add span form
 	let showAddSpan = $state(false);
 	let newSpanName = $state('');
-	let newSpanKindType: 'Custom' | 'LlmCall' | 'FsRead' | 'FsWrite' = $state('Custom');
+	let newSpanKindType: 'custom' | 'llm_call' | 'fs_read' | 'fs_write' = $state('custom');
 	let newSpanParent: string = $state('');
 	// LlmCall fields
 	let llmModel = $state('');
@@ -70,14 +70,14 @@
 
 	function buildKind(): SpanKind {
 		switch (newSpanKindType) {
-			case 'LlmCall':
-				return { LlmCall: { model: llmModel || 'unknown', provider: llmProvider || undefined } };
-			case 'FsRead':
-				return { FsRead: { path: fsPath || '/unknown', bytes_read: 0 } };
-			case 'FsWrite':
-				return { FsWrite: { path: fsPath || '/unknown', file_version: crypto.randomUUID().slice(0, 8), bytes_written: 0 } };
+			case 'llm_call':
+				return { type: 'llm_call', model: llmModel || 'unknown', provider: llmProvider || undefined };
+			case 'fs_read':
+				return { type: 'fs_read', path: fsPath || '/unknown', bytes_read: 0 };
+			case 'fs_write':
+				return { type: 'fs_write', path: fsPath || '/unknown', file_version: crypto.randomUUID().slice(0, 8), bytes_written: 0 };
 			default:
-				return { Custom: { kind: customKind || 'task', attributes: {} } };
+				return { type: 'custom', kind: customKind || 'task', attributes: {} };
 		}
 	}
 
@@ -114,8 +114,8 @@
 		loadTrace(traceId);
 	}
 
-	const filesReadCount = $derived(spans.filter((s) => s.kind && 'FsRead' in s.kind).length);
-	const filesWrittenCount = $derived(spans.filter((s) => s.kind && 'FsWrite' in s.kind).length);
+	const filesReadCount = $derived(spans.filter((s) => s.kind?.type === 'fs_read').length);
+	const filesWrittenCount = $derived(spans.filter((s) => s.kind?.type === 'fs_write').length);
 
 	const traceStatus = $derived.by(() => {
 		if (spans.some((s) => spanStatus(s) === 'failed')) return 'failed';
@@ -191,10 +191,10 @@
 						bind:value={newSpanKindType}
 						class="w-full bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text"
 					>
-						<option value="Custom">Custom</option>
-						<option value="LlmCall">LLM Call</option>
-						<option value="FsRead">File Read</option>
-						<option value="FsWrite">File Write</option>
+						<option value="custom">Custom</option>
+						<option value="llm_call">LLM Call</option>
+						<option value="fs_read">File Read</option>
+						<option value="fs_write">File Write</option>
 					</select>
 				</div>
 				<div>
@@ -212,7 +212,7 @@
 				</div>
 
 				<!-- Kind-specific fields -->
-				{#if newSpanKindType === 'LlmCall'}
+				{#if newSpanKindType === 'llm_call'}
 					<div>
 						<label for="llm-model" class="block text-xs text-text-muted uppercase mb-1">Model</label>
 						<input
@@ -223,7 +223,7 @@
 							class="w-full bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text placeholder:text-text-muted"
 						/>
 					</div>
-				{:else if newSpanKindType === 'FsRead' || newSpanKindType === 'FsWrite'}
+				{:else if newSpanKindType === 'fs_read' || newSpanKindType === 'fs_write'}
 					<div>
 						<label for="fs-path" class="block text-xs text-text-muted uppercase mb-1">Path</label>
 						<input

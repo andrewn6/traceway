@@ -5,10 +5,7 @@
 
 	function kindType(s: Span): string {
 		if (!s.kind) return 'unknown';
-		if ('FsRead' in s.kind) return 'fs_read';
-		if ('FsWrite' in s.kind) return 'fs_write';
-		if ('LlmCall' in s.kind) return 'llm_call';
-		return 'custom';
+		return s.kind.type;
 	}
 
 	const kind = $derived(kindType(span));

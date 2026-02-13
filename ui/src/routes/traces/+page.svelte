@@ -1,13 +1,12 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { getTraces, getTrace, subscribeEvents, createSpan, type Span, type SpanKind } from '$lib/api';
-	import { spanStatus, spanStartedAt } from '$lib/api';
+	import { getTraces, getSpans, createTrace, subscribeEvents, type Span, type Trace } from '$lib/api';
+	import { spanStatus } from '$lib/api';
 	import TraceRow from '$lib/components/TraceRow.svelte';
-	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { onMount } from 'svelte';
 
+	let traces: Trace[] = $state([]);
 	let traceSpans: Map<string, Span[]> = $state(new Map());
-	let traceIds: string[] = $state([]);
 	let filterModel = $state('');
 	let filterStatus = $state('');
 	let loading = $state(true);
@@ -19,18 +18,38 @@
 
 	async function loadTraces() {
 		try {
-			const { traces } = await getTraces();
+			// Two calls in parallel instead of N+1
+			const [traceResult, spanResult] = await Promise.all([
+				getTraces(),
+				getSpans()
+			]);
+			traces = traceResult.traces;
+
+			// Group spans by trace_id client-side
 			const spanMap = new Map<string, Span[]>();
-			for (const id of traces) {
-				const { spans } = await getTrace(id);
-				spanMap.set(id, spans);
+			for (const span of spanResult.spans) {
+				const existing = spanMap.get(span.trace_id) ?? [];
+				existing.push(span);
+				spanMap.set(span.trace_id, existing);
 			}
 			traceSpans = spanMap;
-			traceIds = traces;
 		} catch {
 			// API not available
 		}
 		loading = false;
+	}
+
+	async function handleNewTrace() {
+		creating = true;
+		try {
+			const trace = await createTrace(newName.trim() || undefined);
+			showNewTrace = false;
+			newName = '';
+			goto(`/traces/${trace.id}`);
+		} catch {
+			// error
+		}
+		creating = false;
 	}
 
 	onMount(() => {
@@ -42,8 +61,9 @@
 				const existing = traceSpans.get(tid) ?? [];
 				traceSpans.set(tid, [...existing, event.span]);
 				traceSpans = new Map(traceSpans);
-				if (!traceIds.includes(tid)) {
-					traceIds = [tid, ...traceIds];
+				if (!traces.some(t => t.id === tid)) {
+					// New trace — reload to get trace metadata
+					loadTraces();
 				}
 			} else if (event.type === 'span_updated') {
 				const tid = event.span.trace_id;
@@ -58,41 +78,25 @@
 			} else if (event.type === 'trace_deleted') {
 				traceSpans.delete(event.trace_id);
 				traceSpans = new Map(traceSpans);
-				traceIds = traceIds.filter((id) => id !== event.trace_id);
+				traces = traces.filter((t) => t.id !== event.trace_id);
 			} else if (event.type === 'cleared') {
 				traceSpans = new Map();
-				traceIds = [];
+				traces = [];
 			}
 		});
 
 		return unsub;
 	});
 
-	function uuidv4(): string {
-		return crypto.randomUUID();
-	}
-
-	async function handleNewTrace() {
-		if (!newName.trim()) return;
-		creating = true;
-		try {
-			const traceId = uuidv4();
-			const kind: SpanKind = { Custom: { kind: 'root', attributes: {} } };
-			await createSpan({ trace_id: traceId, name: newName.trim(), kind });
-			showNewTrace = false;
-			newName = '';
-			goto(`/traces/${traceId}`);
-		} catch {
-			// error
-		}
-		creating = false;
-	}
-
 	const filtered = $derived.by(() => {
-		return traceIds.filter((id) => {
-			const spans = traceSpans.get(id) ?? [];
+		return traces.filter((trace) => {
+			const spans = traceSpans.get(trace.id) ?? [];
 			if (filterModel) {
-				if (!spans.some((s) => s.metadata.model?.includes(filterModel))) return false;
+				const hasModel = spans.some((s) =>
+					(s.kind?.type === 'llm_call' && s.kind.model?.includes(filterModel))
+					|| s.metadata.model?.includes(filterModel)
+				);
+				if (!hasModel) return false;
 			}
 			if (filterStatus) {
 				const traceStatus = spans.some((s) => spanStatus(s) === 'failed')
@@ -143,7 +147,7 @@
 			onsubmit={(e) => { e.preventDefault(); handleNewTrace(); }}
 		>
 			<div class="flex-1">
-				<label for="new-trace-name" class="block text-xs text-text-muted uppercase mb-1">Trace name</label>
+				<label for="new-trace-name" class="block text-xs text-text-muted uppercase mb-1">Trace name (optional)</label>
 				<input
 					id="new-trace-name"
 					type="text"
@@ -154,7 +158,7 @@
 			</div>
 			<button
 				type="submit"
-				disabled={creating || !newName.trim()}
+				disabled={creating}
 				class="px-4 py-1.5 text-xs bg-accent text-bg font-semibold rounded hover:bg-accent/80 transition-colors disabled:opacity-50 shrink-0"
 			>
 				{creating ? 'Creating...' : 'Start Trace'}
@@ -164,7 +168,7 @@
 
 	<!-- Table header -->
 	<div class="grid grid-cols-[1fr_80px_100px_140px_100px_100px] gap-4 px-3 text-xs text-text-muted uppercase">
-		<span>Trace ID</span>
+		<span>Trace</span>
 		<span class="text-center">Spans</span>
 		<span class="text-center">Status</span>
 		<span>Started</span>
@@ -174,15 +178,15 @@
 
 	{#if loading}
 		<div class="text-text-muted text-sm text-center py-8">Loading...</div>
-	{:else if traceIds.length === 0}
-		<!-- Empty state: waiting for traces -->
+	{:else if traces.length === 0}
+		<!-- Empty state -->
 		<div class="bg-bg-secondary border border-border rounded-lg p-8 space-y-6">
 			<div class="text-center space-y-2">
 				<div class="flex items-center justify-center gap-2 text-text-secondary">
 					<span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
 					<span class="text-sm">Listening on localhost:3000</span>
 				</div>
-				<p class="text-text-muted text-xs">Start a trace above, or send traces from your code.</p>
+				<p class="text-text-muted text-xs">Click "+ New Trace" above to start, or send traces from your code.</p>
 			</div>
 
 			<div class="space-y-4 max-w-2xl mx-auto">
@@ -190,10 +194,15 @@
 					<summary class="text-xs text-text-secondary cursor-pointer hover:text-text transition-colors">
 						Quick test with curl
 					</summary>
-					<pre class="mt-2 bg-bg-tertiary rounded p-3 text-xs text-text-secondary font-mono overflow-x-auto whitespace-pre"># 1. Create a span (starts a trace automatically)
+					<pre class="mt-2 bg-bg-tertiary rounded p-3 text-xs text-text-secondary font-mono overflow-x-auto whitespace-pre"># 1. Create a trace
+curl -s http://localhost:3000/traces -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{`{"name":"my-trace"}`}'
+
+# 2. Create a span (use the trace_id from step 1)
 curl -s http://localhost:3000/spans -X POST \
   -H 'Content-Type: application/json' \
-  -d '{`{"trace_id":"00000000-0000-0000-0000-000000000001","name":"my-first-span","kind":{"Custom":{"kind":"root","attributes":{}}}}`}'</pre>
+  -d '{`{"trace_id":"<ID>","name":"my-span","kind":{"type":"custom","kind":"task","attributes":{}}}`}'</pre>
 				</details>
 
 				<details class="group">
@@ -229,8 +238,8 @@ await span.complete({`{ result: "done" }`});</pre>
 		<div class="text-text-muted text-sm text-center py-8">No traces match filters</div>
 	{:else}
 		<div class="space-y-0">
-			{#each filtered as traceId (traceId)}
-				<TraceRow {traceId} spans={traceSpans.get(traceId) ?? []} />
+			{#each filtered as trace (trace.id)}
+				<TraceRow traceId={trace.id} spans={traceSpans.get(trace.id) ?? []} />
 			{/each}
 		</div>
 	{/if}

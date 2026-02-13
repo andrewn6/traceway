@@ -145,10 +145,7 @@
 	// ── Span helpers ───────────────────────────────────────────────────
 	function kindType(s: Span): string {
 		if (!s.kind) return 'custom';
-		if ('FsRead' in s.kind) return 'fs_read';
-		if ('FsWrite' in s.kind) return 'fs_write';
-		if ('LlmCall' in s.kind) return 'llm_call';
-		return 'custom';
+		return s.kind.type;
 	}
 
 	function canvasColor(s: Span): string {
@@ -159,7 +156,7 @@
 	}
 
 	function modelBadge(s: Span): string | null {
-		if (s.kind && 'LlmCall' in s.kind) return s.kind.LlmCall.model;
+		if (s.kind?.type === 'llm_call') return s.kind.model;
 		if (s.metadata?.model) return s.metadata.model;
 		return null;
 	}
@@ -167,9 +164,9 @@
 	function tokenBadge(s: Span): string | null {
 		let inp: number | null = null;
 		let out: number | null = null;
-		if (s.kind && 'LlmCall' in s.kind) {
-			inp = s.kind.LlmCall.input_tokens ?? null;
-			out = s.kind.LlmCall.output_tokens ?? null;
+		if (s.kind?.type === 'llm_call') {
+			inp = s.kind.input_tokens ?? null;
+			out = s.kind.output_tokens ?? null;
 		} else if (s.metadata) {
 			inp = s.metadata.input_tokens;
 			out = s.metadata.output_tokens;
@@ -183,8 +180,8 @@
 
 	function bytesBadge(s: Span): string | null {
 		if (!s.kind) return null;
-		if ('FsRead' in s.kind) return formatBytes(s.kind.FsRead.bytes_read);
-		if ('FsWrite' in s.kind) return formatBytes(s.kind.FsWrite.bytes_written);
+		if (s.kind.type === 'fs_read') return formatBytes(s.kind.bytes_read);
+		if (s.kind.type === 'fs_write') return formatBytes(s.kind.bytes_written);
 		return null;
 	}
 

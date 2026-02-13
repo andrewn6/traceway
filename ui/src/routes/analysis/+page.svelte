@@ -20,7 +20,7 @@
 	onMount(async () => {
 		try {
 			const result = await getTraces();
-			traceIds = result.traces;
+			traceIds = result.traces.map(t => t.id);
 		} catch {
 			// daemon not running
 		}

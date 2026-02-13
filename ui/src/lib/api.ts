@@ -25,8 +25,17 @@ export interface Span {
 	metadata: SpanMetadata;
 }
 
+export interface Trace {
+	id: string;
+	name?: string;
+	tags: string[];
+	started_at: string;
+	ended_at?: string | null;
+	machine_id?: string;
+}
+
 export interface TraceList {
-	traces: string[];
+	traces: Trace[];
 	count: number;
 }
 
@@ -59,10 +68,10 @@ export interface SpanFilter {
 // ─── New Types (SpanKind, Files, Health, Analysis) ───────────────────
 
 export type SpanKind =
-	| { FsRead: { path: string; file_version?: string; bytes_read: number } }
-	| { FsWrite: { path: string; file_version: string; bytes_written: number } }
-	| { LlmCall: { model: string; provider?: string; input_tokens?: number; output_tokens?: number; input_preview?: string; output_preview?: string } }
-	| { Custom: { kind: string; attributes: Record<string, unknown> } };
+	| { type: 'fs_read'; path: string; file_version?: string; bytes_read: number }
+	| { type: 'fs_write'; path: string; file_version: string; bytes_written: number }
+	| { type: 'llm_call'; model: string; provider?: string; input_tokens?: number; output_tokens?: number; cost?: number; input_preview?: string; output_preview?: string }
+	| { type: 'custom'; kind: string; attributes: Record<string, unknown> };
 
 export interface TrackedFile {
 	path: string;
@@ -236,6 +245,8 @@ async function postMultipart<T>(path: string, form: FormData): Promise<T> {
 // ─── Trace / Span Endpoints ─────────────────────────────────────────
 
 export const getTraces = () => get<TraceList>('/traces');
+export const createTrace = (name?: string, tags?: string[]) =>
+	post<Trace>('/traces', { name, tags: tags ?? [] });
 export const getTrace = (id: string) => get<SpanList>(`/traces/${id}`);
 export const getSpans = (filter?: SpanFilter) => get<SpanList>(`/spans${qs((filter ?? {}) as Record<string, string | undefined>)}`);
 export const getSpan = (id: string) => get<Span>(`/spans/${id}`);
@@ -382,19 +393,18 @@ export function spanError(span: Span): string | null {
 
 export function spanKindLabel(span: Span): string | null {
 	if (!span.kind) return null;
-	if ('FsRead' in span.kind) return 'fs_read';
-	if ('FsWrite' in span.kind) return 'fs_write';
-	if ('LlmCall' in span.kind) return 'llm_call';
-	if ('Custom' in span.kind) return span.kind.Custom.kind;
-	return null;
+	if (span.kind.type === 'custom') return span.kind.kind;
+	return span.kind.type;
 }
 
 export function spanKindColor(span: Span): string {
 	if (!span.kind) return 'bg-text-muted';
-	if ('FsRead' in span.kind) return 'bg-accent';
-	if ('FsWrite' in span.kind) return 'bg-success';
-	if ('LlmCall' in span.kind) return 'bg-purple-400';
-	return 'bg-text-muted';
+	switch (span.kind.type) {
+		case 'fs_read': return 'bg-accent';
+		case 'fs_write': return 'bg-success';
+		case 'llm_call': return 'bg-purple-400';
+		default: return 'bg-text-muted';
+	}
 }
 
 export function shortId(id: string): string {
