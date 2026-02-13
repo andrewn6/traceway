@@ -46,6 +46,7 @@ export interface ExportData {
 
 export interface SpanFilter {
 	model?: string;
+	provider?: string;
 	status?: string;
 	since?: string;
 	until?: string;
@@ -239,6 +240,23 @@ export const getTrace = (id: string) => get<SpanList>(`/traces/${id}`);
 export const getSpans = (filter?: SpanFilter) => get<SpanList>(`/spans${qs((filter ?? {}) as Record<string, string | undefined>)}`);
 export const getSpan = (id: string) => get<Span>(`/spans/${id}`);
 export const getStats = () => get<Stats>('/stats');
+
+export interface CreateSpanRequest {
+	trace_id: string;
+	parent_id?: string;
+	name: string;
+	kind: SpanKind;
+	input?: unknown;
+}
+
+export const createSpan = (req: CreateSpanRequest) =>
+	post<{ id: string; trace_id: string }>('/spans', req);
+
+export const completeSpan = (spanId: string, output?: unknown) =>
+	post<unknown>(`/spans/${spanId}/complete`, output !== undefined ? { output } : {});
+
+export const failSpan = (spanId: string, error: string) =>
+	post<unknown>(`/spans/${spanId}/fail`, { error });
 
 // ─── File Endpoints ──────────────────────────────────────────────────
 

@@ -1,10 +1,10 @@
 <script lang="ts">
 	import type { Span, DatasetWithCount } from '$lib/api';
-	import { spanStatus, spanStartedAt, spanEndedAt, spanDurationMs, spanError, spanKindLabel, shortId, getDatasets, exportSpanToDataset } from '$lib/api';
+	import { spanStatus, spanStartedAt, spanEndedAt, spanDurationMs, spanError, spanKindLabel, shortId, getDatasets, exportSpanToDataset, completeSpan, failSpan } from '$lib/api';
 	import StatusBadge from './StatusBadge.svelte';
 	import SpanKindIcon from './SpanKindIcon.svelte';
 
-	let { span }: { span: Span | null } = $props();
+	let { span, onSpanAction }: { span: Span | null; onSpanAction?: () => void } = $props();
 
 	let activePayloadTab: 'input' | 'output' = $state('input');
 
@@ -40,6 +40,42 @@
 		}
 		exportLoading = false;
 		setTimeout(() => (exportSuccess = ''), 3000);
+	}
+
+	// Complete / Fail actions
+	let showCompleteForm = $state(false);
+	let completeOutput = $state('');
+	let showFailForm = $state(false);
+	let failError = $state('');
+	let actionLoading = $state(false);
+
+	async function handleComplete() {
+		if (!span) return;
+		actionLoading = true;
+		try {
+			const output = completeOutput.trim() ? JSON.parse(completeOutput) : undefined;
+			await completeSpan(span.id, output);
+			showCompleteForm = false;
+			completeOutput = '';
+			onSpanAction?.();
+		} catch {
+			// error
+		}
+		actionLoading = false;
+	}
+
+	async function handleFail() {
+		if (!span || !failError.trim()) return;
+		actionLoading = true;
+		try {
+			await failSpan(span.id, failError.trim());
+			showFailForm = false;
+			failError = '';
+			onSpanAction?.();
+		} catch {
+			// error
+		}
+		actionLoading = false;
 	}
 
 	function formatJson(value: unknown): string {
@@ -115,6 +151,56 @@
 			{/if}
 			<StatusBadge status={spanStatus(span)} />
 		</div>
+
+		<!-- Complete / Fail actions for running spans -->
+		{#if spanStatus(span) === 'running'}
+			<div class="flex items-center gap-2">
+				<button
+					class="px-3 py-1 text-xs bg-success/10 text-success border border-success/20 rounded hover:bg-success/20 transition-colors"
+					onclick={() => { showCompleteForm = !showCompleteForm; showFailForm = false; }}
+				>Complete</button>
+				<button
+					class="px-3 py-1 text-xs bg-danger/10 text-danger border border-danger/20 rounded hover:bg-danger/20 transition-colors"
+					onclick={() => { showFailForm = !showFailForm; showCompleteForm = false; }}
+				>Fail</button>
+			</div>
+
+			{#if showCompleteForm}
+				<form class="bg-bg-tertiary rounded p-3 space-y-2" onsubmit={(e) => { e.preventDefault(); handleComplete(); }}>
+					<label for="complete-output" class="block text-xs text-text-muted">Output (optional JSON)</label>
+					<textarea
+						id="complete-output"
+						bind:value={completeOutput}
+						rows={3}
+						placeholder={'{"result": "success"}'}
+						class="w-full bg-bg border border-border rounded px-2 py-1.5 text-xs text-text font-mono placeholder:text-text-muted"
+					></textarea>
+					<button
+						type="submit"
+						disabled={actionLoading}
+						class="px-3 py-1 text-xs bg-success text-bg font-semibold rounded hover:bg-success/80 transition-colors disabled:opacity-50"
+					>{actionLoading ? 'Completing...' : 'Complete Span'}</button>
+				</form>
+			{/if}
+
+			{#if showFailForm}
+				<form class="bg-bg-tertiary rounded p-3 space-y-2" onsubmit={(e) => { e.preventDefault(); handleFail(); }}>
+					<label for="fail-error" class="block text-xs text-text-muted">Error message</label>
+					<input
+						id="fail-error"
+						type="text"
+						bind:value={failError}
+						placeholder="What went wrong?"
+						class="w-full bg-bg border border-border rounded px-2 py-1.5 text-xs text-text placeholder:text-text-muted"
+					/>
+					<button
+						type="submit"
+						disabled={actionLoading || !failError.trim()}
+						class="px-3 py-1 text-xs bg-danger text-bg font-semibold rounded hover:bg-danger/80 transition-colors disabled:opacity-50"
+					>{actionLoading ? 'Failing...' : 'Fail Span'}</button>
+				</form>
+			{/if}
+		{/if}
 
 		<div class="grid grid-cols-2 gap-x-6 gap-y-2 text-text-secondary">
 			<div>

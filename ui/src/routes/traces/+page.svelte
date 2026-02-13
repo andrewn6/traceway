@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { getTraces, getTrace, subscribeEvents, type Span, type SpanEvent } from '$lib/api';
+	import { goto } from '$app/navigation';
+	import { getTraces, getTrace, subscribeEvents, createSpan, type Span, type SpanKind } from '$lib/api';
 	import { spanStatus, spanStartedAt } from '$lib/api';
 	import TraceRow from '$lib/components/TraceRow.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
@@ -10,6 +11,11 @@
 	let filterModel = $state('');
 	let filterStatus = $state('');
 	let loading = $state(true);
+
+	// New trace form
+	let showNewTrace = $state(false);
+	let newName = $state('');
+	let creating = $state(false);
 
 	async function loadTraces() {
 		try {
@@ -62,6 +68,26 @@
 		return unsub;
 	});
 
+	function uuidv4(): string {
+		return crypto.randomUUID();
+	}
+
+	async function handleNewTrace() {
+		if (!newName.trim()) return;
+		creating = true;
+		try {
+			const traceId = uuidv4();
+			const kind: SpanKind = { Custom: { kind: 'root', attributes: {} } };
+			await createSpan({ trace_id: traceId, name: newName.trim(), kind });
+			showNewTrace = false;
+			newName = '';
+			goto(`/traces/${traceId}`);
+		} catch {
+			// error
+		}
+		creating = false;
+	}
+
 	const filtered = $derived.by(() => {
 		return traceIds.filter((id) => {
 			const spans = traceSpans.get(id) ?? [];
@@ -85,6 +111,12 @@
 	<div class="flex items-center justify-between">
 		<h1 class="text-xl font-bold">Traces</h1>
 		<div class="flex items-center gap-2 text-sm">
+			<button
+				class="px-3 py-1.5 text-xs bg-accent/10 text-accent border border-accent/20 rounded hover:bg-accent/20 transition-colors"
+				onclick={() => (showNewTrace = !showNewTrace)}
+			>
+				{showNewTrace ? 'Cancel' : '+ New Trace'}
+			</button>
 			<input
 				type="text"
 				placeholder="Filter model..."
@@ -93,6 +125,7 @@
 			/>
 			<select
 				bind:value={filterStatus}
+				id="filter-status"
 				class="bg-bg-tertiary border border-border rounded px-2 py-1 text-xs text-text"
 			>
 				<option value="">All statuses</option>
@@ -102,6 +135,32 @@
 			</select>
 		</div>
 	</div>
+
+	<!-- New trace form -->
+	{#if showNewTrace}
+		<form
+			class="bg-bg-secondary border border-border rounded p-4 flex items-end gap-3"
+			onsubmit={(e) => { e.preventDefault(); handleNewTrace(); }}
+		>
+			<div class="flex-1">
+				<label for="new-trace-name" class="block text-xs text-text-muted uppercase mb-1">Trace name</label>
+				<input
+					id="new-trace-name"
+					type="text"
+					bind:value={newName}
+					placeholder="e.g. chat-completion, code-review, agent-run"
+					class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted"
+				/>
+			</div>
+			<button
+				type="submit"
+				disabled={creating || !newName.trim()}
+				class="px-4 py-1.5 text-xs bg-accent text-bg font-semibold rounded hover:bg-accent/80 transition-colors disabled:opacity-50 shrink-0"
+			>
+				{creating ? 'Creating...' : 'Start Trace'}
+			</button>
+		</form>
+	{/if}
 
 	<!-- Table header -->
 	<div class="grid grid-cols-[1fr_80px_100px_140px_100px_100px] gap-4 px-3 text-xs text-text-muted uppercase">
@@ -123,11 +182,10 @@
 					<span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
 					<span class="text-sm">Listening on localhost:3000</span>
 				</div>
-				<p class="text-text-muted text-xs">Send traces from your code to see them here in real time.</p>
+				<p class="text-text-muted text-xs">Start a trace above, or send traces from your code.</p>
 			</div>
 
 			<div class="space-y-4 max-w-2xl mx-auto">
-				<!-- curl -->
 				<details class="group">
 					<summary class="text-xs text-text-secondary cursor-pointer hover:text-text transition-colors">
 						Quick test with curl
@@ -135,10 +193,9 @@
 					<pre class="mt-2 bg-bg-tertiary rounded p-3 text-xs text-text-secondary font-mono overflow-x-auto whitespace-pre"># 1. Create a span (starts a trace automatically)
 curl -s http://localhost:3000/spans -X POST \
   -H 'Content-Type: application/json' \
-  -d '{`{"trace_id":"00000000-0000-0000-0000-000000000001","name":"my-first-span"}`}'</pre>
+  -d '{`{"trace_id":"00000000-0000-0000-0000-000000000001","name":"my-first-span","kind":{"Custom":{"kind":"root","attributes":{}}}}`}'</pre>
 				</details>
 
-				<!-- Python -->
 				<details class="group">
 					<summary class="text-xs text-text-secondary cursor-pointer hover:text-text transition-colors">
 						Python SDK
@@ -153,7 +210,6 @@ with ctx.span("my-task") as s:
     s.complete({`{"result": "done"}`})</pre>
 				</details>
 
-				<!-- TypeScript -->
 				<details class="group">
 					<summary class="text-xs text-text-secondary cursor-pointer hover:text-text transition-colors">
 						TypeScript SDK

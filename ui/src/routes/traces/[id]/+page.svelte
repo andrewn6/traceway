@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { getTrace, subscribeEvents, type Span } from '$lib/api';
+	import { getTrace, subscribeEvents, createSpan, type Span, type SpanKind } from '$lib/api';
 	import { shortId, spanStatus, spanDurationMs } from '$lib/api';
 	import TraceTimeline from '$lib/components/TraceTimeline.svelte';
 	import SpanDetail from '$lib/components/SpanDetail.svelte';
@@ -10,6 +10,22 @@
 	let spans: Span[] = $state([]);
 	let selectedSpan: Span | null = $state(null);
 	let loading = $state(true);
+
+	// Add span form
+	let showAddSpan = $state(false);
+	let newSpanName = $state('');
+	let newSpanKindType: 'Custom' | 'LlmCall' | 'FsRead' | 'FsWrite' = $state('Custom');
+	let newSpanParent: string = $state('');
+	// LlmCall fields
+	let llmModel = $state('');
+	let llmProvider = $state('');
+	// Fs fields
+	let fsPath = $state('');
+	// Custom fields
+	let customKind = $state('task');
+	// Shared
+	let newSpanInput = $state('');
+	let addingSpan = $state(false);
 
 	async function loadTrace(id: string) {
 		try {
@@ -52,6 +68,52 @@
 		selectedSpan = span;
 	}
 
+	function buildKind(): SpanKind {
+		switch (newSpanKindType) {
+			case 'LlmCall':
+				return { LlmCall: { model: llmModel || 'unknown', provider: llmProvider || undefined } };
+			case 'FsRead':
+				return { FsRead: { path: fsPath || '/unknown', bytes_read: 0 } };
+			case 'FsWrite':
+				return { FsWrite: { path: fsPath || '/unknown', file_version: crypto.randomUUID().slice(0, 8), bytes_written: 0 } };
+			default:
+				return { Custom: { kind: customKind || 'task', attributes: {} } };
+		}
+	}
+
+	async function handleAddSpan() {
+		if (!newSpanName.trim()) return;
+		addingSpan = true;
+		try {
+			const input = newSpanInput.trim() ? JSON.parse(newSpanInput) : undefined;
+			await createSpan({
+				trace_id: traceId,
+				parent_id: newSpanParent || undefined,
+				name: newSpanName.trim(),
+				kind: buildKind(),
+				input
+			});
+			newSpanName = '';
+			newSpanInput = '';
+			showAddSpan = false;
+		} catch {
+			// error
+		}
+		addingSpan = false;
+	}
+
+	function addChildSpan() {
+		if (selectedSpan) {
+			newSpanParent = selectedSpan.id;
+		}
+		showAddSpan = true;
+	}
+
+	function onSpanAction() {
+		// Reload to pick up completed/failed state
+		loadTrace(traceId);
+	}
+
 	const filesReadCount = $derived(spans.filter((s) => s.kind && 'FsRead' in s.kind).length);
 	const filesWrittenCount = $derived(spans.filter((s) => s.kind && 'FsWrite' in s.kind).length);
 
@@ -66,6 +128,9 @@
 		if (durations.length === 0) return null;
 		return Math.max(...durations);
 	});
+
+	// Parent options for dropdown
+	const parentOptions = $derived(spans.map((s) => ({ id: s.id, name: s.name })));
 </script>
 
 <div class="h-[calc(100vh-5rem)] flex flex-col">
@@ -91,8 +156,117 @@
 					{#if filesReadCount > 0}{filesReadCount} read{/if}{#if filesReadCount > 0 && filesWrittenCount > 0} &middot; {/if}{#if filesWrittenCount > 0}{filesWrittenCount} written{/if}
 				</span>
 			{/if}
+
+			<div class="flex-1"></div>
+			<button
+				class="px-3 py-1 text-xs bg-accent/10 text-accent border border-accent/20 rounded hover:bg-accent/20 transition-colors"
+				onclick={() => { showAddSpan = !showAddSpan; if (!showAddSpan) newSpanParent = ''; }}
+			>
+				{showAddSpan ? 'Cancel' : '+ Add Span'}
+			</button>
 		{/if}
 	</div>
+
+	<!-- Add span form -->
+	{#if showAddSpan}
+		<form
+			class="mx-4 mb-2 bg-bg-secondary border border-border rounded p-4 space-y-3 shrink-0"
+			onsubmit={(e) => { e.preventDefault(); handleAddSpan(); }}
+		>
+			<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+				<div>
+					<label for="span-name" class="block text-xs text-text-muted uppercase mb-1">Name</label>
+					<input
+						id="span-name"
+						type="text"
+						bind:value={newSpanName}
+						placeholder="e.g. llm-call, read-file"
+						class="w-full bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text placeholder:text-text-muted"
+					/>
+				</div>
+				<div>
+					<label for="span-kind" class="block text-xs text-text-muted uppercase mb-1">Kind</label>
+					<select
+						id="span-kind"
+						bind:value={newSpanKindType}
+						class="w-full bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text"
+					>
+						<option value="Custom">Custom</option>
+						<option value="LlmCall">LLM Call</option>
+						<option value="FsRead">File Read</option>
+						<option value="FsWrite">File Write</option>
+					</select>
+				</div>
+				<div>
+					<label for="span-parent" class="block text-xs text-text-muted uppercase mb-1">Parent (optional)</label>
+					<select
+						id="span-parent"
+						bind:value={newSpanParent}
+						class="w-full bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text"
+					>
+						<option value="">None (root)</option>
+						{#each parentOptions as opt}
+							<option value={opt.id}>{opt.name} ({shortId(opt.id)})</option>
+						{/each}
+					</select>
+				</div>
+
+				<!-- Kind-specific fields -->
+				{#if newSpanKindType === 'LlmCall'}
+					<div>
+						<label for="llm-model" class="block text-xs text-text-muted uppercase mb-1">Model</label>
+						<input
+							id="llm-model"
+							type="text"
+							bind:value={llmModel}
+							placeholder="gpt-4, claude-3, etc."
+							class="w-full bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text placeholder:text-text-muted"
+						/>
+					</div>
+				{:else if newSpanKindType === 'FsRead' || newSpanKindType === 'FsWrite'}
+					<div>
+						<label for="fs-path" class="block text-xs text-text-muted uppercase mb-1">Path</label>
+						<input
+							id="fs-path"
+							type="text"
+							bind:value={fsPath}
+							placeholder="/path/to/file"
+							class="w-full bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text placeholder:text-text-muted"
+						/>
+					</div>
+				{:else}
+					<div>
+						<label for="custom-kind" class="block text-xs text-text-muted uppercase mb-1">Custom Kind</label>
+						<input
+							id="custom-kind"
+							type="text"
+							bind:value={customKind}
+							placeholder="task, step, etc."
+							class="w-full bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text placeholder:text-text-muted"
+						/>
+					</div>
+				{/if}
+			</div>
+
+			<details class="text-xs">
+				<summary class="text-text-muted cursor-pointer hover:text-text transition-colors">Input payload (optional JSON)</summary>
+				<textarea
+					bind:value={newSpanInput}
+					rows={3}
+					placeholder={'{"prompt": "..."}'}
+					class="w-full mt-2 bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text font-mono placeholder:text-text-muted"
+				></textarea>
+			</details>
+
+			<button
+				type="submit"
+				disabled={addingSpan || !newSpanName.trim()}
+				class="px-4 py-1.5 text-xs bg-accent text-bg font-semibold rounded hover:bg-accent/80 transition-colors disabled:opacity-50"
+			>
+				{addingSpan ? 'Creating...' : 'Create Span'}
+			</button>
+		</form>
+	{/if}
 
 	{#if loading}
 		<div class="text-text-muted text-sm text-center py-8 flex-1">Loading...</div>
@@ -109,10 +283,22 @@
 		</div>
 
 		<!-- Span detail panel -->
-		{#if selectedSpan}
-			<div class="shrink-0 max-h-64 overflow-y-auto mx-4 mt-2 mb-2">
-				<SpanDetail span={selectedSpan} />
-			</div>
-		{/if}
+		<div class="shrink-0 max-h-72 overflow-y-auto mx-4 mt-2 mb-2">
+			{#if selectedSpan}
+				<div class="space-y-2">
+					{#if spanStatus(selectedSpan) === 'running'}
+						<div class="flex items-center gap-2">
+							<button
+								class="px-3 py-1 text-xs bg-accent/10 text-accent border border-accent/20 rounded hover:bg-accent/20 transition-colors"
+								onclick={addChildSpan}
+							>+ Add Child Span</button>
+						</div>
+					{/if}
+					<SpanDetail span={selectedSpan} {onSpanAction} />
+				</div>
+			{:else}
+				<SpanDetail span={null} />
+			{/if}
+		</div>
 	{/if}
 </div>

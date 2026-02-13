@@ -38,6 +38,7 @@
 
 	const navItems = [
 		{ href: '/traces', label: 'Traces', icon: 'trace' },
+		{ href: '/query', label: 'Query', icon: 'query' },
 		{ href: '/files', label: 'Files', icon: 'file' },
 		{ href: '/datasets', label: 'Datasets', icon: 'dataset' },
 		{ href: '/analysis', label: 'Analysis', icon: 'analysis' },
@@ -73,6 +74,10 @@
 					{#if item.icon === 'trace'}
 						<svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
 							<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 0 1 0 3.75H5.625a1.875 1.875 0 0 1 0-3.75Z" />
+						</svg>
+					{:else if item.icon === 'query'}
+						<svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+							<path stroke-linecap="round" stroke-linejoin="round" d="m6.75 7.5 3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z" />
 						</svg>
 					{:else if item.icon === 'file'}
 						<svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
