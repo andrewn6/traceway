@@ -130,41 +130,94 @@
 		</div>
 	{/if}
 
-	<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-		<!-- Recent spans -->
-		<div class="bg-bg-secondary border border-border rounded p-4">
-			<div class="text-text-muted text-xs uppercase mb-3">Recent Spans</div>
-			<div class="space-y-1 max-h-80 overflow-y-auto">
-				{#each recentSpans as span (span.id)}
-					<div class="flex items-center gap-2 text-xs py-1">
-						<StatusBadge status={spanStatus(span)} />
-						<a href="/traces/{span.trace_id}" class="text-accent hover:underline font-mono">
-							{shortId(span.trace_id)}
-						</a>
-						<span class="text-text truncate flex-1">{span.name}</span>
-						{#if span.metadata.model}
-							<span class="text-text-muted">{span.metadata.model}</span>
-						{/if}
-					</div>
-				{:else}
-					<div class="text-text-muted text-sm">No spans yet</div>
-				{/each}
+	{#if traceCount === 0 && spanCount === 0}
+		<!-- Getting started -->
+		<div class="bg-bg-secondary border border-border rounded-lg p-8 space-y-6">
+			<div class="text-center space-y-2">
+				<div class="flex items-center justify-center gap-2 text-text-secondary">
+					<span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
+					<span class="text-sm">Listening on localhost:3000</span>
+				</div>
+				<p class="text-text-muted text-xs">Instrument your LLM application to start collecting traces.</p>
 			</div>
-		</div>
 
-		<!-- Activity feed -->
-		<div class="bg-bg-secondary border border-border rounded p-4">
-			<div class="text-text-muted text-xs uppercase mb-3">Activity Feed</div>
-			<div class="space-y-1 max-h-80 overflow-y-auto">
-				{#each activity as item}
-					<div class="text-xs py-0.5">
-						<span class="text-text-muted font-mono">{item.time}</span>
-						<span class="text-text ml-2">{item.text}</span>
-					</div>
-				{:else}
-					<div class="text-text-muted text-sm">Waiting for events...</div>
-				{/each}
+			<div class="space-y-4 max-w-2xl mx-auto">
+				<details class="group" open>
+					<summary class="text-xs text-text-secondary cursor-pointer hover:text-text transition-colors font-semibold">
+						Quick test with curl
+					</summary>
+					<pre class="mt-2 bg-bg-tertiary rounded p-3 text-xs text-text-secondary font-mono overflow-x-auto whitespace-pre"># Create a span (starts a trace automatically)
+curl -s http://localhost:3000/spans -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{`{"trace_id":"00000000-0000-0000-0000-000000000001","name":"hello-world"}`}'</pre>
+				</details>
+
+				<details class="group">
+					<summary class="text-xs text-text-secondary cursor-pointer hover:text-text transition-colors font-semibold">
+						Python SDK
+					</summary>
+					<pre class="mt-2 bg-bg-tertiary rounded p-3 text-xs text-text-secondary font-mono overflow-x-auto whitespace-pre">pip install llmtrace
+
+from llmtrace import TraceContext
+
+ctx = TraceContext()
+with ctx.span("my-task") as s:
+    # ... your code ...
+    s.complete({`{"result": "done"}`})</pre>
+				</details>
+
+				<details class="group">
+					<summary class="text-xs text-text-secondary cursor-pointer hover:text-text transition-colors font-semibold">
+						TypeScript SDK
+					</summary>
+					<pre class="mt-2 bg-bg-tertiary rounded p-3 text-xs text-text-secondary font-mono overflow-x-auto whitespace-pre">npm install llmtrace
+
+import {`{ TraceContext }`} from "llmtrace";
+
+const ctx = new TraceContext();
+const span = ctx.span("my-task");
+// ... your code ...
+await span.complete({`{ result: "done" }`});</pre>
+				</details>
 			</div>
 		</div>
-	</div>
+	{:else}
+		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+			<!-- Recent spans -->
+			<div class="bg-bg-secondary border border-border rounded p-4">
+				<div class="text-text-muted text-xs uppercase mb-3">Recent Spans</div>
+				<div class="space-y-1 max-h-80 overflow-y-auto">
+					{#each recentSpans as span (span.id)}
+						<div class="flex items-center gap-2 text-xs py-1">
+							<StatusBadge status={spanStatus(span)} />
+							<a href="/traces/{span.trace_id}" class="text-accent hover:underline font-mono">
+								{shortId(span.trace_id)}
+							</a>
+							<span class="text-text truncate flex-1">{span.name}</span>
+							{#if span.metadata.model}
+								<span class="text-text-muted">{span.metadata.model}</span>
+							{/if}
+						</div>
+					{:else}
+						<div class="text-text-muted text-sm">No spans yet</div>
+					{/each}
+				</div>
+			</div>
+
+			<!-- Activity feed -->
+			<div class="bg-bg-secondary border border-border rounded p-4">
+				<div class="text-text-muted text-xs uppercase mb-3">Activity Feed</div>
+				<div class="space-y-1 max-h-80 overflow-y-auto">
+					{#each activity as item}
+						<div class="text-xs py-0.5">
+							<span class="text-text-muted font-mono">{item.time}</span>
+							<span class="text-text ml-2">{item.text}</span>
+						</div>
+					{:else}
+						<div class="text-text-muted text-sm">Waiting for events...</div>
+					{/each}
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>

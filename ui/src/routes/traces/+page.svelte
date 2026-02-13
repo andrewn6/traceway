@@ -115,8 +115,62 @@
 
 	{#if loading}
 		<div class="text-text-muted text-sm text-center py-8">Loading...</div>
+	{:else if traceIds.length === 0}
+		<!-- Empty state: waiting for traces -->
+		<div class="bg-bg-secondary border border-border rounded-lg p-8 space-y-6">
+			<div class="text-center space-y-2">
+				<div class="flex items-center justify-center gap-2 text-text-secondary">
+					<span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
+					<span class="text-sm">Listening on localhost:3000</span>
+				</div>
+				<p class="text-text-muted text-xs">Send traces from your code to see them here in real time.</p>
+			</div>
+
+			<div class="space-y-4 max-w-2xl mx-auto">
+				<!-- curl -->
+				<details class="group">
+					<summary class="text-xs text-text-secondary cursor-pointer hover:text-text transition-colors">
+						Quick test with curl
+					</summary>
+					<pre class="mt-2 bg-bg-tertiary rounded p-3 text-xs text-text-secondary font-mono overflow-x-auto whitespace-pre"># 1. Create a span (starts a trace automatically)
+curl -s http://localhost:3000/spans -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{`{"trace_id":"00000000-0000-0000-0000-000000000001","name":"my-first-span"}`}'</pre>
+				</details>
+
+				<!-- Python -->
+				<details class="group">
+					<summary class="text-xs text-text-secondary cursor-pointer hover:text-text transition-colors">
+						Python SDK
+					</summary>
+					<pre class="mt-2 bg-bg-tertiary rounded p-3 text-xs text-text-secondary font-mono overflow-x-auto whitespace-pre">pip install llmtrace
+
+from llmtrace import TraceContext
+
+ctx = TraceContext()
+with ctx.span("my-task") as s:
+    # ... your code ...
+    s.complete({`{"result": "done"}`})</pre>
+				</details>
+
+				<!-- TypeScript -->
+				<details class="group">
+					<summary class="text-xs text-text-secondary cursor-pointer hover:text-text transition-colors">
+						TypeScript SDK
+					</summary>
+					<pre class="mt-2 bg-bg-tertiary rounded p-3 text-xs text-text-secondary font-mono overflow-x-auto whitespace-pre">npm install llmtrace
+
+import {`{ TraceContext }`} from "llmtrace";
+
+const ctx = new TraceContext();
+const span = ctx.span("my-task");
+// ... your code ...
+await span.complete({`{ result: "done" }`});</pre>
+				</details>
+			</div>
+		</div>
 	{:else if filtered.length === 0}
-		<div class="text-text-muted text-sm text-center py-8">No traces found</div>
+		<div class="text-text-muted text-sm text-center py-8">No traces match filters</div>
 	{:else}
 		<div class="space-y-0">
 			{#each filtered as traceId (traceId)}
