@@ -13,8 +13,8 @@ from .types import (
     SpanKind,
     SpanList,
     SpanMetadata,
-    SpanStatus,
     Stats,
+    Trace,
     TrackedFile,
     TraceList,
 )
@@ -36,8 +36,8 @@ __all__ = [
     "SpanKind",
     "SpanList",
     "SpanMetadata",
-    "SpanStatus",
     "Stats",
+    "Trace",
     "TrackedFile",
     "TraceList",
 ]

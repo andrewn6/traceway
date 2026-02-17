@@ -4,6 +4,8 @@ export type {
   Span,
   SpanKind,
   SpanMetadata,
+  SpanStatus,
+  Trace,
   TraceList,
   SpanList,
   Stats,
@@ -17,3 +19,4 @@ export type {
   FileTraces,
   HealthStatus,
 } from './types.js';
+export { statusKind, statusError } from './types.js';

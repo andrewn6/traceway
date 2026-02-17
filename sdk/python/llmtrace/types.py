@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Union
 
 
 # ─── SpanKind ─────────────────────────────────────────────────────────
@@ -33,47 +33,47 @@ class CustomKind:
     attributes: dict[str, Any] = field(default_factory=dict)
 
 
-SpanKind = FsReadKind | FsWriteKind | LlmCallKind | CustomKind
+SpanKind = Union[FsReadKind, FsWriteKind, LlmCallKind, CustomKind]
 
 
 def span_kind_from_dict(d: dict[str, Any]) -> SpanKind | None:
     if d is None:
         return None
-    if "FsRead" in d:
-        v = d["FsRead"]
-        return FsReadKind(path=v["path"], file_version=v.get("file_version"), bytes_read=v.get("bytes_read", 0))
-    if "FsWrite" in d:
-        v = d["FsWrite"]
-        return FsWriteKind(path=v["path"], file_version=v.get("file_version", ""), bytes_written=v.get("bytes_written", 0))
-    if "LlmCall" in d:
-        v = d["LlmCall"]
+    t = d.get("type")
+    if t == "fs_read":
+        return FsReadKind(path=d["path"], file_version=d.get("file_version"), bytes_read=d.get("bytes_read", 0))
+    if t == "fs_write":
+        return FsWriteKind(path=d["path"], file_version=d.get("file_version", ""), bytes_written=d.get("bytes_written", 0))
+    if t == "llm_call":
         return LlmCallKind(
-            model=v["model"], provider=v.get("provider"),
-            input_tokens=v.get("input_tokens"), output_tokens=v.get("output_tokens"),
-            input_preview=v.get("input_preview"), output_preview=v.get("output_preview"),
+            model=d["model"], provider=d.get("provider"),
+            input_tokens=d.get("input_tokens"), output_tokens=d.get("output_tokens"),
+            input_preview=d.get("input_preview"), output_preview=d.get("output_preview"),
         )
-    if "Custom" in d:
-        v = d["Custom"]
-        return CustomKind(kind=v["kind"], attributes=v.get("attributes", {}))
+    if t == "custom":
+        return CustomKind(kind=d["kind"], attributes=d.get("attributes", {}))
     return None
 
 
 def span_kind_to_dict(kind: SpanKind) -> dict[str, Any]:
     if isinstance(kind, FsReadKind):
-        return {"FsRead": {"path": kind.path, "file_version": kind.file_version, "bytes_read": kind.bytes_read}}
+        d: dict[str, Any] = {"type": "fs_read", "path": kind.path, "bytes_read": kind.bytes_read}
+        if kind.file_version is not None:
+            d["file_version"] = kind.file_version
+        return d
     if isinstance(kind, FsWriteKind):
-        return {"FsWrite": {"path": kind.path, "file_version": kind.file_version, "bytes_written": kind.bytes_written}}
+        return {"type": "fs_write", "path": kind.path, "file_version": kind.file_version, "bytes_written": kind.bytes_written}
     if isinstance(kind, LlmCallKind):
-        d: dict[str, Any] = {"model": kind.model}
+        d = {"type": "llm_call", "model": kind.model}
         if kind.provider is not None:
             d["provider"] = kind.provider
         if kind.input_tokens is not None:
             d["input_tokens"] = kind.input_tokens
         if kind.output_tokens is not None:
             d["output_tokens"] = kind.output_tokens
-        return {"LlmCall": d}
+        return d
     if isinstance(kind, CustomKind):
-        return {"Custom": {"kind": kind.kind, "attributes": kind.attributes}}
+        return {"type": "custom", "kind": kind.kind, "attributes": kind.attributes}
     return {}
 
 
@@ -96,31 +96,25 @@ class SpanMetadata:
 
 # ─── SpanStatus ───────────────────────────────────────────────────────
 
-@dataclass
-class SpanStatus:
-    kind: Literal["running", "completed", "failed"]
-    started_at: str
-    ended_at: str | None = None
-    error: str | None = None
+def parse_status(raw: Any) -> Literal["running", "completed", "failed"]:
+    """Parse SpanStatus from the backend.
 
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "SpanStatus":
-        if "Running" in d:
-            return cls(kind="running", started_at=d["Running"]["started_at"])
-        elif "Completed" in d:
-            return cls(
-                kind="completed",
-                started_at=d["Completed"]["started_at"],
-                ended_at=d["Completed"]["ended_at"],
-            )
-        elif "Failed" in d:
-            return cls(
-                kind="failed",
-                started_at=d["Failed"]["started_at"],
-                ended_at=d["Failed"]["ended_at"],
-                error=d["Failed"]["error"],
-            )
-        raise ValueError(f"Unknown status: {d}")
+    Backend serializes as: "running" | "completed" | {"failed": {"error": "..."}}.
+    """
+    if isinstance(raw, str):
+        if raw in ("running", "completed", "failed"):
+            return raw  # type: ignore
+        raise ValueError(f"Unknown status string: {raw}")
+    if isinstance(raw, dict) and "failed" in raw:
+        return "failed"
+    raise ValueError(f"Unknown status: {raw}")
+
+
+def parse_error(raw: Any) -> str | None:
+    """Extract error string from a failed SpanStatus."""
+    if isinstance(raw, dict) and "failed" in raw:
+        return raw["failed"].get("error")
+    return None
 
 
 # ─── Span ─────────────────────────────────────────────────────────────
@@ -131,13 +125,14 @@ class Span:
     trace_id: str
     parent_id: str | None
     name: str
-    status: SpanStatus
+    status: Literal["running", "completed", "failed"]
     metadata: SpanMetadata
     kind: SpanKind | None = None
     input: Any = None
     output: Any = None
     started_at: str | None = None
     ended_at: str | None = None
+    error: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Span":
@@ -146,26 +141,49 @@ class Span:
             trace_id=d["trace_id"],
             parent_id=d.get("parent_id"),
             name=d["name"],
-            status=SpanStatus.from_dict(d["status"]),
+            status=parse_status(d["status"]),
             metadata=SpanMetadata.from_dict(d.get("metadata", {})),
             kind=span_kind_from_dict(d["kind"]) if d.get("kind") else None,
             input=d.get("input"),
             output=d.get("output"),
             started_at=d.get("started_at"),
             ended_at=d.get("ended_at"),
+            error=parse_error(d.get("status")),
         )
 
 
 # ─── Collections ──────────────────────────────────────────────────────
 
 @dataclass
+class Trace:
+    id: str
+    name: str | None = None
+    tags: list[str] = field(default_factory=list)
+    started_at: str | None = None
+    ended_at: str | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Trace":
+        return cls(
+            id=d["id"],
+            name=d.get("name"),
+            tags=d.get("tags", []),
+            started_at=d.get("started_at"),
+            ended_at=d.get("ended_at"),
+        )
+
+
+@dataclass
 class TraceList:
-    traces: list[str]
+    traces: list[Trace]
     count: int
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "TraceList":
-        return cls(traces=d["traces"], count=d["count"])
+        return cls(
+            traces=[Trace.from_dict(t) for t in d["traces"]],
+            count=d["count"],
+        )
 
 
 @dataclass

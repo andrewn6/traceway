@@ -19,6 +19,7 @@ from .types import (
     SpanList,
     SpanMetadata,
     Stats,
+    Trace,
     TrackedFile,
     TraceList,
     span_kind_to_dict,
@@ -132,6 +133,17 @@ class LLMTrace:
     def _qs(self, params: dict[str, str | None]) -> dict[str, str]:
         return {k: v for k, v in params.items() if v is not None}
 
+    # ─── Trace operations ─────────────────────────────────────────────
+
+    def create_trace(self, name: str | None = None, tags: list[str] | None = None) -> Trace:
+        data: dict[str, Any] = {}
+        if name is not None:
+            data["name"] = name
+        if tags is not None:
+            data["tags"] = tags
+        resp = self._request("POST", "/traces", json=data)
+        return Trace.from_dict(resp)
+
     # ─── Span operations ──────────────────────────────────────────────
 
     def start_span(
@@ -231,6 +243,7 @@ class LLMTrace:
     def trace(self, name: str = "") -> Generator[TraceContext, None, None]:
         """Create a trace context. All spans created within will share the same trace ID.
 
+        Calls POST /traces to register the trace on the server.
         Sets LLMTRACE_TRACE_ID env var for subprocess propagation.
 
         Example:
@@ -240,7 +253,8 @@ class LLMTrace:
                     result = openai.chat(...)
                     call.set_output(result)
         """
-        trace_id = str(uuid.uuid4())
+        trace = self.create_trace(name=name or None)
+        trace_id = trace.id
         old_env = os.environ.get("LLMTRACE_TRACE_ID")
         os.environ["LLMTRACE_TRACE_ID"] = trace_id
         try:

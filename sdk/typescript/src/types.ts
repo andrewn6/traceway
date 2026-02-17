@@ -1,19 +1,19 @@
-// ─── SpanKind ────────────────────────────────────────────────────────
+// ─── SpanKind (internally tagged: {"type": "llm_call", ...}) ─────────
 
 export type SpanKind =
-  | { FsRead: { path: string; file_version?: string; bytes_read: number } }
-  | { FsWrite: { path: string; file_version: string; bytes_written: number } }
+  | { type: 'fs_read'; path: string; file_version?: string; bytes_read: number }
+  | { type: 'fs_write'; path: string; file_version: string; bytes_written: number }
   | {
-      LlmCall: {
-        model: string;
-        provider?: string;
-        input_tokens?: number;
-        output_tokens?: number;
-        input_preview?: string;
-        output_preview?: string;
-      };
+      type: 'llm_call';
+      model: string;
+      provider?: string;
+      input_tokens?: number;
+      output_tokens?: number;
+      cost?: number;
+      input_preview?: string;
+      output_preview?: string;
     }
-  | { Custom: { kind: string; attributes: Record<string, unknown> } };
+  | { type: 'custom'; kind: string; attributes: Record<string, unknown> };
 
 // ─── Legacy SpanMetadata (backward compat) ───────────────────────────
 
@@ -21,6 +21,24 @@ export interface SpanMetadata {
   model: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
+}
+
+// ─── SpanStatus ─────────────────────────────────────────────────────
+// Backend serializes as: "running" | "completed" | {"failed":{"error":"..."}}
+
+export type SpanStatus =
+  | 'running'
+  | 'completed'
+  | { failed: { error: string } };
+
+export function statusKind(s: SpanStatus): 'running' | 'completed' | 'failed' {
+  if (typeof s === 'string') return s;
+  return 'failed';
+}
+
+export function statusError(s: SpanStatus): string | null {
+  if (typeof s === 'object' && 'failed' in s) return s.failed.error;
+  return null;
 }
 
 // ─── Span ────────────────────────────────────────────────────────────
@@ -33,19 +51,24 @@ export interface Span {
   kind?: SpanKind;
   input?: unknown;
   output?: unknown;
-  started_at?: string;
+  started_at: string;
   ended_at?: string | null;
-  status:
-    | { Running: { started_at: string } }
-    | { Completed: { started_at: string; ended_at: string } }
-    | { Failed: { started_at: string; ended_at: string; error: string } };
+  status: SpanStatus;
   metadata: SpanMetadata;
 }
 
 // ─── Collections ─────────────────────────────────────────────────────
 
+export interface Trace {
+  id: string;
+  name?: string;
+  tags?: string[];
+  started_at?: string;
+  ended_at?: string | null;
+}
+
 export interface TraceList {
-  traces: string[];
+  traces: Trace[];
   count: number;
 }
 
@@ -74,6 +97,7 @@ export interface SpanFilter {
   kind?: string;
   path?: string;
   trace_id?: string;
+  provider?: string;
 }
 
 // ─── File Types ──────────────────────────────────────────────────────
@@ -104,15 +128,7 @@ export interface FileTraces {
 
 export interface HealthStatus {
   status: string;
-  uptime_seconds?: number;
-  version?: string;
-  components?: Record<string, string>;
-  storage?: {
-    span_count: number;
-    trace_count: number;
-    file_count: number;
-    db_size_bytes: number;
-  };
+  uptime_secs?: number;
 }
 
 // ─── Span creation ───────────────────────────────────────────────────
@@ -139,8 +155,10 @@ export interface CreatedSpan {
 
 export type SpanEvent =
   | { type: 'span_created'; span: Span }
-  | { type: 'span_updated'; span: Span }
+  | { type: 'span_completed'; span: Span }
+  | { type: 'span_failed'; span: Span }
   | { type: 'span_deleted'; span_id: string }
+  | { type: 'trace_created'; trace: Trace }
   | { type: 'trace_deleted'; trace_id: string }
-  | { type: 'file_version_created'; file: TrackedFile; version: FileVersion }
+  | { type: 'file_version_created'; file: FileVersion }
   | { type: 'cleared' };

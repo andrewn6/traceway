@@ -1,5 +1,6 @@
 import type {
   Span,
+  Trace,
   TraceList,
   SpanList,
   Stats,
@@ -55,6 +56,15 @@ export class LLMTrace {
     );
     if (entries.length === 0) return '';
     return '?' + new URLSearchParams(entries).toString();
+  }
+
+  // ─── Trace operations ──────────────────────────────────────────────
+
+  async createTrace(name?: string, tags?: string[]): Promise<Trace> {
+    const body: Record<string, unknown> = {};
+    if (name !== undefined) body.name = name;
+    if (tags !== undefined) body.tags = tags;
+    return this.request<Trace>('POST', '/traces', body);
   }
 
   // ─── Span operations ───────────────────────────────────────────────
@@ -159,8 +169,8 @@ export class LLMTrace {
     name: string,
     fn: (ctx: TraceContext) => Promise<T>,
   ): Promise<T> {
-    const traceId = crypto.randomUUID();
-    const ctx = new TraceContext(this, traceId, name);
+    const trace = await this.createTrace(name || undefined);
+    const ctx = new TraceContext(this, trace.id, name);
     return fn(ctx);
   }
 }
@@ -202,13 +212,10 @@ export class TraceContext {
   ): Promise<T> {
     return this.span(name, fn, {
       kind: {
-        LlmCall: {
-          model: opts.model,
-          provider: opts.provider,
-          input_tokens: undefined,
-          output_tokens: undefined,
-        },
-      },
+        type: 'llm_call',
+        model: opts.model,
+        provider: opts.provider,
+      } as SpanKind,
       input: opts.input,
     });
   }
