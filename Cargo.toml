@@ -5,8 +5,11 @@ members = [
     "crates/trace",
     "crates/memfs",
     "crates/storage",
+    "crates/storage-sqlite",
+    "crates/storage-turbopuffer",
     "crates/api",
     "crates/proxy",
+    "crates/auth",
 ]
 
 [workspace.package]
@@ -41,3 +44,9 @@ rust-embed = "8"
 mime_guess = "2"
 csv = "1"
 axum-extra = { version = "0.9", features = ["multipart"] }
+bcrypt = "0.16"
+jsonwebtoken = "9"
+rand = "0.8"
+base64 = "0.22"
+utoipa = { version = "5", features = ["chrono", "uuid"] }
+utoipa-axum = "0.2"
