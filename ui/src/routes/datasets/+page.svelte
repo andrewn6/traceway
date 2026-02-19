@@ -33,7 +33,7 @@
 
 		const unsub = subscribeEvents((event) => {
 			if (event.type === 'dataset_created') {
-				datasets = [event.dataset, ...datasets];
+				datasets = [{ ...event.dataset, datapoint_count: 0 }, ...datasets];
 			} else if (event.type === 'dataset_deleted') {
 				datasets = datasets.filter((d) => d.id !== event.dataset_id);
 			} else if (event.type === 'cleared') {
@@ -49,7 +49,7 @@
 		creating = true;
 		try {
 			const ds = await createDataset(newName.trim(), newDescription.trim() || undefined);
-			datasets = [ds, ...datasets];
+			datasets = [{ ...ds, datapoint_count: 0 }, ...datasets];
 			newName = '';
 			newDescription = '';
 			showForm = false;

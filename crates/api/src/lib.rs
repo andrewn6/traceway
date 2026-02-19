@@ -1090,7 +1090,7 @@ pub fn router_with_start_time(store: SharedStore, start_time: Instant) -> Router
         .allow_methods(Any)
         .allow_headers(Any);
 
-    Router::new()
+    let api = Router::new()
         // Traces
         .route("/traces", get(list_traces).post(create_trace).delete(clear_all_traces))
         .route("/traces/:trace_id", get(get_trace).delete(delete_trace))
@@ -1121,7 +1121,10 @@ pub fn router_with_start_time(store: SharedStore, start_time: Instant) -> Router
         // Health
         .route("/health", get(health))
         // SSE
-        .route("/events", get(events))
+        .route("/events", get(events));
+
+    Router::new()
+        .nest("/api", api)
         // Embedded UI (SPA fallback)
         .fallback(serve_ui)
         .layer(cors)
