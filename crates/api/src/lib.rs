@@ -17,7 +17,7 @@ use axum_extra::extract::Multipart;
 use rust_embed::Embed;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{broadcast, watch, RwLock};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use tower_http::cors::{Any, CorsLayer};
 
@@ -55,6 +55,9 @@ pub struct AppState {
     pub store: Arc<RwLock<PersistentStore<SqliteBackend>>>,
     pub events_tx: broadcast::Sender<SystemEvent>,
     pub start_time: Instant,
+    pub config: Arc<RwLock<serde_json::Value>>,
+    pub config_path: Arc<String>,
+    pub shutdown_tx: Option<watch::Sender<bool>>,
 }
 
 pub type SharedStore = Arc<RwLock<PersistentStore<SqliteBackend>>>;
@@ -455,6 +458,37 @@ async fn get_file_versions(
         versions,
         count,
     }))
+}
+
+// --- File content handler ---
+
+async fn get_file_content(
+    State(state): State<AppState>,
+    Path(hash): Path<String>,
+) -> Result<Response, StatusCode> {
+    let r = state.store.read().await;
+    let content = r.load_file_content(&hash).await.map_err(|_| StatusCode::NOT_FOUND)?;
+    drop(r);
+
+    // Try to guess mime type from the hash's associated file path
+    let mime = {
+        let r2 = state.store.read().await;
+        let filter = FileFilter::default();
+        r2.list_files(&filter)
+            .into_iter()
+            .find(|f| f.hash == hash)
+            .map(|f| mime_guess::from_path(&f.path).first_or_octet_stream())
+            .unwrap_or_else(|| mime_guess::mime::APPLICATION_OCTET_STREAM)
+    };
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, mime.as_ref().to_string()),
+            (header::CONTENT_LENGTH, content.len().to_string()),
+        ],
+        content,
+    )
+        .into_response())
 }
 
 // --- Export handler ---
@@ -1048,6 +1082,54 @@ async fn analytics_summary(State(state): State<AppState>) -> Json<AnalyticsSumma
     Json(summary)
 }
 
+// --- Config handlers ---
+
+async fn get_config(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let config = state.config.read().await;
+    Json(config.clone())
+}
+
+async fn update_config(
+    State(state): State<AppState>,
+    Json(new_config): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Write TOML to the config file path
+    let config_path = state.config_path.as_str();
+    if config_path.is_empty() {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "config path not set".to_string()));
+    }
+
+    // Validate that the JSON can be converted to TOML
+    let toml_str = toml::to_string_pretty(&new_config)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid config: {}", e)))?;
+
+    // Write to disk
+    let path = std::path::Path::new(config_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to create config directory: {}", e)))?;
+    }
+    std::fs::write(path, &toml_str)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to write config: {}", e)))?;
+
+    // Update in-memory config
+    let mut config = state.config.write().await;
+    *config = new_config.clone();
+
+    tracing::info!("config updated and saved to {}", config_path);
+    Ok(Json(new_config))
+}
+
+async fn post_shutdown(State(state): State<AppState>) -> StatusCode {
+    if let Some(ref tx) = state.shutdown_tx {
+        tracing::info!("shutdown requested via API");
+        let _ = tx.send(true);
+        StatusCode::ACCEPTED
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    }
+}
+
 // --- Embedded UI ---
 
 #[derive(Embed)]
@@ -1078,12 +1160,25 @@ async fn serve_ui(uri: Uri) -> Response {
 // --- Router ---
 
 pub fn router(store: SharedStore) -> Router {
-    router_with_start_time(store, Instant::now())
+    router_with_start_time(store, Instant::now(), serde_json::Value::Object(Default::default()), String::new(), None)
 }
 
-pub fn router_with_start_time(store: SharedStore, start_time: Instant) -> Router {
+pub fn router_with_start_time(
+    store: SharedStore,
+    start_time: Instant,
+    config: serde_json::Value,
+    config_path: String,
+    shutdown_tx: Option<watch::Sender<bool>>,
+) -> Router {
     let (events_tx, _) = broadcast::channel(256);
-    let state = AppState { store, events_tx, start_time };
+    let state = AppState {
+        store,
+        events_tx,
+        start_time,
+        config: Arc::new(RwLock::new(config)),
+        config_path: Arc::new(config_path),
+        shutdown_tx,
+    };
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -1101,6 +1196,7 @@ pub fn router_with_start_time(store: SharedStore, start_time: Instant) -> Router
         .route("/spans/:span_id/fail", post(fail_span))
         // Files
         .route("/files", get(list_files))
+        .route("/files/content/:hash", get(get_file_content))
         .route("/files/*path", get(get_file_versions))
         // Datasets
         .route("/datasets", get(list_datasets).post(create_dataset))
@@ -1120,6 +1216,9 @@ pub fn router_with_start_time(store: SharedStore, start_time: Instant) -> Router
         .route("/export/json", get(export_json))
         // Health
         .route("/health", get(health))
+        // Config & Shutdown
+        .route("/config", get(get_config).put(update_config))
+        .route("/shutdown", post(post_shutdown))
         // SSE
         .route("/events", get(events));
 
@@ -1132,16 +1231,19 @@ pub fn router_with_start_time(store: SharedStore, start_time: Instant) -> Router
 }
 
 pub async fn serve(store: SharedStore, addr: &str) -> std::io::Result<()> {
-    serve_with_shutdown(store, addr, Instant::now(), std::future::pending()).await
+    serve_with_shutdown(store, addr, Instant::now(), serde_json::Value::Object(Default::default()), String::new(), None, std::future::pending()).await
 }
 
 pub async fn serve_with_shutdown(
     store: SharedStore,
     addr: &str,
     start_time: Instant,
+    config: serde_json::Value,
+    config_path: String,
+    shutdown_tx: Option<watch::Sender<bool>>,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
-    let app = router_with_start_time(store, start_time);
+    let app = router_with_start_time(store, start_time, config, config_path, shutdown_tx);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("api listening on {}", addr);
     axum::serve(listener, app)

@@ -174,6 +174,9 @@ async fn run_api_supervised(
     store: Arc<RwLock<PersistentStore<SqliteBackend>>>,
     addr: String,
     start_time: Instant,
+    config_json: serde_json::Value,
+    config_path: String,
+    shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
 ) {
     let mut restarts = 0u32;
@@ -183,12 +186,15 @@ async fn run_api_supervised(
         let api_store = store.clone();
         let api_addr = addr.clone();
         let api_start_time = start_time;
+        let api_config = config_json.clone();
+        let api_config_path = config_path.clone();
+        let api_shutdown_tx = shutdown_tx.clone();
         let rx = shutdown_rx.clone();
 
         info!("starting api server on {}", api_addr);
 
         let result = tokio::spawn(async move {
-            api::serve_with_shutdown(api_store, &api_addr, api_start_time, shutdown_signal(rx)).await
+            api::serve_with_shutdown(api_store, &api_addr, api_start_time, api_config, api_config_path, Some(api_shutdown_tx), shutdown_signal(rx)).await
         })
         .await;
 
@@ -411,11 +417,21 @@ async fn main() {
     // 2. Shutdown signal channel
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
+    // Serialize config to JSON for the API layer
+    let config_json = serde_json::to_value(&config).unwrap_or_default();
+    let config_path_str = args.config
+        .as_ref()
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| Config::default_path().to_string_lossy().to_string());
+
     // 3. API server (supervised)
     let api_handle = tokio::spawn(run_api_supervised(
         store.clone(),
         resolved.api_addr.clone(),
         start_time,
+        config_json,
+        config_path_str,
+        shutdown_tx.clone(),
         shutdown_rx.clone(),
     ));
 

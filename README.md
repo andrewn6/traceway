@@ -56,7 +56,7 @@ The daemon starts two servers:
 ### Verify
 
 ```sh
-curl http://localhost:3000/health
+curl http://localhost:3000/api/health
 # {"status":"ok","uptime_secs":5}
 ```
 
@@ -64,24 +64,24 @@ curl http://localhost:3000/health
 
 ```sh
 # 1. Create a trace
-TRACE_ID=$(curl -s http://localhost:3000/traces -X POST \
+TRACE_ID=$(curl -s http://localhost:3000/api/traces -X POST \
   -H 'Content-Type: application/json' \
   -d '{"name":"my-first-trace"}' | jq -r '.id')
 
 echo "Trace: $TRACE_ID"
 
 # 2. Create a span
-SPAN_ID=$(curl -s http://localhost:3000/spans -X POST \
+SPAN_ID=$(curl -s http://localhost:3000/api/spans -X POST \
   -H 'Content-Type: application/json' \
   -d "{\"trace_id\":\"$TRACE_ID\",\"name\":\"hello-world\",\"kind\":{\"type\":\"custom\",\"kind\":\"task\",\"attributes\":{}}}" | jq -r '.id')
 
 # 3. Complete the span
-curl -s http://localhost:3000/spans/$SPAN_ID/complete -X POST \
+curl -s http://localhost:3000/api/spans/$SPAN_ID/complete -X POST \
   -H 'Content-Type: application/json' \
   -d '{"output":{"result":"done"}}'
 
 # 4. View the trace
-curl -s http://localhost:3000/traces/$TRACE_ID | jq
+curl -s http://localhost:3000/api/traces/$TRACE_ID | jq
 ```
 
 ### Use the Proxy
@@ -198,24 +198,24 @@ Spans follow a lifecycle: `running` → `completed` or `failed`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/traces` | List all traces |
-| `POST` | `/traces` | Create a new trace |
-| `GET` | `/traces/:id` | Get trace with its spans |
-| `DELETE` | `/traces/:id` | Delete a trace and its spans |
-| `DELETE` | `/traces` | Clear all traces |
+| `GET` | `/api/traces` | List all traces |
+| `POST` | `/api/traces` | Create a new trace |
+| `GET` | `/api/traces/:id` | Get trace with its spans |
+| `DELETE` | `/api/traces/:id` | Delete a trace and its spans |
+| `DELETE` | `/api/traces` | Clear all traces |
 
 ### Spans
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/spans` | List/filter spans |
-| `POST` | `/spans` | Create a span |
-| `GET` | `/spans/:id` | Get a single span |
-| `DELETE` | `/spans/:id` | Delete a span |
-| `POST` | `/spans/:id/complete` | Mark span as completed |
-| `POST` | `/spans/:id/fail` | Mark span as failed |
+| `GET` | `/api/spans` | List/filter spans |
+| `POST` | `/api/spans` | Create a span |
+| `GET` | `/api/spans/:id` | Get a single span |
+| `DELETE` | `/api/spans/:id` | Delete a span |
+| `POST` | `/api/spans/:id/complete` | Mark span as completed |
+| `POST` | `/api/spans/:id/fail` | Mark span as failed |
 
-**Span filters** (query params on `GET /spans`):
+**Span filters** (query params on `GET /api/spans`):
 
 ```
 ?trace_id=...&status=running&kind=llm_call&model=gpt-4&provider=openai&name_contains=chat&since=2024-01-01T00:00:00Z&until=...&path=/src/...
@@ -225,20 +225,20 @@ Spans follow a lifecycle: `running` → `completed` or `failed`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/files` | List tracked file paths |
-| `GET` | `/files/*path` | Get all versions of a file |
+| `GET` | `/api/files` | List tracked file paths |
+| `GET` | `/api/files/*path` | Get all versions of a file |
 
 ### Analytics
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/analytics` | Flexible aggregation query |
-| `GET` | `/analytics/summary` | Quick dashboard summary |
+| `POST` | `/api/analytics` | Flexible aggregation query |
+| `GET` | `/api/analytics/summary` | Quick dashboard summary |
 
 **Example: Cost by model**
 
 ```sh
-curl -s http://localhost:3000/analytics -X POST \
+curl -s http://localhost:3000/api/analytics -X POST \
   -H 'Content-Type: application/json' \
   -d '{
     "metrics": ["total_cost", "total_tokens", "span_count"],
@@ -250,7 +250,7 @@ curl -s http://localhost:3000/analytics -X POST \
 **Example: Dashboard summary**
 
 ```sh
-curl -s http://localhost:3000/analytics/summary | jq
+curl -s http://localhost:3000/api/analytics/summary | jq
 # {
 #   "total_traces": 42,
 #   "total_spans": 186,
@@ -274,29 +274,29 @@ Available group-by fields: `model`, `provider`, `kind`, `status`, `trace`, `day`
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/datasets` | List datasets |
-| `POST` | `/datasets` | Create a dataset |
-| `GET` | `/datasets/:id` | Get dataset details |
-| `PUT` | `/datasets/:id` | Update dataset |
-| `DELETE` | `/datasets/:id` | Delete dataset |
-| `GET` | `/datasets/:id/datapoints` | List datapoints |
-| `POST` | `/datasets/:id/datapoints` | Add datapoint |
-| `DELETE` | `/datasets/:id/datapoints/:dp_id` | Remove datapoint |
-| `POST` | `/datasets/:id/export-span` | Export a span as a datapoint |
-| `POST` | `/datasets/:id/import` | Import CSV file |
-| `GET` | `/datasets/:id/queue` | List review queue |
-| `POST` | `/datasets/:id/queue` | Enqueue datapoints for review |
-| `POST` | `/queue/:item_id/claim` | Claim a queue item |
-| `POST` | `/queue/:item_id/submit` | Submit review |
+| `GET` | `/api/datasets` | List datasets |
+| `POST` | `/api/datasets` | Create a dataset |
+| `GET` | `/api/datasets/:id` | Get dataset details |
+| `PUT` | `/api/datasets/:id` | Update dataset |
+| `DELETE` | `/api/datasets/:id` | Delete dataset |
+| `GET` | `/api/datasets/:id/datapoints` | List datapoints |
+| `POST` | `/api/datasets/:id/datapoints` | Add datapoint |
+| `DELETE` | `/api/datasets/:id/datapoints/:dp_id` | Remove datapoint |
+| `POST` | `/api/datasets/:id/export-span` | Export a span as a datapoint |
+| `POST` | `/api/datasets/:id/import` | Import CSV file |
+| `GET` | `/api/datasets/:id/queue` | List review queue |
+| `POST` | `/api/datasets/:id/queue` | Enqueue datapoints for review |
+| `POST` | `/api/queue/:item_id/claim` | Claim a queue item |
+| `POST` | `/api/queue/:item_id/submit` | Submit review |
 
 ### Other
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/health` | Health check with uptime |
-| `GET` | `/stats` | Trace/span counts |
-| `GET` | `/export/json` | Export all data as JSON |
-| `GET` | `/events` | SSE event stream |
+| `GET` | `/api/health` | Health check with uptime |
+| `GET` | `/api/stats` | Trace/span counts |
+| `GET` | `/api/export/json` | Export all data as JSON |
+| `GET` | `/api/events` | SSE event stream |
 
 ## Web UI
 
@@ -308,7 +308,7 @@ npm install
 npm run dev
 ```
 
-Opens at `http://localhost:5173` and connects to the API at `localhost:3000`.
+Opens at `http://localhost:5173` for development. In production, the UI is embedded in the daemon and served at `http://localhost:3000`. All API calls use the `/api/` prefix.
 
 ### Pages
 

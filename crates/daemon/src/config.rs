@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
     pub api: ApiConfig,
@@ -11,7 +11,7 @@ pub struct Config {
     pub logging: LoggingConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ApiConfig {
     pub addr: String,
@@ -25,7 +25,7 @@ impl Default for ApiConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProxyConfig {
     pub addr: String,
@@ -43,7 +43,7 @@ impl Default for ProxyConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StorageConfig {
     pub db_path: Option<String>,
@@ -55,7 +55,7 @@ impl Default for StorageConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LoggingConfig {
     pub level: String,
@@ -119,5 +119,20 @@ impl Config {
 
     pub fn pid_path() -> PathBuf {
         Self::data_dir().join("daemon.pid")
+    }
+
+    /// Write config to a TOML file.
+    pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
+        let toml_str = toml::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, toml_str)
+    }
+
+    /// Save config to the default path.
+    pub fn save(&self) -> std::io::Result<()> {
+        self.save_to(&Self::default_path())
     }
 }
