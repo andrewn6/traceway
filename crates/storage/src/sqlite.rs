@@ -95,6 +95,70 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_queue_items_status ON queue_items(status);
     CREATE INDEX IF NOT EXISTS idx_queue_items_created_at ON queue_items(created_at);
     "#,
+    // v3: multi-tenancy - add org_id columns and auth tables
+    r#"
+    -- Add org_id to existing tables (nullable for backward compatibility)
+    ALTER TABLE spans ADD COLUMN org_id TEXT;
+    ALTER TABLE traces ADD COLUMN org_id TEXT;
+    ALTER TABLE datasets ADD COLUMN org_id TEXT;
+
+    CREATE INDEX IF NOT EXISTS idx_spans_org_id ON spans(org_id);
+    CREATE INDEX IF NOT EXISTS idx_traces_org_id ON traces(org_id);
+    CREATE INDEX IF NOT EXISTS idx_datasets_org_id ON datasets(org_id);
+
+    -- Organizations
+    CREATE TABLE IF NOT EXISTS organizations (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        plan TEXT NOT NULL DEFAULT 'free',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_organizations_slug ON organizations(slug);
+
+    -- Users
+    CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        name TEXT,
+        org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        role TEXT NOT NULL DEFAULT 'member',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+    CREATE INDEX IF NOT EXISTS idx_users_org_id ON users(org_id);
+
+    -- API Keys
+    CREATE TABLE IF NOT EXISTS api_keys (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        key_prefix TEXT NOT NULL,
+        key_hash TEXT NOT NULL,
+        scopes_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL,
+        last_used_at TEXT,
+        expires_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_keys_org_id ON api_keys(org_id);
+    CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix);
+
+    -- Invites
+    CREATE TABLE IF NOT EXISTS invites (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        email TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'member',
+        invited_by TEXT NOT NULL REFERENCES users(id),
+        token_hash TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_invites_email ON invites(email);
+    CREATE INDEX IF NOT EXISTS idx_invites_org_id ON invites(org_id);
+    "#,
 ];
 
 fn run_migrations(conn: &Connection) -> Result<(), StorageError> {
@@ -404,6 +468,7 @@ impl StorageBackend for SqliteBackend {
 
             traces.push(Trace {
                 id,
+                org_id: None, // Loaded from DB if present via v3 migration
                 name,
                 tags,
                 started_at,
@@ -551,6 +616,7 @@ impl StorageBackend for SqliteBackend {
                 .with_timezone(&Utc);
             datasets.push(Dataset {
                 id,
+                org_id: None, // Loaded from DB if present via v3 migration
                 name,
                 description,
                 created_at,
@@ -786,5 +852,70 @@ impl StorageBackend for SqliteBackend {
         let deleted =
             conn.execute("DELETE FROM queue_items WHERE id = ?1", params![id.to_string()])?;
         Ok(deleted > 0)
+    }
+
+    // --- Methods required by new trait interface ---
+
+    async fn get_trace(&self, id: TraceId) -> Result<Option<Trace>, StorageError> {
+        let traces = self.load_all_traces().await?;
+        Ok(traces.into_iter().find(|t| t.id == id))
+    }
+
+    async fn list_traces(&self, _filter: &crate::filter::TraceFilter) -> Result<Vec<Trace>, StorageError> {
+        self.load_all_traces().await
+    }
+
+    async fn get_span(&self, id: SpanId) -> Result<Option<Span>, StorageError> {
+        let spans = self.load_all_spans().await?;
+        Ok(spans.into_iter().find(|s| s.id() == id))
+    }
+
+    async fn list_spans(&self, _filter: &crate::filter::SpanFilter) -> Result<Vec<Span>, StorageError> {
+        self.load_all_spans().await
+    }
+
+    async fn get_dataset(&self, id: DatasetId) -> Result<Option<Dataset>, StorageError> {
+        let datasets = self.load_all_datasets().await?;
+        Ok(datasets.into_iter().find(|d| d.id == id))
+    }
+
+    async fn list_datasets(&self) -> Result<Vec<Dataset>, StorageError> {
+        self.load_all_datasets().await
+    }
+
+    async fn get_datapoint(&self, id: DatapointId) -> Result<Option<Datapoint>, StorageError> {
+        let datapoints = self.load_all_datapoints().await?;
+        Ok(datapoints.into_iter().find(|d| d.id == id))
+    }
+
+    async fn list_datapoints(&self, dataset_id: DatasetId) -> Result<Vec<Datapoint>, StorageError> {
+        let all = self.load_all_datapoints().await?;
+        Ok(all.into_iter().filter(|d| d.dataset_id == dataset_id).collect())
+    }
+
+    async fn list_datapoints_all(&self) -> Result<Vec<Datapoint>, StorageError> {
+        self.load_all_datapoints().await
+    }
+
+    async fn get_queue_item(&self, id: QueueItemId) -> Result<Option<QueueItem>, StorageError> {
+        let items = self.load_all_queue_items().await?;
+        Ok(items.into_iter().find(|q| q.id == id))
+    }
+
+    async fn list_queue_items(&self, dataset_id: DatasetId) -> Result<Vec<QueueItem>, StorageError> {
+        let all = self.load_all_queue_items().await?;
+        Ok(all.into_iter().filter(|q| q.dataset_id == dataset_id).collect())
+    }
+
+    async fn list_queue_items_all(&self) -> Result<Vec<QueueItem>, StorageError> {
+        self.load_all_queue_items().await
+    }
+
+    async fn list_file_versions(&self) -> Result<Vec<FileVersion>, StorageError> {
+        self.load_all_files().await
+    }
+
+    fn backend_type(&self) -> &'static str {
+        "sqlite"
     }
 }

@@ -1,42 +1,19 @@
 pub mod analytics;
 pub mod backend;
-pub mod sqlite;
+pub mod error;
+pub mod filter;
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, Utc};
+
 use trace::{
     Datapoint, DatapointId, Dataset, DatasetId, FileVersion, QueueItem, QueueItemId,
     QueueItemStatus, Span, SpanId, SpanKind, Trace, TraceId,
 };
 
-pub use backend::{StorageBackend, StorageError};
-pub use sqlite::SqliteBackend;
-
-// --- Span Filter ---
-
-#[derive(Debug, Default, Clone)]
-pub struct SpanFilter {
-    pub kind: Option<String>,
-    pub model: Option<String>,
-    pub provider: Option<String>,
-    pub status: Option<String>,
-    pub since: Option<DateTime<Utc>>,
-    pub until: Option<DateTime<Utc>>,
-    pub name_contains: Option<String>,
-    pub path: Option<String>,
-    pub trace_id: Option<TraceId>,
-}
-
-// --- File Filter ---
-
-#[derive(Debug, Default, Clone)]
-pub struct FileFilter {
-    pub path_prefix: Option<String>,
-    pub since: Option<DateTime<Utc>>,
-    pub until: Option<DateTime<Utc>>,
-    pub associated_trace: Option<TraceId>,
-}
+pub use backend::StorageBackend;
+pub use error::StorageError;
+pub use filter::{DatapointFilter, FileFilter, SpanFilter, TraceFilter};
 
 // --- In-memory span store ---
 
@@ -252,6 +229,16 @@ impl<B: StorageBackend> PersistentStore<B> {
             queue_items,
             backend,
         })
+    }
+
+    /// Get a reference to the underlying backend
+    pub fn backend(&self) -> &B {
+        &self.backend
+    }
+
+    /// Get the backend type
+    pub fn backend_type(&self) -> &'static str {
+        self.backend.backend_type()
     }
 
     // --- Span methods ---
