@@ -4,11 +4,13 @@ use uuid::Uuid;
 
 pub mod api_key;
 pub mod context;
+pub mod middleware;
 pub mod session;
 
 // Re-exports
 pub use api_key::{ApiKey, ApiKeyId, generate_api_key, hash_api_key, verify_api_key};
 pub use context::{AuthContext, AuthError};
+pub use middleware::{Auth, AuthConfig, ApiKeyLookup};
 pub use session::{SessionToken, create_session, verify_session};
 
 // --- ID Types ---
