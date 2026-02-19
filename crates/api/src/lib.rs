@@ -1,3 +1,8 @@
+pub mod auth_routes;
+pub mod events;
+pub mod jobs;
+pub mod metrics;
+
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -21,12 +26,15 @@ use tokio::sync::{broadcast, watch, RwLock};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use tower_http::cors::{Any, CorsLayer};
 
-use storage::{analytics, FileFilter, PersistentStore, SpanFilter, SqliteBackend};
+use storage::{analytics, FileFilter, PersistentStore, SpanFilter};
+use storage_sqlite::SqliteBackend;
 use trace::{
     AnalyticsQuery, AnalyticsResponse, AnalyticsSummary, Datapoint, DatapointId, DatapointKind,
     DatapointSource, Dataset, DatasetId, FileVersion, Message, QueueItem, QueueItemId,
     QueueItemStatus, Span, SpanBuilder, SpanId, SpanKind, Trace, TraceId,
 };
+
+pub use events::{EventBus, EventSubscriber, LocalEventBus};
 
 // --- Events ---
 
@@ -58,6 +66,7 @@ pub struct AppState {
     pub config: Arc<RwLock<serde_json::Value>>,
     pub config_path: Arc<String>,
     pub shutdown_tx: Option<watch::Sender<bool>>,
+    pub auth_config: auth::AuthConfig,
 }
 
 pub type SharedStore = Arc<RwLock<PersistentStore<SqliteBackend>>>;
@@ -322,6 +331,7 @@ async fn list_spans(
         name_contains: params.name_contains,
         path: params.path,
         trace_id: params.trace_id,
+        limit: None,
     };
     let spans: Vec<Span> = r.filter_spans(&filter).into_iter().cloned().collect();
     let count = spans.len();
@@ -596,17 +606,31 @@ struct HealthResponse {
     uptime_secs: u64,
     version: String,
     storage: StorageHealth,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    region: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instance: Option<String>,
 }
 
 #[derive(Serialize)]
 struct StorageHealth {
     trace_count: usize,
     span_count: usize,
+    backend: String,
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     let uptime = state.start_time.elapsed().as_secs();
     let r = state.store.read().await;
+
+    // Get region/instance from env for cloud deployments
+    let region = std::env::var("FLY_REGION")
+        .or_else(|_| std::env::var("RAILWAY_REGION"))
+        .ok();
+    let instance = std::env::var("FLY_ALLOC_ID")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .ok();
+
     Json(HealthResponse {
         status: "ok".to_string(),
         uptime_secs: uptime,
@@ -614,8 +638,39 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         storage: StorageHealth {
             trace_count: r.trace_count(),
             span_count: r.span_count(),
+            backend: "sqlite".to_string(), // TODO: Get from store
         },
+        region,
+        instance,
     })
+}
+
+// --- Readiness probe (for k8s/cloud platforms) ---
+
+async fn ready() -> StatusCode {
+    // Simple readiness check - could add DB connectivity check here
+    StatusCode::OK
+}
+
+// --- Liveness probe ---
+
+async fn live() -> StatusCode {
+    StatusCode::OK
+}
+
+// --- Metrics endpoint (Prometheus format) ---
+
+async fn prometheus_metrics(State(state): State<AppState>) -> Response {
+    let r = state.store.read().await;
+    let metrics = metrics::Metrics::new();
+    metrics.update_counts(r.span_count() as u64, r.trace_count() as u64);
+
+    let body = metrics.export_prometheus();
+    (
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        body,
+    )
+        .into_response()
 }
 
 // --- Dataset handlers ---
@@ -1178,6 +1233,7 @@ pub fn router_with_start_time(
         config: Arc::new(RwLock::new(config)),
         config_path: Arc::new(config_path),
         shutdown_tx,
+        auth_config: auth::AuthConfig::local(), // Default to local mode
     };
 
     let cors = CorsLayer::new()
@@ -1214,13 +1270,18 @@ pub fn router_with_start_time(
         // Stats & Export
         .route("/stats", get(get_stats))
         .route("/export/json", get(export_json))
-        // Health
+        // Health & Observability
         .route("/health", get(health))
+        .route("/ready", get(ready))
+        .route("/live", get(live))
+        .route("/metrics", get(prometheus_metrics))
         // Config & Shutdown
         .route("/config", get(get_config).put(update_config))
         .route("/shutdown", post(post_shutdown))
         // SSE
-        .route("/events", get(events));
+        .route("/events", get(events))
+        // Auth routes
+        .merge(auth_routes::auth_router());
 
     Router::new()
         .nest("/api", api)
