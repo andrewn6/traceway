@@ -63,7 +63,7 @@
 	const childIndex = $derived.by(() => {
 		const idx = new Map<string | null, Span[]>();
 		for (const s of spans) {
-			const key = s.parent_id;
+			const key = s.parent_id ?? null;
 			let arr = idx.get(key);
 			if (!arr) {
 				arr = [];
