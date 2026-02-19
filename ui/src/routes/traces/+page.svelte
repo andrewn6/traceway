@@ -65,7 +65,7 @@
 					// New trace — reload to get trace metadata
 					loadTraces();
 				}
-			} else if (event.type === 'span_updated') {
+			} else if (event.type === 'span_completed' || event.type === 'span_failed') {
 				const tid = event.span.trace_id;
 				const existing = traceSpans.get(tid);
 				if (existing) {
@@ -93,8 +93,7 @@
 			const spans = traceSpans.get(trace.id) ?? [];
 			if (filterModel) {
 				const hasModel = spans.some((s) =>
-					(s.kind?.type === 'llm_call' && s.kind.model?.includes(filterModel))
-					|| s.metadata.model?.includes(filterModel)
+					s.kind?.type === 'llm_call' && s.kind.model?.includes(filterModel)
 				);
 				if (!hasModel) return false;
 			}

@@ -46,12 +46,6 @@
 		const days = Math.floor(hours / 24);
 		return `${days}d ${hours % 24}h`;
 	}
-
-	function formatBytes(bytes: number): string {
-		if (bytes < 1024) return `${bytes} B`;
-		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-	}
 </script>
 
 <div class="max-w-3xl space-y-6">
@@ -73,46 +67,28 @@
 							<span class="text-success">Running</span>
 						</div>
 					</div>
-					{#if health.uptime_seconds !== undefined}
-						<div>
-							<span class="text-text-muted text-xs">Uptime</span>
-							<div class="text-text mt-0.5">{formatUptime(health.uptime_seconds)}</div>
-						</div>
-					{/if}
-					{#if health.version}
-						<div>
-							<span class="text-text-muted text-xs">Version</span>
-							<div class="text-text mt-0.5 font-mono">{health.version}</div>
-						</div>
-					{/if}
-				</div>
-				{#if health.components}
-					<div class="border-t border-border pt-3">
-						<span class="text-text-muted text-xs uppercase">Components</span>
-						<div class="grid grid-cols-2 gap-2 mt-2">
-							{#each Object.entries(health.components) as [name, status]}
-								<div class="flex items-center gap-2 text-sm">
-									<span class="w-1.5 h-1.5 rounded-full {status === 'running' || status === 'mounted' || status === 'connected' ? 'bg-success' : 'bg-warning'}"></span>
-									<span class="text-text-secondary">{name}</span>
-									<span class="text-text-muted text-xs">{status}</span>
-								</div>
-							{/each}
-						</div>
+					<div>
+						<span class="text-text-muted text-xs">Uptime</span>
+						<div class="text-text mt-0.5">{formatUptime(health.uptime_secs)}</div>
 					</div>
-				{/if}
+					<div>
+						<span class="text-text-muted text-xs">Version</span>
+						<div class="text-text mt-0.5 font-mono">{health.version}</div>
+					</div>
+				</div>
 			{:else}
 				<div class="flex items-center gap-1.5 text-sm">
 					<span class="w-2 h-2 rounded-full bg-danger"></span>
 					<span class="text-danger">Not connected</span>
 				</div>
-				<p class="text-text-muted text-xs">Start the daemon with <code class="bg-bg-tertiary px-1 rounded">llmtrace start</code></p>
+				<p class="text-text-muted text-xs">Start the daemon with <code class="bg-bg-tertiary px-1 rounded">cargo run -p daemon -- --foreground</code></p>
 			{/if}
 		</section>
 
 		<!-- Storage -->
 		<section class="bg-bg-secondary border border-border rounded p-4 space-y-3">
 			<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Storage</h2>
-			<div class="grid grid-cols-3 gap-4 text-sm">
+			<div class="grid grid-cols-2 gap-4 text-sm">
 				<div>
 					<span class="text-text-muted text-xs">Traces</span>
 					<div class="text-text text-lg font-bold mt-0.5">{stats.trace_count}</div>
@@ -121,12 +97,6 @@
 					<span class="text-text-muted text-xs">Spans</span>
 					<div class="text-text text-lg font-bold mt-0.5">{stats.span_count}</div>
 				</div>
-				{#if health?.storage?.db_size_bytes}
-					<div>
-						<span class="text-text-muted text-xs">Database Size</span>
-						<div class="text-text text-lg font-bold mt-0.5">{formatBytes(health.storage.db_size_bytes)}</div>
-					</div>
-				{/if}
 			</div>
 		</section>
 
@@ -138,20 +108,12 @@
 			</p>
 			<div class="grid grid-cols-2 gap-4 text-sm">
 				<div>
-					<span class="text-text-muted text-xs">API Address</span>
-					<div class="text-text mt-0.5 font-mono text-xs">127.0.0.1:3000</div>
-				</div>
-				<div>
-					<span class="text-text-muted text-xs">Proxy Address</span>
-					<div class="text-text mt-0.5 font-mono text-xs">127.0.0.1:3001</div>
-				</div>
-				<div>
 					<span class="text-text-muted text-xs">Database Path</span>
 					<div class="text-text mt-0.5 font-mono text-xs">~/.llmtrace/traces.db</div>
 				</div>
 				<div>
-					<span class="text-text-muted text-xs">Mount Path</span>
-					<div class="text-text mt-0.5 font-mono text-xs">~/.llmtrace/mem</div>
+					<span class="text-text-muted text-xs">Log Directory</span>
+					<div class="text-text mt-0.5 font-mono text-xs">~/.llmtrace/logs/</div>
 				</div>
 			</div>
 		</section>

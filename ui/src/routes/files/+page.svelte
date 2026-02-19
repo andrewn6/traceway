@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { getFiles, subscribeEvents, type TrackedFile } from '$lib/api';
+	import { getFiles, subscribeEvents, type FileVersion } from '$lib/api';
 	import { onMount } from 'svelte';
 
-	let files: TrackedFile[] = $state([]);
+	let files: FileVersion[] = $state([]);
 	let loading = $state(true);
 	let search = $state('');
 	let error = $state('');
@@ -13,11 +13,11 @@
 		path: string;
 		isDir: boolean;
 		children: TreeNode[];
-		file?: TrackedFile;
+		file?: FileVersion;
 		expanded: boolean;
 	}
 
-	function buildTree(files: TrackedFile[]): TreeNode[] {
+	function buildTree(files: FileVersion[]): TreeNode[] {
 		const root: TreeNode[] = [];
 
 		for (const file of files) {
@@ -63,9 +63,16 @@
 		return sortTree(root);
 	}
 
+	function formatSize(bytes: number): string {
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	}
+
 	async function loadFiles() {
 		try {
-			files = await getFiles();
+			const res = await getFiles();
+			files = res.files;
 			error = '';
 		} catch (e) {
 			error = 'Could not load files. Is the daemon running?';
@@ -162,12 +169,10 @@
 								<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
 							</svg>
 							<span class="text-text flex-1">{node.name}</span>
-							{#if node.file?.version_count}
-								<span class="text-text-muted text-xs">{node.file.version_count}v</span>
-							{/if}
-							{#if node.file?.updated_at}
+							{#if node.file}
+								<span class="text-text-muted text-xs font-mono">{formatSize(node.file.size)}</span>
 								<span class="text-text-muted text-xs font-mono">
-									{new Date(node.file.updated_at).toLocaleDateString()}
+									{new Date(node.file.created_at).toLocaleDateString()}
 								</span>
 							{/if}
 						</a>

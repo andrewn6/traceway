@@ -119,14 +119,14 @@ class LLMTrace:
     # ─── Internal helpers ─────────────────────────────────────────────
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
-        resp = self._client.request(method, path, **kwargs)
+        resp = self._client.request(method, f"/api{path}", **kwargs)
         resp.raise_for_status()
         if resp.content:
             return resp.json()
         return None
 
     def _request_text(self, method: str, path: str, **kwargs: Any) -> str:
-        resp = self._client.request(method, path, **kwargs)
+        resp = self._client.request(method, f"/api{path}", **kwargs)
         resp.raise_for_status()
         return resp.text
 
@@ -243,7 +243,7 @@ class LLMTrace:
     def trace(self, name: str = "") -> Generator[TraceContext, None, None]:
         """Create a trace context. All spans created within will share the same trace ID.
 
-        Calls POST /traces to register the trace on the server.
+        Calls POST /api/traces to register the trace on the server.
         Sets LLMTRACE_TRACE_ID env var for subprocess propagation.
 
         Example:
