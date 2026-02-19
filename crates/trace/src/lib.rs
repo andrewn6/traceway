@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 pub type SpanId = Uuid;
@@ -9,10 +10,11 @@ pub type TraceId = Uuid;
 pub type DatasetId = Uuid;
 pub type DatapointId = Uuid;
 pub type QueueItemId = Uuid;
+pub type OrgId = Uuid;
 
 // --- SpanKind: typed span variants ---
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SpanKind {
     FsRead {
@@ -113,7 +115,7 @@ impl SpanKind {
 
 // --- SpanStatus: simplified (timestamps live on Span) ---
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SpanStatus {
     Running,
@@ -137,10 +139,16 @@ impl SpanStatus {
 
 // --- Span: immutable after completion ---
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Span {
+    #[schema(value_type = String)]
     id: SpanId,
+    #[schema(value_type = String)]
     trace_id: TraceId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    org_id: Option<OrgId>,
+    #[schema(value_type = Option<String>)]
     parent_id: Option<SpanId>,
     name: String,
     kind: SpanKind,
@@ -161,6 +169,10 @@ impl Span {
 
     pub fn trace_id(&self) -> TraceId {
         self.trace_id
+    }
+
+    pub fn org_id(&self) -> Option<OrgId> {
+        self.org_id
     }
 
     pub fn parent_id(&self) -> Option<SpanId> {
@@ -232,6 +244,7 @@ impl Span {
 
 pub struct SpanBuilder {
     trace_id: TraceId,
+    org_id: Option<OrgId>,
     parent_id: Option<SpanId>,
     name: String,
     kind: SpanKind,
@@ -242,11 +255,17 @@ impl SpanBuilder {
     pub fn new(trace_id: TraceId, name: impl Into<String>, kind: SpanKind) -> Self {
         Self {
             trace_id,
+            org_id: None,
             parent_id: None,
             name: name.into(),
             kind,
             input: None,
         }
+    }
+
+    pub fn org(mut self, org_id: OrgId) -> Self {
+        self.org_id = Some(org_id);
+        self
     }
 
     pub fn parent(mut self, parent_id: SpanId) -> Self {
@@ -263,6 +282,7 @@ impl SpanBuilder {
         Span {
             id: Uuid::now_v7(),
             trace_id: self.trace_id,
+            org_id: self.org_id,
             parent_id: self.parent_id,
             name: self.name,
             kind: self.kind,
@@ -277,9 +297,13 @@ impl SpanBuilder {
 
 // --- Trace: explicit trace-level metadata ---
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Trace {
+    #[schema(value_type = String)]
     pub id: TraceId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub org_id: Option<OrgId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default)]
@@ -295,12 +319,18 @@ impl Trace {
     pub fn new(name: Option<String>) -> Self {
         Self {
             id: Uuid::now_v7(),
+            org_id: None,
             name,
             tags: Vec::new(),
             started_at: Utc::now(),
             ended_at: None,
             machine_id: None,
         }
+    }
+
+    pub fn with_org(mut self, org_id: OrgId) -> Self {
+        self.org_id = Some(org_id);
+        self
     }
 
     pub fn with_tags(mut self, tags: Vec<String>) -> Self {
@@ -316,7 +346,7 @@ impl Trace {
 
 // --- File model types ---
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TrackedFile {
     pub path: String,
     pub current_hash: String,
@@ -324,13 +354,14 @@ pub struct TrackedFile {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct FileVersion {
     pub hash: String,
     pub path: String,
     pub size: u64,
     pub created_at: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
     pub created_by_span: Option<SpanId>,
 }
 
@@ -344,13 +375,13 @@ pub fn content_hash(bytes: &[u8]) -> String {
 
 // --- Dataset types ---
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Message {
     pub role: String,
     pub content: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DatapointKind {
     LlmConversation {
@@ -373,7 +404,7 @@ pub enum DatapointKind {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DatapointSource {
     Manual,
@@ -381,9 +412,13 @@ pub enum DatapointSource {
     FileUpload,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Dataset {
+    #[schema(value_type = String)]
     pub id: DatasetId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub org_id: Option<OrgId>,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -396,21 +431,30 @@ impl Dataset {
         let now = Utc::now();
         Self {
             id: Uuid::now_v7(),
+            org_id: None,
             name: name.into(),
             description,
             created_at: now,
             updated_at: now,
         }
     }
+
+    pub fn with_org(mut self, org_id: OrgId) -> Self {
+        self.org_id = Some(org_id);
+        self
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Datapoint {
+    #[schema(value_type = String)]
     pub id: DatapointId,
+    #[schema(value_type = String)]
     pub dataset_id: DatasetId,
     pub kind: DatapointKind,
     pub source: DatapointSource,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
     pub source_span_id: Option<SpanId>,
     pub created_at: DateTime<Utc>,
 }
@@ -433,7 +477,7 @@ impl Datapoint {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum QueueItemStatus {
     Pending,
@@ -451,10 +495,13 @@ impl QueueItemStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct QueueItem {
+    #[schema(value_type = String)]
     pub id: QueueItemId,
+    #[schema(value_type = String)]
     pub dataset_id: DatasetId,
+    #[schema(value_type = String)]
     pub datapoint_id: DatapointId,
     pub status: QueueItemStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -503,7 +550,7 @@ impl QueueItem {
 
 // --- Analytics types ---
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AnalyticsQuery {
     pub metrics: Vec<AnalyticsMetric>,
     #[serde(default)]
@@ -512,7 +559,7 @@ pub struct AnalyticsQuery {
     pub filter: AnalyticsFilter,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalyticsMetric {
     TotalCost,
@@ -524,7 +571,7 @@ pub enum AnalyticsMetric {
     ErrorCount,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GroupByField {
     Model,
@@ -536,7 +583,7 @@ pub enum GroupByField {
     Hour,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 pub struct AnalyticsFilter {
     #[serde(default)]
     pub kind: Option<String>,
@@ -551,22 +598,23 @@ pub struct AnalyticsFilter {
     #[serde(default)]
     pub until: Option<DateTime<Utc>>,
     #[serde(default)]
+    #[schema(value_type = Option<String>)]
     pub trace_id: Option<TraceId>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AnalyticsResponse {
     pub groups: Vec<AnalyticsGroup>,
     pub totals: MetricValues,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AnalyticsGroup {
     pub key: HashMap<String, String>,
     pub metrics: MetricValues,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 pub struct MetricValues {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_cost: Option<f64>,
@@ -584,7 +632,7 @@ pub struct MetricValues {
     pub error_count: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AnalyticsSummary {
     pub total_traces: usize,
     pub total_spans: usize,
@@ -599,14 +647,14 @@ pub struct AnalyticsSummary {
     pub tokens_by_model: Vec<ModelTokens>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ModelCost {
     pub model: String,
     pub cost: f64,
     pub span_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ModelTokens {
     pub model: String,
     pub input_tokens: u64,
