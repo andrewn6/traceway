@@ -1,4 +1,5 @@
 mod config;
+mod ingest;
 mod pid;
 
 use std::net::TcpListener as StdTcpListener;
@@ -52,6 +53,14 @@ struct Args {
     /// Path to config file
     #[arg(long)]
     config: Option<String>,
+
+    /// Enable synthetic span ingest loop for development/testing
+    #[arg(long)]
+    dev_ingest: bool,
+
+    /// Interval (seconds) between synthetic span bursts [default: 5]
+    #[arg(long, default_value = "5")]
+    dev_ingest_interval: u64,
 }
 
 /// Resolved configuration merging CLI args over config file over defaults.
@@ -62,6 +71,8 @@ struct ResolvedConfig {
     db_path: PathBuf,
     log_level: String,
     foreground: bool,
+    dev_ingest: bool,
+    dev_ingest_interval: u64,
 }
 
 impl ResolvedConfig {
@@ -90,6 +101,8 @@ impl ResolvedConfig {
                 .or_else(|| std::env::var("LLMTRACE_LOG").ok())
                 .unwrap_or_else(|| config.logging.level.clone()),
             foreground: !args.daemon,
+            dev_ingest: args.dev_ingest,
+            dev_ingest_interval: args.dev_ingest_interval,
         }
     }
 }
@@ -304,6 +317,11 @@ fn daemonize(args: &Args) -> ! {
     if let Some(ref config) = args.config {
         cmd.arg("--config").arg(config);
     }
+    if args.dev_ingest {
+        cmd.arg("--dev-ingest");
+        cmd.arg("--dev-ingest-interval")
+            .arg(args.dev_ingest_interval.to_string());
+    }
 
     // Redirect stdio to /dev/null for the background process
     use std::process::Stdio;
@@ -412,6 +430,22 @@ async fn main() {
         shutdown_rx.clone(),
     ));
 
+    // 5. Dev ingest loop (optional synthetic span generation for testing)
+    let ingest_handle = if resolved.dev_ingest {
+        let interval = Duration::from_secs(resolved.dev_ingest_interval);
+        info!(
+            interval_secs = resolved.dev_ingest_interval,
+            "starting synthetic ingest loop"
+        );
+        Some(tokio::spawn(ingest::run_synthetic_ingest(
+            store.clone(),
+            interval,
+            shutdown_rx.clone(),
+        )))
+    } else {
+        None
+    };
+
     info!(
         "daemon ready — api http://{} | proxy http://{} -> {}",
         resolved.api_addr, resolved.proxy_addr, resolved.target_url
@@ -449,6 +483,9 @@ async fn main() {
         SHUTDOWN_TIMEOUT,
         async {
             let _ = tokio::join!(api_handle, proxy_handle);
+            if let Some(h) = ingest_handle {
+                let _ = h.await;
+            }
         },
     )
     .await;
