@@ -2,6 +2,9 @@ mod config;
 mod ingest;
 mod pid;
 
+#[cfg(feature = "cloud")]
+mod cloud;
+
 use std::net::TcpListener as StdTcpListener;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,7 +14,8 @@ use clap::Parser;
 use tokio::sync::{watch, RwLock};
 use tracing::{error, info, warn};
 
-use storage::{PersistentStore, SqliteBackend};
+use storage::PersistentStore;
+use storage_sqlite::SqliteBackend;
 
 use crate::config::Config;
 use crate::pid::PidFile;
@@ -61,6 +65,10 @@ struct Args {
     /// Interval (seconds) between synthetic span bursts [default: 5]
     #[arg(long, default_value = "5")]
     dev_ingest_interval: u64,
+
+    /// Run in cloud mode (load config from environment)
+    #[arg(long)]
+    cloud: bool,
 }
 
 /// Resolved configuration merging CLI args over config file over defaults.
@@ -353,6 +361,13 @@ fn daemonize(args: &Args) -> ! {
 async fn main() {
     let args = Args::parse();
 
+    // Cloud mode: load all config from environment
+    #[cfg(feature = "cloud")]
+    if args.cloud {
+        run_cloud_mode().await;
+        return;
+    }
+
     // Load config file
     let config = match &args.config {
         Some(path) => Config::load_from(std::path::Path::new(path)),
@@ -515,4 +530,134 @@ async fn main() {
     drop(pid_file);
 
     info!("daemon stopped");
+}
+
+/// Run in cloud mode - configuration loaded from environment variables
+#[cfg(feature = "cloud")]
+async fn run_cloud_mode() {
+    use crate::cloud::{setup_cloud_logging, CloudConfig};
+
+    let cloud_config = CloudConfig::from_env();
+    setup_cloud_logging(&cloud_config);
+    cloud_config.log_config();
+
+    info!("llmfs cloud daemon starting");
+
+    let start_time = Instant::now();
+
+    // Initialize storage based on configuration
+    let store = match cloud_config.storage_backend {
+        cloud::StorageBackendType::Sqlite => {
+            // Use in-memory or ephemeral SQLite for cloud
+            let db_path = std::env::var("DB_PATH")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from("/tmp/llmfs.db"));
+
+            info!(path = %db_path.display(), "Using SQLite storage");
+
+            if let Some(parent) = db_path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+
+            let backend = match SqliteBackend::open(&db_path) {
+                Ok(b) => b,
+                Err(e) => {
+                    error!("Failed to open database: {}", e);
+                    std::process::exit(1);
+                }
+            };
+
+            match PersistentStore::open(backend).await {
+                Ok(p) => Arc::new(RwLock::new(p)),
+                Err(e) => {
+                    error!("Failed to load data: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        cloud::StorageBackendType::Turbopuffer => {
+            // Turbopuffer backend would be initialized here
+            // For now, fall back to SQLite with a warning
+            warn!("Turbopuffer backend selected but not yet integrated - using SQLite");
+
+            let db_path = PathBuf::from("/tmp/llmfs.db");
+            let backend = SqliteBackend::open(&db_path).expect("Failed to open SQLite");
+            let persistent = PersistentStore::open(backend).await.expect("Failed to load data");
+            Arc::new(RwLock::new(persistent))
+        }
+    };
+
+    info!("Storage ready");
+
+    // Shutdown signal handling
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    // Empty config for cloud mode (config comes from env)
+    let config_json = serde_json::json!({
+        "mode": "cloud",
+        "storage": format!("{:?}", cloud_config.storage_backend),
+        "redis": cloud_config.has_redis(),
+        "region": cloud_config.region,
+    });
+
+    let addr = cloud_config.bind_addr();
+    info!(addr = %addr, "Starting API server");
+
+    // Start API server
+    let api_handle = tokio::spawn({
+        let store = store.clone();
+        let shutdown_rx = shutdown_rx.clone();
+        let shutdown_tx = shutdown_tx.clone();
+        let addr = addr.clone();
+        async move {
+            api::serve_with_shutdown(
+                store,
+                &addr,
+                start_time,
+                config_json,
+                String::new(),
+                Some(shutdown_tx),
+                shutdown_signal(shutdown_rx),
+            )
+            .await
+        }
+    });
+
+    info!("Cloud daemon ready on http://{}", addr);
+
+    // Wait for shutdown signal
+    let ctrl_c = async {
+        tokio::signal::ctrl_c().await.ok();
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => info!("Received SIGINT"),
+        _ = terminate => info!("Received SIGTERM"),
+    }
+
+    info!("Initiating graceful shutdown");
+    let _ = shutdown_tx.send(true);
+
+    // Wait for API server with timeout
+    let shutdown_result = tokio::time::timeout(SHUTDOWN_TIMEOUT, api_handle).await;
+
+    match shutdown_result {
+        Ok(Ok(Ok(()))) => info!("API server stopped gracefully"),
+        Ok(Ok(Err(e))) => error!("API server error: {}", e),
+        Ok(Err(e)) => error!("API server panicked: {}", e),
+        Err(_) => warn!("Shutdown timed out"),
+    }
+
+    info!("Cloud daemon stopped");
 }

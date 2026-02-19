@@ -16,7 +16,8 @@ use std::time::Duration;
 use tokio::sync::{watch, RwLock};
 use tracing::{debug, info, warn};
 
-use storage::{PersistentStore, SqliteBackend};
+use storage::PersistentStore;
+use storage_sqlite::SqliteBackend;
 use trace::{SpanBuilder, SpanKind, Trace};
 
 /// Models used in synthetic LLM call spans.
