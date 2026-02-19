@@ -217,7 +217,7 @@ def test_analytics_summary():
             s.set_output({})
 
     # Call analytics summary via raw HTTP (SDK doesn't wrap this yet)
-    resp = httpx.get(f"{BASE}/analytics/summary")
+    resp = httpx.get(f"{BASE}/api/analytics/summary")
     assert resp.status_code == 200
     data = resp.json()
     assert data["total_spans"] >= 3
@@ -227,7 +227,7 @@ def test_analytics_summary():
     assert "claude-3" in data["models_used"]
 
     # Flexible analytics query
-    resp = httpx.post(f"{BASE}/analytics", json={
+    resp = httpx.post(f"{BASE}/api/analytics", json={
         "metrics": ["span_count", "total_tokens"],
         "group_by": ["model"],
         "filter": {"kind": "llm_call"},

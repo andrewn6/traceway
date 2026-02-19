@@ -18,6 +18,8 @@
 				stats.span_count++;
 			} else if (event.type === 'span_deleted') {
 				stats.span_count = Math.max(0, stats.span_count - 1);
+			} else if (event.type === 'trace_created') {
+				stats.trace_count++;
 			} else if (event.type === 'trace_deleted') {
 				stats.trace_count = Math.max(0, stats.trace_count - 1);
 				getStats().then((s) => (stats = s)).catch(() => {});
@@ -37,15 +39,17 @@
 	});
 
 	const navItems = [
+		{ href: '/', label: 'Dashboard', icon: 'dashboard' },
 		{ href: '/traces', label: 'Traces', icon: 'trace' },
 		{ href: '/query', label: 'Query', icon: 'query' },
 		{ href: '/files', label: 'Files', icon: 'file' },
 		{ href: '/datasets', label: 'Datasets', icon: 'dataset' },
-		{ href: '/analysis', label: 'Analysis', icon: 'analysis' },
+		{ href: '/analytics', label: 'Analytics', icon: 'analysis' },
 		{ href: '/settings', label: 'Settings', icon: 'settings' },
 	];
 
 	function isActive(href: string): boolean {
+		if (href === '/') return page.url.pathname === '/';
 		return page.url.pathname === href || page.url.pathname.startsWith(href + '/');
 	}
 </script>
@@ -55,7 +59,7 @@
 	<aside class="w-48 shrink-0 border-r border-border bg-bg-secondary flex flex-col">
 		<!-- Logo -->
 		<div class="px-4 py-4 border-b border-border">
-			<a href="/traces" class="text-text font-bold text-base tracking-tight hover:text-accent transition-colors">
+			<a href="/" class="text-text font-bold text-base tracking-tight hover:text-accent transition-colors">
 				llmtrace
 			</a>
 		</div>
@@ -70,8 +74,12 @@
 							? 'bg-bg-tertiary text-text'
 							: 'text-text-secondary hover:text-text hover:bg-bg-tertiary/50'}"
 				>
-					<!-- Icons -->
-					{#if item.icon === 'trace'}
+				<!-- Icons -->
+				{#if item.icon === 'dashboard'}
+					<svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+					</svg>
+				{:else if item.icon === 'trace'}
 						<svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
 							<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 0 1 0 3.75H5.625a1.875 1.875 0 0 1 0-3.75Z" />
 						</svg>

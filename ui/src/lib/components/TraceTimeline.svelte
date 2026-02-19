@@ -157,7 +157,6 @@
 
 	function modelBadge(s: Span): string | null {
 		if (s.kind?.type === 'llm_call') return s.kind.model;
-		if (s.metadata?.model) return s.metadata.model;
 		return null;
 	}
 

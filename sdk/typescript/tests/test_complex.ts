@@ -230,7 +230,7 @@ async function testAnalyticsSummary() {
   });
 
   // Analytics summary via raw fetch
-  const summaryResp = await fetch(`${BASE}/analytics/summary`);
+  const summaryResp = await fetch(`${BASE}/api/analytics/summary`);
   assert(summaryResp.ok, `analytics/summary failed: ${summaryResp.status}`);
   const summary = await summaryResp.json();
   assert(summary.total_spans >= 3, `Expected >=3 spans, got ${summary.total_spans}`);
@@ -240,7 +240,7 @@ async function testAnalyticsSummary() {
   assert(summary.models_used.includes('claude-3'), 'Missing claude-3');
 
   // Flexible analytics query
-  const analyticsResp = await fetch(`${BASE}/analytics`, {
+  const analyticsResp = await fetch(`${BASE}/api/analytics`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

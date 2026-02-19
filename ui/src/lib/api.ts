@@ -1,28 +1,27 @@
-const API_BASE = 'http://localhost:3000';
+const API_BASE = '/api';
 
-// ─── Core Types (existing) ───────────────────────────────────────────
+// ─── Core Types ──────────────────────────────────────────────────────
 
-export interface SpanMetadata {
-	model: string | null;
-	input_tokens: number | null;
-	output_tokens: number | null;
-}
+export type SpanKind =
+	| { type: 'fs_read'; path: string; file_version?: string; bytes_read: number }
+	| { type: 'fs_write'; path: string; file_version: string; bytes_written: number }
+	| { type: 'llm_call'; model: string; provider?: string; input_tokens?: number; output_tokens?: number; cost?: number; input_preview?: string; output_preview?: string }
+	| { type: 'custom'; kind: string; attributes: Record<string, unknown> };
+
+// Status as serialized by Rust serde: "running", "completed", or { "failed": { "error": "..." } }
+export type SpanStatus = 'running' | 'completed' | { failed: { error: string } };
 
 export interface Span {
 	id: string;
 	trace_id: string;
 	parent_id: string | null;
 	name: string;
-	kind?: SpanKind;
+	kind: SpanKind;
+	status: SpanStatus;
+	started_at: string;
+	ended_at: string | null;
 	input?: unknown;
 	output?: unknown;
-	started_at?: string;
-	ended_at?: string | null;
-	status:
-		| { Running: { started_at: string } }
-		| { Completed: { started_at: string; ended_at: string } }
-		| { Failed: { started_at: string; ended_at: string; error: string } };
-	metadata: SpanMetadata;
 }
 
 export interface Trace {
@@ -65,21 +64,7 @@ export interface SpanFilter {
 	trace_id?: string;
 }
 
-// ─── New Types (SpanKind, Files, Health, Analysis) ───────────────────
-
-export type SpanKind =
-	| { type: 'fs_read'; path: string; file_version?: string; bytes_read: number }
-	| { type: 'fs_write'; path: string; file_version: string; bytes_written: number }
-	| { type: 'llm_call'; model: string; provider?: string; input_tokens?: number; output_tokens?: number; cost?: number; input_preview?: string; output_preview?: string }
-	| { type: 'custom'; kind: string; attributes: Record<string, unknown> };
-
-export interface TrackedFile {
-	path: string;
-	current_hash: string;
-	version_count: number;
-	created_at: string;
-	updated_at: string;
-}
+// ─── File Types ──────────────────────────────────────────────────────
 
 export interface FileVersion {
 	hash: string;
@@ -87,32 +72,29 @@ export interface FileVersion {
 	size: number;
 	created_at: string;
 	created_by_span: string | null;
-	created_by_trace: string | null;
 }
 
-export interface FileTraces {
-	reads: { trace_id: string; span_name: string; at: string }[];
-	writes: { trace_id: string; span_name: string; at: string }[];
+export interface FileListResponse {
+	files: FileVersion[];
+	count: number;
 }
+
+export interface FileVersionsResponse {
+	path: string;
+	versions: FileVersion[];
+	count: number;
+}
+
+// ─── Health ──────────────────────────────────────────────────────────
 
 export interface HealthStatus {
 	status: string;
-	uptime_seconds?: number;
-	version?: string;
-	components?: Record<string, string>;
-	storage?: {
+	uptime_secs: number;
+	version: string;
+	storage: {
 		span_count: number;
 		trace_count: number;
-		file_count: number;
-		db_size_bytes: number;
 	};
-}
-
-export interface TraceDiff {
-	only_in_a: Span[];
-	only_in_b: Span[];
-	in_both: { a: Span; b: Span }[];
-	files_diff: { path: string; version_a?: string; version_b?: string }[];
 }
 
 // ─── Dataset Types ───────────────────────────────────────────────────
@@ -171,15 +153,34 @@ export interface QueueList {
 	counts: { pending: number; claimed: number; completed: number };
 }
 
+// ─── Analytics Types ─────────────────────────────────────────────────
+
+export interface AnalyticsSummary {
+	total_traces: number;
+	total_spans: number;
+	total_llm_calls: number;
+	total_cost: number;
+	total_tokens: number;
+	avg_latency_ms: number;
+	error_count: number;
+	models_used: string[];
+	providers_used: string[];
+	cost_by_model: { model: string; cost: number; span_count: number }[];
+	tokens_by_model: { model: string; input_tokens: number; output_tokens: number; total_tokens: number }[];
+}
+
 // ─── Events ──────────────────────────────────────────────────────────
 
 export type SpanEvent =
 	| { type: 'span_created'; span: Span }
-	| { type: 'span_updated'; span: Span }
+	| { type: 'span_completed'; span: Span }
+	| { type: 'span_failed'; span: Span }
 	| { type: 'span_deleted'; span_id: string }
+	| { type: 'trace_created'; trace: Trace }
+	| { type: 'trace_completed'; trace: Trace }
 	| { type: 'trace_deleted'; trace_id: string }
-	| { type: 'file_version_created'; file: TrackedFile; version: FileVersion }
-	| { type: 'dataset_created'; dataset: DatasetWithCount }
+	| { type: 'file_version_created'; file: FileVersion }
+	| { type: 'dataset_created'; dataset: Dataset }
 	| { type: 'dataset_deleted'; dataset_id: string }
 	| { type: 'datapoint_created'; datapoint: Datapoint }
 	| { type: 'queue_item_updated'; item: QueueItem }
@@ -199,12 +200,6 @@ async function get<T>(path: string): Promise<T> {
 	const res = await fetch(`${API_BASE}${path}`);
 	if (!res.ok) throw new Error(`GET ${path}: ${res.status}`);
 	return res.json();
-}
-
-async function getText(path: string): Promise<string> {
-	const res = await fetch(`${API_BASE}${path}`);
-	if (!res.ok) throw new Error(`GET ${path}: ${res.status}`);
-	return res.text();
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
@@ -272,37 +267,24 @@ export const failSpan = (spanId: string, error: string) =>
 // ─── File Endpoints ──────────────────────────────────────────────────
 
 export const getFiles = (filter?: { path_prefix?: string }) =>
-	get<TrackedFile[]>(`/files${qs(filter ?? {})}`);
-
-export const getFileContent = (path: string) =>
-	getText(`/files/${encodeURIComponent(path)}`);
+	get<FileListResponse>(`/files${qs(filter ?? {})}`);
 
 export const getFileVersions = (path: string) =>
-	get<FileVersion[]>(`/files/${encodeURIComponent(path)}/versions`);
-
-export const getFileTraces = (path: string) =>
-	get<FileTraces>(`/files/${encodeURIComponent(path)}/traces`);
+	get<FileVersionsResponse>(`/files/${encodeURIComponent(path)}`);
 
 // ─── Health ──────────────────────────────────────────────────────────
 
 export const getHealth = () => get<HealthStatus>('/health');
 
-// ─── Analysis ────────────────────────────────────────────────────────
+// ─── Analytics ───────────────────────────────────────────────────────
 
-export const getTraceDiff = (traceA: string, traceB: string) =>
-	get<TraceDiff>(`/analysis/diff${qs({ trace_a: traceA, trace_b: traceB })}`);
-
-export const getFileImpact = (path: string) =>
-	get<{ traces: { trace_id: string; read_at: string }[] }>(`/analysis/file-impact${qs({ path })}`);
-
-export const getUnusedContext = (traceId: string) =>
-	get<{ unused_files: { path: string; bytes_read: number }[] }>(`/analysis/unused-context${qs({ trace_id: traceId })}`);
+export const getAnalyticsSummary = () => get<AnalyticsSummary>('/analytics/summary');
 
 // ─── Dataset Endpoints ───────────────────────────────────────────────
 
 export const getDatasets = () => get<DatasetList>('/datasets');
 export const createDataset = (name: string, description?: string) =>
-	post<DatasetWithCount>('/datasets', { name, description });
+	post<Dataset>('/datasets', { name, description });
 export const getDataset = (id: string) => get<DatasetWithCount>(`/datasets/${id}`);
 export const updateDataset = (id: string, body: { name?: string; description?: string }) =>
 	put<DatasetWithCount>(`/datasets/${id}`, body);
@@ -361,50 +343,48 @@ export function subscribeEvents(callback: (event: SpanEvent) => void): () => voi
 // ─── Span Helpers ────────────────────────────────────────────────────
 
 export function spanStatus(span: Span): 'running' | 'completed' | 'failed' {
-	if ('Running' in span.status) return 'running';
-	if ('Completed' in span.status) return 'completed';
+	if (span.status === 'running') return 'running';
+	if (span.status === 'completed') return 'completed';
 	return 'failed';
 }
 
 export function spanStartedAt(span: Span): string {
-	if (span.started_at) return span.started_at;
-	if ('Running' in span.status) return span.status.Running.started_at;
-	if ('Completed' in span.status) return span.status.Completed.started_at;
-	return span.status.Failed.started_at;
+	return span.started_at;
 }
 
 export function spanEndedAt(span: Span): string | null {
-	if (span.ended_at) return span.ended_at;
-	if ('Completed' in span.status) return span.status.Completed.ended_at;
-	if ('Failed' in span.status) return span.status.Failed.ended_at;
-	return null;
+	return span.ended_at ?? null;
 }
 
 export function spanDurationMs(span: Span): number | null {
-	const end = spanEndedAt(span);
-	if (!end) return null;
-	return new Date(end).getTime() - new Date(spanStartedAt(span)).getTime();
+	if (!span.ended_at) return null;
+	return new Date(span.ended_at).getTime() - new Date(span.started_at).getTime();
 }
 
 export function spanError(span: Span): string | null {
-	if ('Failed' in span.status) return span.status.Failed.error;
+	if (typeof span.status === 'object' && 'failed' in span.status) {
+		return span.status.failed.error;
+	}
 	return null;
 }
 
-export function spanKindLabel(span: Span): string | null {
-	if (!span.kind) return null;
+export function spanKindLabel(span: Span): string {
 	if (span.kind.type === 'custom') return span.kind.kind;
 	return span.kind.type;
 }
 
 export function spanKindColor(span: Span): string {
-	if (!span.kind) return 'bg-text-muted';
 	switch (span.kind.type) {
 		case 'fs_read': return 'bg-accent';
 		case 'fs_write': return 'bg-success';
 		case 'llm_call': return 'bg-purple-400';
 		default: return 'bg-text-muted';
 	}
+}
+
+export function spanModel(span: Span): string | null {
+	if (span.kind.type === 'llm_call') return span.kind.model;
+	return null;
 }
 
 export function shortId(id: string): string {

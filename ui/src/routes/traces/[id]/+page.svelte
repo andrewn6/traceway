@@ -47,7 +47,7 @@
 		const unsub = subscribeEvents((event) => {
 			if (event.type === 'span_created' && event.span.trace_id === traceId) {
 				spans = [...spans, event.span];
-			} else if (event.type === 'span_updated' && event.span.trace_id === traceId) {
+			} else if ((event.type === 'span_completed' || event.type === 'span_failed') && event.span.trace_id === traceId) {
 				spans = spans.map((s) => (s.id === event.span.id ? event.span : s));
 				if (selectedSpan?.id === event.span.id) {
 					selectedSpan = event.span;

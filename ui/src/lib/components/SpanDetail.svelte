@@ -254,32 +254,7 @@
 			</div>
 		{/if}
 
-		<!-- Legacy metadata (backward compat) -->
-		{#if !span.kind && (span.metadata.model || span.metadata.input_tokens || span.metadata.output_tokens)}
-			<div class="border-t border-border pt-2 space-y-1">
-				<div class="text-text-muted text-xs uppercase">Metadata</div>
-				<div class="grid grid-cols-3 gap-2 text-xs">
-					{#if span.metadata.model}
-						<div>
-							<span class="text-text-muted">Model</span>
-							<div class="text-accent">{span.metadata.model}</div>
-						</div>
-					{/if}
-					{#if span.metadata.input_tokens}
-						<div>
-							<span class="text-text-muted">In tokens</span>
-							<div>{span.metadata.input_tokens.toLocaleString()}</div>
-						</div>
-					{/if}
-					{#if span.metadata.output_tokens}
-						<div>
-							<span class="text-text-muted">Out tokens</span>
-							<div>{span.metadata.output_tokens.toLocaleString()}</div>
-						</div>
-					{/if}
-				</div>
-			</div>
-		{/if}
+
 
 		<!-- Input / Output payloads -->
 		{#if span.input !== undefined || span.output !== undefined}

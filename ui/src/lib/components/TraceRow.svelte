@@ -15,9 +15,6 @@
 		for (const s of spans) {
 			if (s.kind?.type === 'llm_call') return s.kind.model;
 		}
-		for (const s of spans) {
-			if (s.metadata.model) return s.metadata.model;
-		}
 		return null;
 	});
 	const started = $derived(

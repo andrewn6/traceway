@@ -30,7 +30,7 @@ export class LLMTrace {
   // ─── Internal helpers ──────────────────────────────────────────────
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
+    const res = await fetch(`${this.baseUrl}/api${path}`, {
       method,
       headers: body ? { 'Content-Type': 'application/json' } : {},
       body: body ? JSON.stringify(body) : undefined,
@@ -43,7 +43,7 @@ export class LLMTrace {
   }
 
   private async requestText(method: string, path: string): Promise<string> {
-    const res = await fetch(`${this.baseUrl}${path}`, { method });
+    const res = await fetch(`${this.baseUrl}/api${path}`, { method });
     if (!res.ok) {
       throw new Error(`${method} ${path}: HTTP ${res.status}`);
     }
@@ -152,7 +152,7 @@ export class LLMTrace {
   // ─── Live ──────────────────────────────────────────────────────────
 
   subscribe(callback: (event: SpanEvent) => void): () => void {
-    const es = new EventSource(`${this.baseUrl}/events`);
+    const es = new EventSource(`${this.baseUrl}/api/events`);
     es.onmessage = (e) => {
       try {
         callback(JSON.parse(e.data));
