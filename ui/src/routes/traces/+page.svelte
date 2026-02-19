@@ -14,6 +14,7 @@
 	// New trace form
 	let showNewTrace = $state(false);
 	let newName = $state('');
+	let newTags = $state('');
 	let creating = $state(false);
 
 	async function loadTraces() {
@@ -42,9 +43,11 @@
 	async function handleNewTrace() {
 		creating = true;
 		try {
-			const trace = await createTrace(newName.trim() || undefined);
+			const tags = newTags.trim() ? newTags.split(',').map(t => t.trim()).filter(Boolean) : undefined;
+			const trace = await createTrace(newName.trim() || undefined, tags);
 			showNewTrace = false;
 			newName = '';
+			newTags = '';
 			goto(`/traces/${trace.id}`);
 		} catch {
 			// error
@@ -155,6 +158,16 @@
 					class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted"
 				/>
 			</div>
+			<div class="w-48">
+				<label for="new-trace-tags" class="block text-xs text-text-muted uppercase mb-1">Tags (comma-separated)</label>
+				<input
+					id="new-trace-tags"
+					type="text"
+					bind:value={newTags}
+					placeholder="e.g. prod, gpt-4, test"
+					class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted"
+				/>
+			</div>
 			<button
 				type="submit"
 				disabled={creating}
@@ -166,13 +179,14 @@
 	{/if}
 
 	<!-- Table header -->
-	<div class="grid grid-cols-[1fr_80px_100px_140px_100px_100px] gap-4 px-3 text-xs text-text-muted uppercase">
+	<div class="grid grid-cols-[1fr_80px_100px_140px_100px_100px_60px] gap-4 px-3 text-xs text-text-muted uppercase">
 		<span>Trace</span>
 		<span class="text-center">Spans</span>
 		<span class="text-center">Status</span>
 		<span>Started</span>
 		<span class="text-right">Duration</span>
 		<span>Model</span>
+		<span></span>
 	</div>
 
 	{#if loading}
@@ -194,12 +208,12 @@
 						Quick test with curl
 					</summary>
 					<pre class="mt-2 bg-bg-tertiary rounded p-3 text-xs text-text-secondary font-mono overflow-x-auto whitespace-pre"># 1. Create a trace
-curl -s http://localhost:3000/traces -X POST \
+curl -s http://localhost:3000/api/traces -X POST \
   -H 'Content-Type: application/json' \
   -d '{`{"name":"my-trace"}`}'
 
 # 2. Create a span (use the trace_id from step 1)
-curl -s http://localhost:3000/spans -X POST \
+curl -s http://localhost:3000/api/spans -X POST \
   -H 'Content-Type: application/json' \
   -d '{`{"trace_id":"<ID>","name":"my-span","kind":{"type":"custom","kind":"task","attributes":{}}}`}'</pre>
 				</details>
@@ -238,7 +252,11 @@ await span.complete({`{ result: "done" }`});</pre>
 	{:else}
 		<div class="space-y-0">
 			{#each filtered as trace (trace.id)}
-				<TraceRow traceId={trace.id} spans={traceSpans.get(trace.id) ?? []} />
+				<TraceRow traceId={trace.id} spans={traceSpans.get(trace.id) ?? []} onDelete={(id) => {
+					traces = traces.filter(t => t.id !== id);
+					traceSpans.delete(id);
+					traceSpans = new Map(traceSpans);
+				}} />
 			{/each}
 		</div>
 	{/if}

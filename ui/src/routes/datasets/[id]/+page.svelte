@@ -10,6 +10,7 @@
 		claimQueueItem,
 		submitQueueItem,
 		importFile,
+		updateDataset,
 		subscribeEvents,
 		shortId,
 		type DatasetWithCount,
@@ -28,6 +29,35 @@
 	let queue: QueueList = $state({ items: [], counts: { pending: 0, claimed: 0, completed: 0 } });
 	let loading = $state(true);
 	let activeTab: 'datapoints' | 'import' | 'queue' = $state('datapoints');
+
+	// ── Edit dataset state ────────────────────────────────────────────
+	let showEditDataset = $state(false);
+	let editName = $state('');
+	let editDescription = $state('');
+	let editSaving = $state(false);
+
+	function startEditDataset() {
+		if (!dataset) return;
+		editName = dataset.name;
+		editDescription = dataset.description ?? '';
+		showEditDataset = true;
+	}
+
+	async function handleSaveDataset() {
+		if (!dataset || !editName.trim()) return;
+		editSaving = true;
+		try {
+			const updated = await updateDataset(datasetId, {
+				name: editName.trim(),
+				description: editDescription.trim() || undefined
+			});
+			dataset = updated;
+			showEditDataset = false;
+		} catch {
+			// error
+		}
+		editSaving = false;
+	}
 
 	// ── Datapoint form state ───────────────────────────────────────────
 	let showAddForm = $state(false);
@@ -239,6 +269,18 @@
 		return JSON.stringify(value, null, 2);
 	}
 
+	function exportDatasetJson() {
+		if (datapoints.length === 0) return;
+		const exportData = datapoints.map(dp => dp.kind);
+		const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = `${dataset?.name ?? 'dataset'}-${datapoints.length}-datapoints.json`;
+		a.click();
+		URL.revokeObjectURL(url);
+	}
+
 	const queueItemsByStatus = $derived.by(() => {
 		const pending = queue.items.filter((i) => i.status === 'pending');
 		const claimed = queue.items.filter((i) => i.status === 'claimed');
@@ -253,12 +295,37 @@
 		<a href="/datasets" class="text-text-secondary hover:text-text text-sm">&larr; Datasets</a>
 		<span class="text-text-muted">/</span>
 		{#if dataset}
-			<h1 class="text-lg font-bold">{dataset.name}</h1>
-			<span class="px-2 py-0.5 text-xs bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded">
-				{dataset.datapoint_count} datapoints
-			</span>
-			{#if dataset.description}
-				<span class="text-text-muted text-sm">{dataset.description}</span>
+			{#if showEditDataset}
+				<form class="flex items-end gap-2 flex-1" onsubmit={(e) => { e.preventDefault(); handleSaveDataset(); }}>
+					<div>
+						<label for="edit-ds-name" class="block text-xs text-text-muted uppercase mb-1">Name</label>
+						<input id="edit-ds-name" type="text" bind:value={editName}
+							class="bg-bg-tertiary border border-border rounded px-2 py-1 text-sm text-text" />
+					</div>
+					<div class="flex-1">
+						<label for="edit-ds-desc" class="block text-xs text-text-muted uppercase mb-1">Description</label>
+						<input id="edit-ds-desc" type="text" bind:value={editDescription} placeholder="Optional description"
+							class="w-full bg-bg-tertiary border border-border rounded px-2 py-1 text-sm text-text placeholder:text-text-muted" />
+					</div>
+					<button type="submit" disabled={editSaving || !editName.trim()}
+						class="px-3 py-1 text-xs bg-amber-400 text-bg font-semibold rounded hover:bg-amber-300 transition-colors disabled:opacity-50">
+						{editSaving ? 'Saving...' : 'Save'}
+					</button>
+					<button type="button" onclick={() => (showEditDataset = false)}
+						class="px-3 py-1 text-xs text-text-muted hover:text-text transition-colors">Cancel</button>
+				</form>
+			{:else}
+				<h1 class="text-lg font-bold">{dataset.name}</h1>
+				<span class="px-2 py-0.5 text-xs bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded">
+					{dataset.datapoint_count} datapoints
+				</span>
+				{#if dataset.description}
+					<span class="text-text-muted text-sm">{dataset.description}</span>
+				{/if}
+				<button
+					class="text-text-muted hover:text-text text-xs transition-colors"
+					onclick={startEditDataset}
+				>edit</button>
 			{/if}
 		{:else if !loading}
 			<h1 class="text-lg font-bold text-text-muted">Dataset not found</h1>
@@ -312,6 +379,12 @@
 						>
 							Enqueue {selected.size} selected
 						</button>
+					{/if}
+					{#if datapoints.length > 0}
+						<button
+							class="px-3 py-1.5 text-xs bg-bg-tertiary text-text-secondary border border-border rounded hover:text-text transition-colors"
+							onclick={exportDatasetJson}
+						>Export JSON</button>
 					{/if}
 				</div>
 
