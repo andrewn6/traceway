@@ -22,6 +22,7 @@ use axum_extra::extract::Multipart;
 use rust_embed::Embed;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::{OpenApi, ToSchema};
 use tokio::sync::{broadcast, watch, RwLock};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use tower_http::cors::{Any, CorsLayer};
@@ -35,6 +36,95 @@ use trace::{
 };
 
 pub use events::{EventBus, EventSubscriber, LocalEventBus};
+
+// --- OpenAPI ---
+
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "llm-fs API",
+        version = "0.1.0",
+        description = "LLM tracing and observability API"
+    ),
+    paths(
+        // OpenAPI spec endpoint
+        openapi_spec,
+    ),
+    components(schemas(
+        // Trace types
+        trace::Span,
+        trace::SpanKind,
+        trace::SpanStatus,
+        trace::Trace,
+        trace::FileVersion,
+        trace::TrackedFile,
+        trace::Dataset,
+        trace::Datapoint,
+        trace::DatapointKind,
+        trace::DatapointSource,
+        trace::Message,
+        trace::QueueItem,
+        trace::QueueItemStatus,
+        trace::AnalyticsQuery,
+        trace::AnalyticsMetric,
+        trace::GroupByField,
+        trace::AnalyticsFilter,
+        trace::AnalyticsResponse,
+        trace::AnalyticsGroup,
+        trace::MetricValues,
+        trace::AnalyticsSummary,
+        trace::ModelCost,
+        trace::ModelTokens,
+        // Request types
+        CreateSpanRequest,
+        CompleteSpanRequest,
+        FailSpanRequest,
+        SpanQueryParams,
+        CreateTraceRequest,
+        FileQueryParams,
+        ExportParams,
+        CreateDatasetRequest,
+        UpdateDatasetRequest,
+        CreateDatapointRequest,
+        ExportSpanRequest,
+        EnqueueRequest,
+        ClaimRequest,
+        SubmitRequest,
+        // Response types
+        CreatedSpan,
+        TraceListResponse,
+        SpanList,
+        Stats,
+        DeletedTrace,
+        ClearedAll,
+        ExportData,
+        FileListResponse,
+        FileVersionsResponse,
+        DatasetResponse,
+        DatasetListResponse,
+        DatapointListResponse,
+        ImportResponse,
+        QueueListResponse,
+        QueueCounts,
+        EnqueueResponse,
+        HealthResponse,
+        StorageHealth,
+    ))
+)]
+pub struct ApiDoc;
+
+/// Get OpenAPI specification
+#[utoipa::path(
+    get,
+    path = "/api/openapi.json",
+    responses(
+        (status = 200, description = "OpenAPI JSON specification")
+    ),
+    tag = "docs"
+)]
+async fn openapi_spec() -> Json<utoipa::openapi::OpenApi> {
+    Json(ApiDoc::openapi())
+}
 
 // --- Events ---
 
@@ -73,202 +163,213 @@ pub type SharedStore = Arc<RwLock<PersistentStore<SqliteBackend>>>;
 
 // --- Request types ---
 
-#[derive(Deserialize)]
-struct CreateSpanRequest {
-    trace_id: TraceId,
+#[derive(Deserialize, ToSchema)]
+pub struct CreateSpanRequest {
+    #[schema(value_type = String)]
+    pub trace_id: TraceId,
     #[serde(default)]
-    parent_id: Option<SpanId>,
-    name: String,
-    kind: SpanKind,
+    #[schema(value_type = Option<String>)]
+    pub parent_id: Option<SpanId>,
+    pub name: String,
+    pub kind: SpanKind,
     #[serde(default)]
-    input: Option<serde_json::Value>,
+    pub input: Option<serde_json::Value>,
 }
 
-#[derive(Deserialize)]
-struct CompleteSpanRequest {
+#[derive(Deserialize, ToSchema)]
+pub struct CompleteSpanRequest {
     #[serde(default)]
-    output: Option<serde_json::Value>,
+    pub output: Option<serde_json::Value>,
 }
 
-#[derive(Deserialize)]
-struct FailSpanRequest {
-    error: String,
+#[derive(Deserialize, ToSchema)]
+pub struct FailSpanRequest {
+    pub error: String,
 }
 
-#[derive(Deserialize)]
-struct SpanQueryParams {
-    kind: Option<String>,
-    model: Option<String>,
-    provider: Option<String>,
-    status: Option<String>,
-    since: Option<DateTime<Utc>>,
-    until: Option<DateTime<Utc>>,
-    name_contains: Option<String>,
-    path: Option<String>,
-    trace_id: Option<TraceId>,
+#[derive(Deserialize, ToSchema)]
+pub struct SpanQueryParams {
+    pub kind: Option<String>,
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub status: Option<String>,
+    pub since: Option<DateTime<Utc>>,
+    pub until: Option<DateTime<Utc>>,
+    pub name_contains: Option<String>,
+    pub path: Option<String>,
+    #[schema(value_type = Option<String>)]
+    pub trace_id: Option<TraceId>,
 }
 
-#[derive(Deserialize)]
-struct CreateTraceRequest {
+#[derive(Deserialize, ToSchema)]
+pub struct CreateTraceRequest {
     #[serde(default)]
-    name: Option<String>,
+    pub name: Option<String>,
     #[serde(default)]
-    tags: Vec<String>,
+    pub tags: Vec<String>,
 }
 
-#[derive(Deserialize)]
-struct FileQueryParams {
-    path_prefix: Option<String>,
-    since: Option<DateTime<Utc>>,
-    until: Option<DateTime<Utc>>,
+#[derive(Deserialize, ToSchema)]
+pub struct FileQueryParams {
+    pub path_prefix: Option<String>,
+    pub since: Option<DateTime<Utc>>,
+    pub until: Option<DateTime<Utc>>,
 }
 
-#[derive(Deserialize)]
-struct ExportParams {
-    trace_id: Option<TraceId>,
+#[derive(Deserialize, ToSchema)]
+pub struct ExportParams {
+    #[schema(value_type = Option<String>)]
+    pub trace_id: Option<TraceId>,
 }
 
 // --- Dataset request types ---
 
-#[derive(Deserialize)]
-struct CreateDatasetRequest {
-    name: String,
+#[derive(Deserialize, ToSchema)]
+pub struct CreateDatasetRequest {
+    pub name: String,
     #[serde(default)]
-    description: Option<String>,
+    pub description: Option<String>,
 }
 
-#[derive(Deserialize)]
-struct UpdateDatasetRequest {
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateDatasetRequest {
     #[serde(default)]
-    name: Option<String>,
+    pub name: Option<String>,
     #[serde(default)]
-    description: Option<String>,
+    pub description: Option<String>,
 }
 
-#[derive(Deserialize)]
-struct CreateDatapointRequest {
-    kind: DatapointKind,
+#[derive(Deserialize, ToSchema)]
+pub struct CreateDatapointRequest {
+    pub kind: DatapointKind,
 }
 
-#[derive(Deserialize)]
-struct ExportSpanRequest {
-    span_id: SpanId,
+#[derive(Deserialize, ToSchema)]
+pub struct ExportSpanRequest {
+    #[schema(value_type = String)]
+    pub span_id: SpanId,
 }
 
-#[derive(Deserialize)]
-struct EnqueueRequest {
-    datapoint_ids: Vec<DatapointId>,
+#[derive(Deserialize, ToSchema)]
+pub struct EnqueueRequest {
+    #[schema(value_type = Vec<String>)]
+    pub datapoint_ids: Vec<DatapointId>,
 }
 
-#[derive(Deserialize)]
-struct ClaimRequest {
-    claimed_by: String,
+#[derive(Deserialize, ToSchema)]
+pub struct ClaimRequest {
+    pub claimed_by: String,
 }
 
-#[derive(Deserialize)]
-struct SubmitRequest {
+#[derive(Deserialize, ToSchema)]
+pub struct SubmitRequest {
     #[serde(default)]
-    edited_data: Option<serde_json::Value>,
+    pub edited_data: Option<serde_json::Value>,
 }
 
 // --- Response types ---
 
-#[derive(Serialize)]
-struct CreatedSpan {
-    id: SpanId,
-    trace_id: TraceId,
+#[derive(Serialize, ToSchema)]
+pub struct CreatedSpan {
+    #[schema(value_type = String)]
+    pub id: SpanId,
+    #[schema(value_type = String)]
+    pub trace_id: TraceId,
 }
 
-#[derive(Serialize)]
-struct TraceListResponse {
-    traces: Vec<Trace>,
-    count: usize,
+#[derive(Serialize, ToSchema)]
+pub struct TraceListResponse {
+    pub traces: Vec<Trace>,
+    pub count: usize,
 }
 
-#[derive(Serialize)]
-struct SpanList {
-    spans: Vec<Span>,
-    count: usize,
+#[derive(Serialize, ToSchema)]
+pub struct SpanList {
+    pub spans: Vec<Span>,
+    pub count: usize,
 }
 
-#[derive(Serialize)]
-struct Stats {
-    trace_count: usize,
-    span_count: usize,
+#[derive(Serialize, ToSchema)]
+pub struct Stats {
+    pub trace_count: usize,
+    pub span_count: usize,
 }
 
-#[derive(Serialize)]
-struct DeletedTrace {
-    trace_id: TraceId,
-    spans_deleted: usize,
+#[derive(Serialize, ToSchema)]
+pub struct DeletedTrace {
+    #[schema(value_type = String)]
+    pub trace_id: TraceId,
+    pub spans_deleted: usize,
 }
 
-#[derive(Serialize)]
-struct ClearedAll {
-    message: String,
+#[derive(Serialize, ToSchema)]
+pub struct ClearedAll {
+    pub message: String,
 }
 
-#[derive(Serialize)]
-struct ExportData {
-    traces: HashMap<TraceId, Vec<Span>>,
+#[derive(Serialize, ToSchema)]
+pub struct ExportData {
+    #[schema(value_type = HashMap<String, Vec<Span>>)]
+    pub traces: HashMap<TraceId, Vec<Span>>,
 }
 
-#[derive(Serialize)]
-struct FileListResponse {
-    files: Vec<FileVersion>,
-    count: usize,
+#[derive(Serialize, ToSchema)]
+pub struct FileListResponse {
+    pub files: Vec<FileVersion>,
+    pub count: usize,
 }
 
-#[derive(Serialize)]
-struct FileVersionsResponse {
-    path: String,
-    versions: Vec<FileVersion>,
-    count: usize,
+#[derive(Serialize, ToSchema)]
+pub struct FileVersionsResponse {
+    pub path: String,
+    pub versions: Vec<FileVersion>,
+    pub count: usize,
 }
 
 // --- Dataset response types ---
 
-#[derive(Serialize)]
-struct DatasetResponse {
+#[derive(Serialize, ToSchema)]
+pub struct DatasetResponse {
     #[serde(flatten)]
-    dataset: Dataset,
-    datapoint_count: usize,
+    pub dataset: Dataset,
+    pub datapoint_count: usize,
 }
 
-#[derive(Serialize)]
-struct DatasetListResponse {
-    datasets: Vec<DatasetResponse>,
-    count: usize,
+#[derive(Serialize, ToSchema)]
+pub struct DatasetListResponse {
+    pub datasets: Vec<DatasetResponse>,
+    pub count: usize,
 }
 
-#[derive(Serialize)]
-struct DatapointListResponse {
-    datapoints: Vec<Datapoint>,
-    count: usize,
+#[derive(Serialize, ToSchema)]
+pub struct DatapointListResponse {
+    pub datapoints: Vec<Datapoint>,
+    pub count: usize,
 }
 
-#[derive(Serialize)]
-struct ImportResponse {
-    imported: usize,
-    dataset_id: DatasetId,
+#[derive(Serialize, ToSchema)]
+pub struct ImportResponse {
+    pub imported: usize,
+    #[schema(value_type = String)]
+    pub dataset_id: DatasetId,
 }
 
-#[derive(Serialize)]
-struct QueueListResponse {
-    items: Vec<QueueItem>,
-    counts: QueueCounts,
+#[derive(Serialize, ToSchema)]
+pub struct QueueListResponse {
+    pub items: Vec<QueueItem>,
+    pub counts: QueueCounts,
 }
 
-#[derive(Serialize)]
-struct QueueCounts {
-    pending: usize,
-    claimed: usize,
-    completed: usize,
+#[derive(Serialize, ToSchema)]
+pub struct QueueCounts {
+    pub pending: usize,
+    pub claimed: usize,
+    pub completed: usize,
 }
 
-#[derive(Serialize)]
-struct EnqueueResponse {
-    enqueued: usize,
+#[derive(Serialize, ToSchema)]
+pub struct EnqueueResponse {
+    pub enqueued: usize,
 }
 
 // --- Trace handlers ---
@@ -600,23 +701,23 @@ async fn clear_all_traces(State(state): State<AppState>) -> Json<ClearedAll> {
 
 // --- Health handler ---
 
-#[derive(Serialize)]
-struct HealthResponse {
-    status: String,
-    uptime_secs: u64,
-    version: String,
-    storage: StorageHealth,
+#[derive(Serialize, ToSchema)]
+pub struct HealthResponse {
+    pub status: String,
+    pub uptime_secs: u64,
+    pub version: String,
+    pub storage: StorageHealth,
     #[serde(skip_serializing_if = "Option::is_none")]
-    region: Option<String>,
+    pub region: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    instance: Option<String>,
+    pub instance: Option<String>,
 }
 
-#[derive(Serialize)]
-struct StorageHealth {
-    trace_count: usize,
-    span_count: usize,
-    backend: String,
+#[derive(Serialize, ToSchema)]
+pub struct StorageHealth {
+    pub trace_count: usize,
+    pub span_count: usize,
+    pub backend: String,
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
@@ -1280,6 +1381,8 @@ pub fn router_with_start_time(
         .route("/shutdown", post(post_shutdown))
         // SSE
         .route("/events", get(events))
+        // OpenAPI spec
+        .route("/openapi.json", get(openapi_spec))
         // Auth routes
         .merge(auth_routes::auth_router());
 

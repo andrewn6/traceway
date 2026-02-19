@@ -13,6 +13,8 @@ storage = { path = "../storage" }
 storage-sqlite = { path = "../storage-sqlite" }
 auth = { path = "../auth" }
 axum.workspace = true
+utoipa.workspace = true
+utoipa-axum.workspace = true
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
