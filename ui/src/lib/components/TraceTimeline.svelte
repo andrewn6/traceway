@@ -166,9 +166,6 @@
 		if (s.kind?.type === 'llm_call') {
 			inp = s.kind.input_tokens ?? null;
 			out = s.kind.output_tokens ?? null;
-		} else if (s.metadata) {
-			inp = s.metadata.input_tokens;
-			out = s.metadata.output_tokens;
 		}
 		if (inp == null && out == null) return null;
 		const parts: string[] = [];

@@ -9,11 +9,13 @@
 	let activity: { time: string; text: string }[] = $state([]);
 	let loaded = $state(false);
 
-	const errorRate = $derived(
-		summary && summary.total_spans > 0
-			? ((summary.error_count / summary.total_spans) * 100).toFixed(1)
-			: '0.0'
-	);
+	const errorRate = $derived.by(() => {
+		const s = summary;
+		if (s && s.total_spans > 0) {
+			return ((s.error_count / s.total_spans) * 100).toFixed(1);
+		}
+		return '0.0';
+	});
 
 	function addActivity(text: string) {
 		const time = new Date().toLocaleTimeString();
@@ -95,12 +97,12 @@
 						Quick test with curl
 					</summary>
 					<pre class="mt-2 bg-bg-tertiary rounded p-3 text-xs text-text-secondary font-mono overflow-x-auto whitespace-pre"># Create a trace first
-TRACE=$(curl -s localhost:3000/traces -X POST \
+TRACE=$(curl -s localhost:3000/api/traces -X POST \
   -H 'Content-Type: application/json' \
   -d '{`{"name":"test-trace","tags":["manual"]}`}' | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
 
 # Create a span in that trace
-curl -s localhost:3000/spans -X POST \
+curl -s localhost:3000/api/spans -X POST \
   -H 'Content-Type: application/json' \
   -d "{`{\"trace_id\":\"$TRACE\",\"name\":\"hello-world\",\"kind\":{\"type\":\"llm_call\",\"model\":\"gpt-4o\"}}`}"</pre>
 				</details>
