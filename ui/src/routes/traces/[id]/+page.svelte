@@ -1,6 +1,7 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { getTrace, subscribeEvents, createSpan, type Span, type SpanKind } from '$lib/api';
+	import { getTrace, subscribeEvents, createSpan, deleteTrace, exportJson, type Span, type SpanKind } from '$lib/api';
 	import { shortId, spanStatus, spanDurationMs } from '$lib/api';
 	import TraceTimeline from '$lib/components/TraceTimeline.svelte';
 	import SpanDetail from '$lib/components/SpanDetail.svelte';
@@ -114,6 +115,38 @@
 		loadTrace(traceId);
 	}
 
+	let confirmDeleteTrace = $state(false);
+
+	async function handleDeleteTrace() {
+		if (!confirmDeleteTrace) {
+			confirmDeleteTrace = true;
+			setTimeout(() => (confirmDeleteTrace = false), 3000);
+			return;
+		}
+		try {
+			await deleteTrace(traceId);
+			goto('/traces');
+		} catch {
+			// error
+		}
+		confirmDeleteTrace = false;
+	}
+
+	async function handleExportTrace() {
+		try {
+			const data = await exportJson(traceId);
+			const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `trace-${shortId(traceId)}.json`;
+			a.click();
+			URL.revokeObjectURL(url);
+		} catch {
+			// error
+		}
+	}
+
 	const filesReadCount = $derived(spans.filter((s) => s.kind?.type === 'fs_read').length);
 	const filesWrittenCount = $derived(spans.filter((s) => s.kind?.type === 'fs_write').length);
 
@@ -164,6 +197,14 @@
 			>
 				{showAddSpan ? 'Cancel' : '+ Add Span'}
 			</button>
+			<button
+				class="px-3 py-1 text-xs bg-bg-tertiary text-text-secondary border border-border rounded hover:text-text transition-colors"
+				onclick={handleExportTrace}
+			>Export JSON</button>
+			<button
+				class="px-3 py-1 text-xs transition-colors border rounded {confirmDeleteTrace ? 'bg-danger/10 text-danger border-danger/30 font-semibold' : 'bg-bg-tertiary text-text-muted border-border hover:text-danger hover:border-danger/30'}"
+				onclick={handleDeleteTrace}
+			>{confirmDeleteTrace ? 'Confirm delete?' : 'Delete'}</button>
 		{/if}
 	</div>
 

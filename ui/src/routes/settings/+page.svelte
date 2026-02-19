@@ -100,13 +100,18 @@
 			</div>
 		</section>
 
-		<!-- Configuration -->
+		<!-- Storage Details -->
 		<section class="bg-bg-secondary border border-border rounded p-4 space-y-3">
 			<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Configuration</h2>
 			<p class="text-text-muted text-xs">
-				Configuration is loaded from <code class="bg-bg-tertiary px-1 rounded">~/.llmtrace/config.toml</code>
+				Configuration is loaded from <code class="bg-bg-tertiary px-1 rounded">~/.llmtrace/config.toml</code>.
+				Edit the file and restart the daemon to apply changes.
 			</p>
 			<div class="grid grid-cols-2 gap-4 text-sm">
+				<div>
+					<span class="text-text-muted text-xs">API Address</span>
+					<div class="text-text mt-0.5 font-mono text-xs">{window.location.host}</div>
+				</div>
 				<div>
 					<span class="text-text-muted text-xs">Database Path</span>
 					<div class="text-text mt-0.5 font-mono text-xs">~/.llmtrace/traces.db</div>
@@ -115,6 +120,12 @@
 					<span class="text-text-muted text-xs">Log Directory</span>
 					<div class="text-text mt-0.5 font-mono text-xs">~/.llmtrace/logs/</div>
 				</div>
+				{#if health}
+					<div>
+						<span class="text-text-muted text-xs">Storage Backend</span>
+						<div class="text-text mt-0.5 font-mono text-xs">SQLite ({stats.trace_count} traces, {stats.span_count} spans)</div>
+					</div>
+				{/if}
 			</div>
 		</section>
 

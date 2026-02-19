@@ -175,6 +175,17 @@
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === 'Enter') applyDsl();
 	}
+
+	function exportResults() {
+		if (results.length === 0) return;
+		const blob = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = `query-results-${resultCount}.json`;
+		a.click();
+		URL.revokeObjectURL(url);
+	}
 </script>
 
 <svelte:head>
@@ -321,6 +332,13 @@
 				<span>{resultCount} span{resultCount !== 1 ? 's' : ''} found</span>
 				<span>&middot;</span>
 				<span>{queryTimeMs}ms</span>
+				{#if results.length > 0}
+					<div class="flex-1"></div>
+					<button
+						class="text-text-secondary hover:text-text transition-colors"
+						onclick={exportResults}
+					>Export JSON</button>
+				{/if}
 			</div>
 
 			{#if results.length > 0}

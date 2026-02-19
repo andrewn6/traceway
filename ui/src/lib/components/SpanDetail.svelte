@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Span, DatasetWithCount } from '$lib/api';
-	import { spanStatus, spanStartedAt, spanEndedAt, spanDurationMs, spanError, spanKindLabel, shortId, getDatasets, exportSpanToDataset, completeSpan, failSpan } from '$lib/api';
+	import { spanStatus, spanStartedAt, spanEndedAt, spanDurationMs, spanError, spanKindLabel, shortId, getDatasets, exportSpanToDataset, completeSpan, failSpan, deleteSpan } from '$lib/api';
 	import StatusBadge from './StatusBadge.svelte';
 	import SpanKindIcon from './SpanKindIcon.svelte';
 
@@ -40,6 +40,25 @@
 		}
 		exportLoading = false;
 		setTimeout(() => (exportSuccess = ''), 3000);
+	}
+
+	// Delete span
+	let confirmDeleteSpan = $state(false);
+
+	async function handleDeleteSpan() {
+		if (!span) return;
+		if (!confirmDeleteSpan) {
+			confirmDeleteSpan = true;
+			setTimeout(() => (confirmDeleteSpan = false), 3000);
+			return;
+		}
+		try {
+			await deleteSpan(span.id);
+			onSpanAction?.();
+		} catch {
+			// error
+		}
+		confirmDeleteSpan = false;
 	}
 
 	// Complete / Fail actions
@@ -146,9 +165,13 @@
 					</div>
 				{/if}
 			</div>
-			{#if exportSuccess}
-				<span class="text-xs text-success">{exportSuccess}</span>
-			{/if}
+		{#if exportSuccess}
+			<span class="text-xs text-success">{exportSuccess}</span>
+		{/if}
+			<button
+				class="px-2 py-1 text-xs transition-colors border rounded {confirmDeleteSpan ? 'bg-danger/10 text-danger border-danger/30 font-semibold' : 'text-text-muted border-border hover:text-danger hover:border-danger/30'}"
+				onclick={handleDeleteSpan}
+			>{confirmDeleteSpan ? 'confirm?' : 'delete'}</button>
 			<StatusBadge status={spanStatus(span)} />
 		</div>
 

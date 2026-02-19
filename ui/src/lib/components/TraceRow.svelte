@@ -1,9 +1,28 @@
 <script lang="ts">
 	import type { Span } from '$lib/api';
-	import { spanStatus, spanStartedAt, spanDurationMs, shortId } from '$lib/api';
+	import { spanStatus, spanStartedAt, spanDurationMs, shortId, deleteTrace } from '$lib/api';
 	import StatusBadge from './StatusBadge.svelte';
 
-	let { traceId, spans }: { traceId: string; spans: Span[] } = $props();
+	let { traceId, spans, onDelete }: { traceId: string; spans: Span[]; onDelete?: (traceId: string) => void } = $props();
+
+	let confirmDelete = $state(false);
+
+	async function handleDelete(e: Event) {
+		e.preventDefault();
+		e.stopPropagation();
+		if (!confirmDelete) {
+			confirmDelete = true;
+			setTimeout(() => (confirmDelete = false), 3000);
+			return;
+		}
+		try {
+			await deleteTrace(traceId);
+			onDelete?.(traceId);
+		} catch {
+			// error
+		}
+		confirmDelete = false;
+	}
 
 	const firstSpan = $derived(spans[0]);
 	const status = $derived.by(() => {
@@ -29,7 +48,7 @@
 
 <a
 	href="/traces/{traceId}"
-	class="grid grid-cols-[1fr_80px_100px_140px_100px_100px] gap-4 items-center py-2 px-3 hover:bg-bg-tertiary rounded text-sm transition-colors border-b border-border"
+	class="grid grid-cols-[1fr_80px_100px_140px_100px_100px_60px] gap-4 items-center py-2 px-3 hover:bg-bg-tertiary rounded text-sm transition-colors border-b border-border"
 >
 	<span class="font-mono text-accent text-xs truncate">{shortId(traceId)}</span>
 	<span class="text-text-secondary text-center">{spans.length}</span>
@@ -39,4 +58,8 @@
 		{totalDuration !== null ? `${totalDuration}ms` : '...'}
 	</span>
 	<span class="text-text-secondary text-xs truncate">{model ?? '-'}</span>
+	<button
+		class="text-xs transition-colors {confirmDelete ? 'text-danger font-semibold' : 'text-text-muted hover:text-danger'}"
+		onclick={handleDelete}
+	>{confirmDelete ? 'confirm?' : 'delete'}</button>
 </a>
