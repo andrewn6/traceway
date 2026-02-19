@@ -1,3 +1,5 @@
+pub mod layout;
+
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::sync::Arc;
@@ -19,7 +21,7 @@ pub struct TraceFs {
     store: Arc<RwLock<SpanStore>>,
     trace_inos: HashMap<TraceId, u64>,
     span_inos: HashMap<SpanId, u64>,
-    next_ino: u64, 
+    next_ino: u64,
 }
 
 impl TraceFs {
@@ -54,7 +56,7 @@ impl TraceFs {
 
     fn file_attr(ino: u64, size: u64) -> FileAttr {
         FileAttr {
-            ino, 
+            ino,
             size,
             blocks: 1,
             atime: SystemTime::UNIX_EPOCH,
@@ -105,12 +107,12 @@ impl Filesystem for TraceFs {
             ],
             TRACES_INO => vec![
                 (TRACES_INO, FileType::Directory, "."),
-                (ROOT_INO, FileType::Directory, "..")
+                (ROOT_INO, FileType::Directory, ".."),
             ],
             _ => {
                 reply.error(libc::ENOENT);
                 return;
-            } 
+            }
         };
 
         for (i, (ino, kind, name)) in entries.into_iter().enumerate().skip(offset as usize) {
@@ -127,7 +129,7 @@ impl Filesystem for TraceFs {
         _ino: u64,
         _fh: u64,
         _offset: i64,
-        _size: u32, 
+        _size: u32,
         _flags: i32,
         _lock_owner: Option<u64>,
         reply: ReplyData,
@@ -141,7 +143,6 @@ pub fn mount(store: Arc<RwLock<SpanStore>>, mountpoint: &str) -> std::io::Result
     let options = vec![
         fuser::MountOption::RO,
         fuser::MountOption::FSName("tracefs".to_string()),
-        
     ];
     fuser::mount2(fs, mountpoint, &options)?;
     Ok(())
