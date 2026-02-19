@@ -1,173 +1,71 @@
 const API_BASE = '/api';
 
-// ─── Core Types ──────────────────────────────────────────────────────
+// ─── Generated Types ─────────────────────────────────────────────────
+// Re-export types from the auto-generated OpenAPI types
+import type { components } from './api-types';
 
-export type SpanKind =
-	| { type: 'fs_read'; path: string; file_version?: string; bytes_read: number }
-	| { type: 'fs_write'; path: string; file_version: string; bytes_written: number }
-	| { type: 'llm_call'; model: string; provider?: string; input_tokens?: number; output_tokens?: number; cost?: number; input_preview?: string; output_preview?: string }
-	| { type: 'custom'; kind: string; attributes: Record<string, unknown> };
+// Core types
+export type SpanKind = components['schemas']['SpanKind'];
+export type SpanStatus = components['schemas']['SpanStatus'];
+export type Span = components['schemas']['Span'];
+export type Trace = components['schemas']['Trace'];
+export type TraceListResponse = components['schemas']['TraceListResponse'];
+export type SpanList = components['schemas']['SpanList'];
+export type Stats = components['schemas']['Stats'];
+export type ExportData = components['schemas']['ExportData'];
 
-// Status as serialized by Rust serde: "running", "completed", or { "failed": { "error": "..." } }
-export type SpanStatus = 'running' | 'completed' | { failed: { error: string } };
+// File types
+export type FileVersion = components['schemas']['FileVersion'];
+export type FileListResponse = components['schemas']['FileListResponse'];
+export type FileVersionsResponse = components['schemas']['FileVersionsResponse'];
 
-export interface Span {
-	id: string;
-	trace_id: string;
-	parent_id: string | null;
-	name: string;
-	kind: SpanKind;
-	status: SpanStatus;
-	started_at: string;
-	ended_at: string | null;
-	input?: unknown;
-	output?: unknown;
-}
+// Health types
+export type HealthResponse = components['schemas']['HealthResponse'];
+export type StorageHealth = components['schemas']['StorageHealth'];
 
-export interface Trace {
-	id: string;
-	name?: string;
-	tags: string[];
-	started_at: string;
-	ended_at?: string | null;
-	machine_id?: string;
-}
+// Dataset types
+export type DatapointKind = components['schemas']['DatapointKind'];
+export type DatapointSource = components['schemas']['DatapointSource'];
+export type Dataset = components['schemas']['Dataset'];
+export type DatasetResponse = components['schemas']['DatasetResponse'];
+export type DatasetListResponse = components['schemas']['DatasetListResponse'];
+export type Datapoint = components['schemas']['Datapoint'];
+export type DatapointListResponse = components['schemas']['DatapointListResponse'];
+export type QueueItem = components['schemas']['QueueItem'];
+export type QueueItemStatus = components['schemas']['QueueItemStatus'];
+export type QueueListResponse = components['schemas']['QueueListResponse'];
+export type QueueCounts = components['schemas']['QueueCounts'];
+export type Message = components['schemas']['Message'];
 
-export interface TraceList {
-	traces: Trace[];
-	count: number;
-}
+// Analytics types
+export type AnalyticsSummary = components['schemas']['AnalyticsSummary'];
+export type AnalyticsQuery = components['schemas']['AnalyticsQuery'];
+export type AnalyticsResponse = components['schemas']['AnalyticsResponse'];
+export type AnalyticsFilter = components['schemas']['AnalyticsFilter'];
+export type AnalyticsMetric = components['schemas']['AnalyticsMetric'];
+export type GroupByField = components['schemas']['GroupByField'];
+export type MetricValues = components['schemas']['MetricValues'];
+export type ModelCost = components['schemas']['ModelCost'];
+export type ModelTokens = components['schemas']['ModelTokens'];
 
-export interface SpanList {
-	spans: Span[];
-	count: number;
-}
+// Request types
+export type CreateSpanRequest = components['schemas']['CreateSpanRequest'];
+export type CompleteSpanRequest = components['schemas']['CompleteSpanRequest'];
+export type FailSpanRequest = components['schemas']['FailSpanRequest'];
+export type SpanQueryParams = components['schemas']['SpanQueryParams'];
+export type CreateTraceRequest = components['schemas']['CreateTraceRequest'];
+export type CreateDatasetRequest = components['schemas']['CreateDatasetRequest'];
+export type UpdateDatasetRequest = components['schemas']['UpdateDatasetRequest'];
+export type CreateDatapointRequest = components['schemas']['CreateDatapointRequest'];
 
-export interface Stats {
-	trace_count: number;
-	span_count: number;
-}
-
-export interface ExportData {
-	traces: Record<string, Span[]>;
-}
-
-export interface SpanFilter {
-	model?: string;
-	provider?: string;
-	status?: string;
-	since?: string;
-	until?: string;
-	name_contains?: string;
-	kind?: string;
-	path?: string;
-	trace_id?: string;
-}
-
-// ─── File Types ──────────────────────────────────────────────────────
-
-export interface FileVersion {
-	hash: string;
-	path: string;
-	size: number;
-	created_at: string;
-	created_by_span: string | null;
-}
-
-export interface FileListResponse {
-	files: FileVersion[];
-	count: number;
-}
-
-export interface FileVersionsResponse {
-	path: string;
-	versions: FileVersion[];
-	count: number;
-}
-
-// ─── Health ──────────────────────────────────────────────────────────
-
-export interface HealthStatus {
-	status: string;
-	uptime_secs: number;
-	version: string;
-	storage: {
-		span_count: number;
-		trace_count: number;
-	};
-}
-
-// ─── Dataset Types ───────────────────────────────────────────────────
-
-export type DatapointKind =
-	| { type: 'llm_conversation'; messages: { role: string; content: string }[]; expected?: { role: string; content: string }; metadata: Record<string, unknown> }
-	| { type: 'generic'; input: unknown; expected_output?: unknown; actual_output?: unknown; score?: number; metadata: Record<string, unknown> };
-
-export type DatapointSource = 'manual' | 'span_export' | 'file_upload';
-
-export interface Dataset {
-	id: string;
-	name: string;
-	description?: string;
-	created_at: string;
-	updated_at: string;
-}
-
-export interface DatasetWithCount extends Dataset {
-	datapoint_count: number;
-}
-
-export interface Datapoint {
-	id: string;
-	dataset_id: string;
-	kind: DatapointKind;
-	source: DatapointSource;
-	source_span_id?: string;
-	created_at: string;
-}
-
-export interface QueueItem {
-	id: string;
-	dataset_id: string;
-	datapoint_id: string;
-	status: 'pending' | 'claimed' | 'completed';
-	claimed_by?: string;
-	claimed_at?: string;
-	original_data?: unknown;
-	edited_data?: unknown;
-	created_at: string;
-}
-
-export interface DatasetList {
-	datasets: DatasetWithCount[];
-	count: number;
-}
-
-export interface DatapointList {
-	datapoints: Datapoint[];
-	count: number;
-}
-
-export interface QueueList {
-	items: QueueItem[];
-	counts: { pending: number; claimed: number; completed: number };
-}
-
-// ─── Analytics Types ─────────────────────────────────────────────────
-
-export interface AnalyticsSummary {
-	total_traces: number;
-	total_spans: number;
-	total_llm_calls: number;
-	total_cost: number;
-	total_tokens: number;
-	avg_latency_ms: number;
-	error_count: number;
-	models_used: string[];
-	providers_used: string[];
-	cost_by_model: { model: string; cost: number; span_count: number }[];
-	tokens_by_model: { model: string; input_tokens: number; output_tokens: number; total_tokens: number }[];
-}
+// Legacy type aliases for backward compatibility
+export type TraceList = TraceListResponse;
+export type DatasetWithCount = DatasetResponse;
+export type DatasetList = DatasetListResponse;
+export type DatapointList = DatapointListResponse;
+export type QueueList = QueueListResponse;
+export type HealthStatus = HealthResponse;
+export type SpanFilter = SpanQueryParams;
 
 // ─── Events ──────────────────────────────────────────────────────────
 
@@ -246,14 +144,6 @@ export const getTrace = (id: string) => get<SpanList>(`/traces/${id}`);
 export const getSpans = (filter?: SpanFilter) => get<SpanList>(`/spans${qs((filter ?? {}) as Record<string, string | undefined>)}`);
 export const getSpan = (id: string) => get<Span>(`/spans/${id}`);
 export const getStats = () => get<Stats>('/stats');
-
-export interface CreateSpanRequest {
-	trace_id: string;
-	parent_id?: string;
-	name: string;
-	kind: SpanKind;
-	input?: unknown;
-}
 
 export const createSpan = (req: CreateSpanRequest) =>
 	post<{ id: string; trace_id: string }>('/spans', req);
@@ -411,3 +301,67 @@ export function spanModel(span: Span): string | null {
 export function shortId(id: string): string {
 	return id.slice(0, 8);
 }
+
+// ─── Auth Types ──────────────────────────────────────────────────────
+
+export type Scope =
+	| 'traces_read'
+	| 'traces_write'
+	| 'datasets_read'
+	| 'datasets_write'
+	| 'analytics_read'
+	| 'admin';
+
+export interface AuthConfig {
+	mode: 'local' | 'cloud';
+	features: string[];
+}
+
+export interface AuthMe {
+	org_id: string;
+	user_id: string | null;
+	scopes: Scope[];
+	is_local_mode: boolean;
+}
+
+export interface ApiKeyInfo {
+	id: string;
+	name: string;
+	key_prefix: string;
+	scopes: Scope[];
+	created_at: string;
+	last_used_at: string | null;
+}
+
+export interface ApiKeyCreated {
+	id: string;
+	key: string;
+	name: string;
+	key_prefix: string;
+	scopes: Scope[];
+}
+
+export interface OrgInfo {
+	id: string;
+	name: string;
+	slug: string;
+	plan: string;
+}
+
+export interface OrgMember {
+	id: string;
+	email: string;
+	name: string | null;
+	role: string;
+}
+
+// ─── Auth Endpoints ──────────────────────────────────────────────────
+
+export const getAuthConfig = () => get<AuthConfig>('/auth/config');
+export const getAuthMe = () => get<AuthMe>('/auth/me');
+export const getOrg = () => get<OrgInfo>('/org');
+export const getApiKeys = () => get<ApiKeyInfo[]>('/org/api-keys');
+export const createApiKey = (name: string, scopes?: Scope[]) =>
+	post<ApiKeyCreated>('/org/api-keys', { name, scopes: scopes ?? [] });
+export const deleteApiKey = (id: string) => del<unknown>(`/org/api-keys/${id}`);
+export const getOrgMembers = () => get<OrgMember[]>('/org/members');

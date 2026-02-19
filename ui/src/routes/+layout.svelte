@@ -1,16 +1,18 @@
 <script lang="ts">
 	import '../app.css';
 	import { page } from '$app/state';
-	import { getStats, subscribeEvents, type Stats } from '$lib/api';
+	import { getStats, getAuthConfig, subscribeEvents, type Stats, type AuthConfig } from '$lib/api';
 	import { onMount } from 'svelte';
 
 	let { children } = $props();
 
 	let stats: Stats = $state({ trace_count: 0, span_count: 0 });
 	let connected = $state(false);
+	let authConfig: AuthConfig = $state({ mode: 'local', features: [] });
 
 	onMount(() => {
 		getStats().then((s) => (stats = s)).catch(() => {});
+		getAuthConfig().then((c) => (authConfig = c)).catch(() => {});
 
 		const unsub = subscribeEvents((event) => {
 			connected = true;
@@ -38,7 +40,9 @@
 		};
 	});
 
-	const navItems = [
+	const isCloudMode = $derived(authConfig.mode === 'cloud');
+
+	const navItems = $derived([
 		{ href: '/', label: 'Dashboard', icon: 'dashboard' },
 		{ href: '/traces', label: 'Traces', icon: 'trace' },
 		{ href: '/query', label: 'Query', icon: 'query' },
@@ -46,7 +50,12 @@
 		{ href: '/datasets', label: 'Datasets', icon: 'dataset' },
 		{ href: '/analytics', label: 'Analytics', icon: 'analysis' },
 		{ href: '/settings', label: 'Settings', icon: 'settings' },
-	];
+		// Cloud-only items
+		...(isCloudMode ? [
+			{ href: '/settings/team', label: 'Team', icon: 'team' },
+			{ href: '/settings/api-keys', label: 'API Keys', icon: 'key' },
+		] : []),
+	]);
 
 	function isActive(href: string): boolean {
 		if (href === '/') return page.url.pathname === '/';

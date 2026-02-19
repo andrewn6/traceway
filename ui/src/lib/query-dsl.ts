@@ -98,7 +98,7 @@ export function filterToDsl(filter: SpanFilter): string {
 
 	for (const [filterKey, dslKey] of Object.entries(REVERSE_MAP)) {
 		const value = filter[filterKey as keyof SpanFilter];
-		if (value === undefined || value === '') continue;
+		if (value === undefined || value === null || value === '') continue;
 		if (value.includes(' ')) {
 			parts.push(`${dslKey}:"${value}"`);
 		} else {
