@@ -272,9 +272,30 @@ export const getFiles = (filter?: { path_prefix?: string }) =>
 export const getFileVersions = (path: string) =>
 	get<FileVersionsResponse>(`/files/${encodeURIComponent(path)}`);
 
+// ─── File Content ────────────────────────────────────────────────────
+
+export async function getFileContent(hash: string): Promise<string> {
+	const res = await fetch(`${API_BASE}/files/content/${encodeURIComponent(hash)}`);
+	if (!res.ok) throw new Error(`GET /files/content/${hash}: ${res.status}`);
+	return res.text();
+}
+
 // ─── Health ──────────────────────────────────────────────────────────
 
 export const getHealth = () => get<HealthStatus>('/health');
+
+// ─── Config & Shutdown ───────────────────────────────────────────────
+
+export interface DaemonConfig {
+	api: { addr: string };
+	proxy: { addr: string; target: string; capture_mode: string };
+	storage: { db_path: string | null };
+	logging: { level: string };
+}
+
+export const getConfig = () => get<DaemonConfig>('/config');
+export const updateConfig = (config: DaemonConfig) => put<DaemonConfig>('/config', config);
+export const shutdownDaemon = () => post<unknown>('/shutdown', {});
 
 // ─── Analytics ───────────────────────────────────────────────────────
 

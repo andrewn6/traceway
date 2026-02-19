@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { getFileVersions, getSpans, shortId, spanStatus, type FileVersion, type Span, type SpanFilter } from '$lib/api';
+	import { getFileVersions, getFileContent, getSpans, shortId, spanStatus, type FileVersion, type Span, type SpanFilter } from '$lib/api';
 	import { onMount } from 'svelte';
 
 	const filePath = $derived(page.params.path ?? '');
@@ -10,7 +10,13 @@
 	let writeSpans: Span[] = $state([]);
 	let loading = $state(true);
 	let error = $state('');
-	let activeTab: 'versions' | 'traces' = $state('versions');
+	let activeTab: 'versions' | 'content' | 'traces' = $state('versions');
+
+	// Content viewer state
+	let selectedVersion: FileVersion | null = $state(null);
+	let contentLoading = $state(false);
+	let contentError = $state('');
+	let contentText = $state('');
 
 	async function loadFile(path: string) {
 		loading = true;
@@ -31,6 +37,20 @@
 			error = 'Could not load file. Is the daemon running?';
 		}
 		loading = false;
+	}
+
+	async function loadContent(version: FileVersion) {
+		selectedVersion = version;
+		contentLoading = true;
+		contentError = '';
+		contentText = '';
+		activeTab = 'content';
+		try {
+			contentText = await getFileContent(version.hash);
+		} catch (e) {
+			contentError = `Could not load content for hash ${version.hash.slice(0, 12)}`;
+		}
+		contentLoading = false;
 	}
 
 	onMount(() => {
@@ -54,6 +74,19 @@
 		if (hours < 24) return `${hours}h ago`;
 		const days = Math.floor(hours / 24);
 		return `${days}d ago`;
+	}
+
+	function inferLanguage(path: string): string {
+		const ext = path.split('.').pop()?.toLowerCase() ?? '';
+		const map: Record<string, string> = {
+			ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
+			py: 'python', rs: 'rust', go: 'go', rb: 'ruby',
+			java: 'java', c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp',
+			css: 'css', scss: 'scss', html: 'html', svelte: 'svelte',
+			json: 'json', toml: 'toml', yaml: 'yaml', yml: 'yaml',
+			md: 'markdown', sh: 'bash', sql: 'sql', xml: 'xml',
+		};
+		return map[ext] ?? 'plaintext';
 	}
 </script>
 
@@ -93,6 +126,16 @@
 			</button>
 			<button
 				class="px-4 py-2 text-sm transition-colors border-b-2
+					{activeTab === 'content' ? 'border-accent text-text' : 'border-transparent text-text-secondary hover:text-text'}"
+				onclick={() => activeTab = 'content'}
+			>
+				Content
+				{#if selectedVersion}
+					<span class="ml-1 text-text-muted text-xs font-mono">({selectedVersion.hash.slice(0, 8)})</span>
+				{/if}
+			</button>
+			<button
+				class="px-4 py-2 text-sm transition-colors border-b-2
 					{activeTab === 'traces' ? 'border-accent text-text' : 'border-transparent text-text-secondary hover:text-text'}"
 				onclick={() => activeTab = 'traces'}
 			>
@@ -120,8 +163,59 @@
 									span {shortId(version.created_by_span)}
 								</span>
 							{/if}
+							<button
+								class="px-2 py-1 text-xs bg-accent/10 text-accent border border-accent/20 rounded hover:bg-accent/20 transition-colors"
+								onclick={() => loadContent(version)}
+							>
+								View
+							</button>
 						</div>
 					{/each}
+				</div>
+			{/if}
+		{/if}
+
+		<!-- Content tab -->
+		{#if activeTab === 'content'}
+			{#if !selectedVersion}
+				<div class="bg-bg-secondary border border-border rounded p-6 text-center">
+					<p class="text-text-muted text-sm">Select a version from the Versions tab to view its content.</p>
+				</div>
+			{:else if contentLoading}
+				<div class="text-text-muted text-sm py-8 text-center">Loading content...</div>
+			{:else if contentError}
+				<div class="bg-bg-secondary border border-border rounded p-6 text-center">
+					<p class="text-text-muted text-sm">{contentError}</p>
+				</div>
+			{:else}
+				<div class="space-y-2">
+					<!-- Content header -->
+					<div class="flex items-center justify-between text-xs text-text-muted">
+						<div class="flex items-center gap-3">
+							<span class="font-mono text-accent">{selectedVersion.hash.slice(0, 12)}</span>
+							<span>{formatSize(selectedVersion.size)}</span>
+							<span>{timeAgo(selectedVersion.created_at)}</span>
+							<span class="bg-bg-tertiary px-1.5 py-0.5 rounded text-text-secondary">{inferLanguage(filePath)}</span>
+						</div>
+						<button
+							class="px-2 py-1 text-xs bg-bg-tertiary text-text-secondary border border-border rounded hover:bg-bg-secondary transition-colors"
+							onclick={() => {
+								const blob = new Blob([contentText], { type: 'text/plain' });
+								const url = URL.createObjectURL(blob);
+								const a = document.createElement('a');
+								a.href = url;
+								a.download = filePath.split('/').pop() ?? 'file';
+								a.click();
+								URL.revokeObjectURL(url);
+							}}
+						>
+							Download
+						</button>
+					</div>
+					<!-- Content body -->
+					<div class="bg-bg-secondary border border-border rounded overflow-hidden">
+						<pre class="p-4 text-xs font-mono text-text overflow-x-auto max-h-[70vh] overflow-y-auto whitespace-pre">{contentText}</pre>
+					</div>
 				</div>
 			{/if}
 		{/if}

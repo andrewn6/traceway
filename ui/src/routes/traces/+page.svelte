@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { getTraces, getSpans, createTrace, subscribeEvents, type Span, type Trace } from '$lib/api';
+	import { getTraces, getSpans, subscribeEvents, type Span, type Trace } from '$lib/api';
 	import { spanStatus } from '$lib/api';
 	import TraceRow from '$lib/components/TraceRow.svelte';
 	import { onMount } from 'svelte';
@@ -10,12 +10,6 @@
 	let filterModel = $state('');
 	let filterStatus = $state('');
 	let loading = $state(true);
-
-	// New trace form
-	let showNewTrace = $state(false);
-	let newName = $state('');
-	let newTags = $state('');
-	let creating = $state(false);
 
 	async function loadTraces() {
 		try {
@@ -38,21 +32,6 @@
 			// API not available
 		}
 		loading = false;
-	}
-
-	async function handleNewTrace() {
-		creating = true;
-		try {
-			const tags = newTags.trim() ? newTags.split(',').map(t => t.trim()).filter(Boolean) : undefined;
-			const trace = await createTrace(newName.trim() || undefined, tags);
-			showNewTrace = false;
-			newName = '';
-			newTags = '';
-			goto(`/traces/${trace.id}`);
-		} catch {
-			// error
-		}
-		creating = false;
 	}
 
 	onMount(() => {
@@ -117,12 +96,6 @@
 	<div class="flex items-center justify-between">
 		<h1 class="text-xl font-bold">Traces</h1>
 		<div class="flex items-center gap-2 text-sm">
-			<button
-				class="px-3 py-1.5 text-xs bg-accent/10 text-accent border border-accent/20 rounded hover:bg-accent/20 transition-colors"
-				onclick={() => (showNewTrace = !showNewTrace)}
-			>
-				{showNewTrace ? 'Cancel' : '+ New Trace'}
-			</button>
 			<input
 				type="text"
 				placeholder="Filter model..."
@@ -141,42 +114,6 @@
 			</select>
 		</div>
 	</div>
-
-	<!-- New trace form -->
-	{#if showNewTrace}
-		<form
-			class="bg-bg-secondary border border-border rounded p-4 flex items-end gap-3"
-			onsubmit={(e) => { e.preventDefault(); handleNewTrace(); }}
-		>
-			<div class="flex-1">
-				<label for="new-trace-name" class="block text-xs text-text-muted uppercase mb-1">Trace name (optional)</label>
-				<input
-					id="new-trace-name"
-					type="text"
-					bind:value={newName}
-					placeholder="e.g. chat-completion, code-review, agent-run"
-					class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted"
-				/>
-			</div>
-			<div class="w-48">
-				<label for="new-trace-tags" class="block text-xs text-text-muted uppercase mb-1">Tags (comma-separated)</label>
-				<input
-					id="new-trace-tags"
-					type="text"
-					bind:value={newTags}
-					placeholder="e.g. prod, gpt-4, test"
-					class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted"
-				/>
-			</div>
-			<button
-				type="submit"
-				disabled={creating}
-				class="px-4 py-1.5 text-xs bg-accent text-bg font-semibold rounded hover:bg-accent/80 transition-colors disabled:opacity-50 shrink-0"
-			>
-				{creating ? 'Creating...' : 'Start Trace'}
-			</button>
-		</form>
-	{/if}
 
 	<!-- Table header -->
 	<div class="grid grid-cols-[1fr_80px_100px_140px_100px_100px_60px] gap-4 px-3 text-xs text-text-muted uppercase">
@@ -197,9 +134,9 @@
 			<div class="text-center space-y-2">
 				<div class="flex items-center justify-center gap-2 text-text-secondary">
 					<span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
-					<span class="text-sm">Listening on localhost:3000</span>
+					<span class="text-sm">Listening for traces</span>
 				</div>
-				<p class="text-text-muted text-xs">Click "+ New Trace" above to start, or send traces from your code.</p>
+				<p class="text-text-muted text-xs">Traces are created automatically when your code uses the SDK or proxy. Send traces from your code to see them here.</p>
 			</div>
 
 			<div class="space-y-4 max-w-2xl mx-auto">
