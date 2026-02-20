@@ -1,4 +1,4 @@
-# llmtrace
+# Traceway
 
 A local-first observability platform for LLM applications. Capture traces, spans, file I/O, token usage, and cost — then query and analyze everything through a REST API and web UI.
 
@@ -8,7 +8,7 @@ Think of it as [Jaeger](https://www.jaegertracing.io/) or [Langfuse](https://lan
 
 When building with LLMs, you need to understand what's happening: which files were read into context, what the model produced, how many tokens it consumed, and how much it cost. Existing tools either require a cloud account or are tightly coupled to a specific framework.
 
-llmtrace is a standalone daemon that any LLM application can send traces to — framework-agnostic, language-agnostic, local-first.
+Traceway is a standalone daemon that any LLM application can send traces to — framework-agnostic, language-agnostic, local-first.
 
 ## Features
 
@@ -20,7 +20,7 @@ llmtrace is a standalone daemon that any LLM application can send traces to — 
 - **Dataset management** — Export spans to datasets, import CSVs, label via a review queue
 - **Real-time events** — SSE stream pushes span/trace lifecycle events to connected clients
 - **Web UI** — Dashboard, trace explorer, span query builder, waterfall timelines, analysis tools
-- **SQLite storage** — Everything persists in a single `~/.llmtrace/traces.db` file
+- **SQLite storage** — Everything persists in a single `~/.traceway/traces.db` file
 
 ## Quick Start
 
@@ -92,7 +92,7 @@ Instead of calling your LLM directly, point your application at the proxy:
 # Before (direct to Ollama)
 curl http://localhost:11434/api/chat -d '{"model":"llama3","messages":[{"role":"user","content":"Hi"}]}'
 
-# After (through llmtrace proxy — automatically traced)
+# After (through Traceway proxy — automatically traced)
 curl http://localhost:3001/api/chat -d '{"model":"llama3","messages":[{"role":"user","content":"Hi"}]}'
 ```
 
@@ -100,7 +100,7 @@ The proxy captures the request/response, extracts token counts, and creates a sp
 
 ## Configuration
 
-Config file: `~/.llmtrace/config.toml`
+Config file: `~/.traceway/config.toml`
 
 ```toml
 [api]
@@ -111,7 +111,7 @@ addr = "127.0.0.1:3001"
 target = "http://localhost:11434"   # Ollama, vLLM, OpenAI-compatible, etc.
 
 [storage]
-db_path = "/custom/path/traces.db"  # default: ~/.llmtrace/traces.db
+db_path = "/custom/path/traces.db"  # default: ~/.traceway/traces.db
 
 [logging]
 level = "info"                      # trace, debug, info, warn, error
@@ -128,16 +128,16 @@ daemon --foreground \
   --log-level debug
 ```
 
-Environment variable: `LLMTRACE_LOG=debug` overrides the log level.
+Environment variable: `TRACEWAY_LOG=debug` overrides the log level.
 
 ### File Locations
 
 | File | Path |
 |------|------|
-| Config | `~/.llmtrace/config.toml` |
-| Database | `~/.llmtrace/traces.db` |
-| Logs | `~/.llmtrace/logs/daemon.log` |
-| PID file | `~/.llmtrace/daemon.pid` |
+| Config | `~/.traceway/config.toml` |
+| Database | `~/.traceway/traces.db` |
+| Logs | `~/.traceway/logs/daemon.log` |
+| PID file | `~/.traceway/daemon.pid` |
 
 ## Architecture
 
@@ -339,7 +339,7 @@ Drop the proxy in front of any OpenAI-compatible API and get tracing for free �
 
 ## Comparison with Similar Tools
 
-| Feature | llmtrace | Langfuse | Langsmith | Phoenix |
+| Feature | Traceway | Langfuse | Langsmith | Phoenix |
 |---------|----------|----------|-----------|---------|
 | Self-hosted | Local-only | Cloud + self-host | Cloud only | Self-host |
 | Setup | Single binary | Docker compose | Account required | Docker |
@@ -360,7 +360,7 @@ cargo check -p trace -p storage -p api -p proxy -p daemon
 cargo build -p daemon
 
 # Run with debug logging
-LLMTRACE_LOG=debug cargo run -p daemon -- --foreground
+TRACEWAY_LOG=debug cargo run -p daemon -- --foreground
 
 # UI development
 cd ui && npm run dev
