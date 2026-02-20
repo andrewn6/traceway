@@ -536,6 +536,7 @@ async fn main() {
 #[cfg(feature = "cloud")]
 async fn run_cloud_mode() {
     use crate::cloud::{setup_cloud_logging, CloudConfig};
+    use api::auth_keys::{CompositeApiKeyLookup, EnvApiKeyLookup};
 
     let cloud_config = CloudConfig::from_env();
     setup_cloud_logging(&cloud_config);
@@ -545,10 +546,46 @@ async fn run_cloud_mode() {
 
     let start_time = Instant::now();
 
-    // Initialize storage based on configuration
+    // ── Auth: Postgres-backed auth store ────────────────────────────
+    let auth_config = api::auth_keys::auth_config_from_env();
+    let auth_store: Option<Arc<dyn auth::AuthStore>> = if !auth_config.local_mode {
+        match std::env::var("DATABASE_URL") {
+            Ok(url) => {
+                info!("Connecting to Postgres for auth store");
+                match storage_postgres::PostgresAuthStore::connect(&url).await {
+                    Ok(pg) => {
+                        if let Err(e) = pg.migrate().await {
+                            error!("Failed to run auth migrations: {}", e);
+                            std::process::exit(1);
+                        }
+                        info!("Auth store ready (Postgres)");
+                        Some(Arc::new(pg) as Arc<dyn auth::AuthStore>)
+                    }
+                    Err(e) => {
+                        error!("Failed to connect to Postgres: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Err(_) => {
+                warn!("DATABASE_URL not set - auth features will be unavailable");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // ── API Key lookup ──────────────────────────────────────────────
+    let api_key_lookup: Arc<dyn auth::ApiKeyLookup> = if let Some(ref store) = auth_store {
+        Arc::new(CompositeApiKeyLookup::new(store.clone()))
+    } else {
+        Arc::new(EnvApiKeyLookup::from_env())
+    };
+
+    // ── Trace storage ───────────────────────────────────────────────
     let store = match cloud_config.storage_backend {
         cloud::StorageBackendType::Sqlite => {
-            // Use in-memory or ephemeral SQLite for cloud
             let db_path = std::env::var("DB_PATH")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::from("/tmp/llmfs.db"));
@@ -576,8 +613,6 @@ async fn run_cloud_mode() {
             }
         }
         cloud::StorageBackendType::Turbopuffer => {
-            // Turbopuffer backend would be initialized here
-            // For now, fall back to SQLite with a warning
             warn!("Turbopuffer backend selected but not yet integrated - using SQLite");
 
             let db_path = PathBuf::from("/tmp/llmfs.db");
@@ -589,10 +624,9 @@ async fn run_cloud_mode() {
 
     info!("Storage ready");
 
-    // Shutdown signal handling
+    // ── Shutdown signal handling ─────────────────────────────────────
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-    // Empty config for cloud mode (config comes from env)
     let config_json = serde_json::json!({
         "mode": "cloud",
         "storage": format!("{:?}", cloud_config.storage_backend),
@@ -603,29 +637,40 @@ async fn run_cloud_mode() {
     let addr = cloud_config.bind_addr();
     info!(addr = %addr, "Starting API server");
 
-    // Start API server
+    // ── Build and start the API server using RouterBuilder ───────────
     let api_handle = tokio::spawn({
         let store = store.clone();
         let shutdown_rx = shutdown_rx.clone();
-        let shutdown_tx = shutdown_tx.clone();
+        let shutdown_tx_clone = shutdown_tx.clone();
         let addr = addr.clone();
+
+        let mut builder = api::RouterBuilder::new(store.clone())
+            .start_time(start_time)
+            .config(config_json)
+            .config_path(String::new())
+            .shutdown_tx(shutdown_tx_clone)
+            .auth_config(auth_config)
+            .api_key_lookup(api_key_lookup);
+
+        if let Some(s) = auth_store {
+            builder = builder.auth_store(s);
+        }
+
+        let app = builder.build();
+
         async move {
-            api::serve_with_shutdown(
-                store,
-                &addr,
-                start_time,
-                config_json,
-                String::new(),
-                Some(shutdown_tx),
-                shutdown_signal(shutdown_rx),
-            )
-            .await
+            let listener = tokio::net::TcpListener::bind(&addr).await?;
+            tracing::info!("api listening on {}", addr);
+            axum::serve(listener, app)
+                .with_graceful_shutdown(shutdown_signal(shutdown_rx))
+                .await
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
         }
     });
 
     info!("Cloud daemon ready on http://{}", addr);
 
-    // Wait for shutdown signal
+    // ── Wait for shutdown signal ─────────────────────────────────────
     let ctrl_c = async {
         tokio::signal::ctrl_c().await.ok();
     };
@@ -649,7 +694,6 @@ async fn run_cloud_mode() {
     info!("Initiating graceful shutdown");
     let _ = shutdown_tx.send(true);
 
-    // Wait for API server with timeout
     let shutdown_result = tokio::time::timeout(SHUTDOWN_TIMEOUT, api_handle).await;
 
     match shutdown_result {

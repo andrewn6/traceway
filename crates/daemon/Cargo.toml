@@ -5,14 +5,16 @@ edition.workspace = true
 
 [features]
 default = []
-cloud = ["redis", "metrics"]
+cloud = ["redis", "metrics", "storage-postgres"]
 metrics = ["prometheus"]
 
 [dependencies]
 trace = { path = "../trace" }
 storage = { path = "../storage" }
 storage-sqlite = { path = "../storage-sqlite" }
+auth = { path = "../auth" }
 api = { path = "../api" }
+axum.workspace = true
 proxy = { path = "../proxy" }
 # memfs = { path = "../memfs" }  # requires macFUSE
 clap.workspace = true
@@ -27,5 +29,6 @@ serde_json.workspace = true
 nix.workspace = true
 
 # Cloud dependencies (optional)
+storage-postgres = { path = "../storage-postgres", optional = true }
 redis = { version = "0.25", features = ["tokio-comp", "connection-manager"], optional = true }
 prometheus = { version = "0.13", optional = true }
