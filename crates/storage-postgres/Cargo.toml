@@ -1,0 +1,17 @@
+[package]
+name = "storage-postgres"
+version.workspace = true
+edition.workspace = true
+description = "Postgres storage backend for llm-fs cloud auth"
+
+[dependencies]
+auth = { path = "../auth" }
+async-trait.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
