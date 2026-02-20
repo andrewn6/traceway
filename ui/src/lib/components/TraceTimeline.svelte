@@ -2,6 +2,7 @@
 	import type { Span } from '$lib/api';
 	import { spanStatus, spanStartedAt, spanEndedAt, spanDurationMs } from '$lib/api';
 	import SpanKindIcon from './SpanKindIcon.svelte';
+	import { onMount, onDestroy } from 'svelte';
 
 	let {
 		spans,
@@ -218,36 +219,51 @@
 	let canvas: HTMLCanvasElement | undefined = $state(undefined);
 	let canvasWidth = $state(300);
 	let dragging = $state(false);
+	let resizeObserver: ResizeObserver | undefined;
 
-	function drawMinimap() {
-		if (!canvas) return;
-		const ctx = canvas.getContext('2d');
+	function drawMinimap(
+		canvasEl: HTMLCanvasElement,
+		tree: TreeNode[],
+		range: { min: number; max: number },
+		scroll: number,
+		height: number,
+		selected: string | null,
+		width: number
+	) {
+		const ctx = canvasEl.getContext('2d');
 		if (!ctx) return;
 
 		const dpr = window.devicePixelRatio || 1;
-		const w = canvasWidth;
+		const w = width;
 		const h = MINIMAP_HEIGHT;
-		canvas.width = w * dpr;
-		canvas.height = h * dpr;
-		ctx.scale(dpr, dpr);
+		
+		// Only resize if needed
+		const targetWidth = Math.floor(w * dpr);
+		const targetHeight = Math.floor(h * dpr);
+		if (canvasEl.width !== targetWidth || canvasEl.height !== targetHeight) {
+			canvasEl.width = targetWidth;
+			canvasEl.height = targetHeight;
+		}
+		
+		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
 		// Clear
 		ctx.clearRect(0, 0, w, h);
 
-		const rows = flatTree.length;
+		const rows = tree.length;
 		if (rows === 0) return;
 
 		const rowH = Math.max(h / rows, 1);
-		const range = timeRange.max - timeRange.min;
+		const rangeMs = range.max - range.min;
 
 		// Draw span bars
-		for (let i = 0; i < flatTree.length; i++) {
-			const node = flatTree[i];
+		for (let i = 0; i < tree.length; i++) {
+			const node = tree[i];
 			const s = node.span;
 			const start = new Date(spanStartedAt(s)).getTime();
 			const end = spanEndedAt(s) ? new Date(spanEndedAt(s)!).getTime() : Date.now();
-			const x = ((start - timeRange.min) / range) * w;
-			const barW = Math.max(((end - start) / range) * w, 1);
+			const x = ((start - range.min) / rangeMs) * w;
+			const barW = Math.max(((end - start) / rangeMs) * w, 1);
 			const y = i * rowH;
 
 			ctx.fillStyle = canvasColor(s);
@@ -257,8 +273,8 @@
 
 		// Draw viewport rectangle
 		ctx.globalAlpha = 1;
-		const vpStartRow = scrollTop / ROW_HEIGHT;
-		const vpEndRow = (scrollTop + containerHeight) / ROW_HEIGHT;
+		const vpStartRow = scroll / ROW_HEIGHT;
+		const vpEndRow = (scroll + height) / ROW_HEIGHT;
 		const vpY = (vpStartRow / rows) * h;
 		const vpH = Math.max(((vpEndRow - vpStartRow) / rows) * h, 4);
 
@@ -269,8 +285,8 @@
 		ctx.strokeRect(0.5, vpY + 0.5, w - 1, vpH - 1);
 
 		// Highlight selected span row
-		if (selectedId) {
-			const selIdx = flatTree.findIndex((n) => n.span.id === selectedId);
+		if (selected) {
+			const selIdx = tree.findIndex((n) => n.span.id === selected);
 			if (selIdx >= 0) {
 				const selY = (selIdx / rows) * h;
 				ctx.fillStyle = 'rgba(88,166,255,0.25)';
@@ -286,26 +302,34 @@
 		}
 	}
 
-	let resizeObserver: ResizeObserver | undefined = $state(undefined);
-
-	$effect(() => {
-		if (canvas) {
+	onMount(() => {
+		if (canvas?.parentElement) {
 			resizeObserver = new ResizeObserver(onCanvasResize);
-			resizeObserver.observe(canvas.parentElement!);
-			canvasWidth = canvas.parentElement!.clientWidth;
-			return () => resizeObserver?.disconnect();
+			resizeObserver.observe(canvas.parentElement);
+			canvasWidth = canvas.parentElement.clientWidth;
 		}
+	});
+	
+	onDestroy(() => {
+		resizeObserver?.disconnect();
 	});
 
 	$effect(() => {
-		// Track dependencies for redraw
-		void flatTree;
-		void timeRange;
-		void scrollTop;
-		void containerHeight;
-		void selectedId;
-		void canvasWidth;
-		drawMinimap();
+		// Capture all values to avoid reactivity issues
+		const tree = flatTree;
+		const range = timeRange;
+		const scroll = scrollTop;
+		const height = containerHeight;
+		const selected = selectedId;
+		const width = canvasWidth;
+		const canvasEl = canvas;
+		
+		if (canvasEl) {
+			// Use requestAnimationFrame to avoid blocking
+			requestAnimationFrame(() => {
+				drawMinimap(canvasEl, tree, range, scroll, height, selected, width);
+			});
+		}
 	});
 
 	// ── Minimap pointer interactions ───────────────────────────────────

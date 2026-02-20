@@ -97,7 +97,7 @@ function qs(params: Record<string, string | undefined>): string {
 }
 
 async function get<T>(path: string): Promise<T> {
-	const res = await fetch(`${API_BASE}${path}`);
+	const res = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
 	if (!res.ok) throw new Error(`GET ${path}: ${res.status}`);
 	return res.json();
 }
@@ -105,6 +105,7 @@ async function get<T>(path: string): Promise<T> {
 async function post<T>(path: string, body?: unknown): Promise<T> {
 	const res = await fetch(`${API_BASE}${path}`, {
 		method: 'POST',
+		credentials: 'include',
 		headers: body ? { 'Content-Type': 'application/json' } : {},
 		body: body ? JSON.stringify(body) : undefined
 	});
@@ -115,6 +116,7 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 async function put<T>(path: string, body?: unknown): Promise<T> {
 	const res = await fetch(`${API_BASE}${path}`, {
 		method: 'PUT',
+		credentials: 'include',
 		headers: body ? { 'Content-Type': 'application/json' } : {},
 		body: body ? JSON.stringify(body) : undefined
 	});
@@ -123,7 +125,7 @@ async function put<T>(path: string, body?: unknown): Promise<T> {
 }
 
 async function del<T>(path: string): Promise<T> {
-	const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE' });
+	const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE', credentials: 'include' });
 	if (!res.ok) throw new Error(`DELETE ${path}: ${res.status}`);
 	return res.json();
 }
@@ -131,10 +133,24 @@ async function del<T>(path: string): Promise<T> {
 async function postMultipart<T>(path: string, form: FormData): Promise<T> {
 	const res = await fetch(`${API_BASE}${path}`, {
 		method: 'POST',
+		credentials: 'include',
 		body: form
 	});
 	if (!res.ok) throw new Error(`POST ${path}: ${res.status}`);
 	return res.json();
+}
+
+/**
+ * POST with raw response access (for checking status codes, reading headers).
+ * Used for auth endpoints where we need to handle errors without throwing.
+ */
+async function postRaw(path: string, body?: unknown): Promise<Response> {
+	return fetch(`${API_BASE}${path}`, {
+		method: 'POST',
+		credentials: 'include',
+		headers: body ? { 'Content-Type': 'application/json' } : {},
+		body: body ? JSON.stringify(body) : undefined
+	});
 }
 
 // ─── Trace / Span Endpoints ─────────────────────────────────────────
@@ -357,6 +373,22 @@ export interface OrgMember {
 	role: string;
 }
 
+// ─── Auth Response Types ─────────────────────────────────────────────
+
+export interface AuthResponse {
+	user_id: string;
+	org_id: string;
+	email: string;
+	name: string | null;
+	role: string;
+}
+
+export interface AuthResult {
+	ok: boolean;
+	data?: AuthResponse;
+	error?: string;
+}
+
 // ─── Auth Endpoints ──────────────────────────────────────────────────
 
 export const getAuthConfig = () => get<AuthConfig>('/auth/config');
@@ -367,3 +399,37 @@ export const createApiKey = (name: string, scopes?: Scope[]) =>
 	post<ApiKeyCreated>('/org/api-keys', { name, scopes: scopes ?? [] });
 export const deleteApiKey = (id: string) => del<unknown>(`/org/api-keys/${id}`);
 export const getOrgMembers = () => get<OrgMember[]>('/org/members');
+
+export async function signup(
+	email: string,
+	password: string,
+	name?: string,
+	orgName?: string
+): Promise<AuthResult> {
+	const res = await postRaw('/auth/signup', {
+		email,
+		password,
+		name: name || undefined,
+		org_name: orgName || undefined
+	});
+	if (res.ok) {
+		const data: AuthResponse = await res.json();
+		return { ok: true, data };
+	}
+	const text = await res.text();
+	return { ok: false, error: text || `Signup failed (${res.status})` };
+}
+
+export async function login(email: string, password: string): Promise<AuthResult> {
+	const res = await postRaw('/auth/login', { email, password });
+	if (res.ok) {
+		const data: AuthResponse = await res.json();
+		return { ok: true, data };
+	}
+	const text = await res.text();
+	return { ok: false, error: text || `Login failed (${res.status})` };
+}
+
+export async function logout(): Promise<void> {
+	await postRaw('/auth/logout');
+}

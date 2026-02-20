@@ -330,19 +330,13 @@
 	{:else if spans.length === 0}
 		<div class="text-text-muted text-sm text-center py-8 flex-1">Trace not found</div>
 	{:else}
-		<!-- Simple span list (TraceTimeline disabled for debugging) -->
-		<div class="flex-1 min-h-0 border border-border rounded mx-4 bg-bg-secondary overflow-auto p-4">
-			<h2 class="text-sm font-bold mb-2">Spans ({spans.length})</h2>
-			{#each spans as span}
-				<button
-					class="block w-full text-left p-2 mb-1 rounded hover:bg-bg-tertiary {selectedSpan?.id === span.id ? 'bg-bg-tertiary' : ''}"
-					onclick={() => selectSpan(span)}
-				>
-					<span class="font-mono text-xs text-accent">{shortId(span.id)}</span>
-					<span class="ml-2">{span.name}</span>
-					<span class="ml-2 text-text-muted text-xs">{span.kind.type}</span>
-				</button>
-			{/each}
+		<!-- Timeline -->
+		<div class="flex-1 min-h-0 border border-border rounded mx-4 bg-bg-secondary overflow-hidden">
+			<TraceTimeline
+				{spans}
+				selectedId={selectedSpan?.id ?? null}
+				onSelect={selectSpan}
+			/>
 		</div>
 
 		<!-- Span detail panel -->
