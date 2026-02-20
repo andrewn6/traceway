@@ -5,11 +5,11 @@
  * (from sdk/typescript/, no build step needed)
  */
 
-import { LLMTrace, type SpanKind, type Span } from '../src/index.js';
+import { Traceway, type SpanKind, type Span } from '../src/index.js';
 import { statusKind } from '../src/types.js';
 
-const BASE = process.env.LLMTRACE_URL ?? 'http://localhost:3000';
-const client = new LLMTrace({ url: BASE });
+const BASE = process.env.TRACEWAY_URL ?? 'http://localhost:3000';
+const client = new Traceway({ url: BASE });
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(`ASSERT FAILED: ${msg}`);

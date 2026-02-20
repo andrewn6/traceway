@@ -20,7 +20,7 @@ pub struct ApiKeyRecord {
 
 /// Environment-based API key lookup.
 /// 
-/// Reads API keys from LLMFS_API_KEYS environment variable.
+/// Reads API keys from TRACEWAY_API_KEYS environment variable.
 /// Format: "key1,key2,key3" where each key is the full API key.
 /// All keys share the same org (default org) and full scopes.
 ///
@@ -33,8 +33,8 @@ impl EnvApiKeyLookup {
     pub fn from_env() -> Self {
         let mut keys = Vec::new();
         
-        // Load keys from LLMFS_API_KEYS env var
-        if let Ok(api_keys) = std::env::var("LLMFS_API_KEYS") {
+        // Load keys from TRACEWAY_API_KEYS env var
+        if let Ok(api_keys) = std::env::var("TRACEWAY_API_KEYS") {
             for key in api_keys.split(',') {
                 let key = key.trim();
                 if key.is_empty() {
@@ -42,8 +42,8 @@ impl EnvApiKeyLookup {
                 }
                 
                 // Validate format
-                if !key.starts_with("llmfs_sk_") || key.len() < 16 {
-                    tracing::warn!("Invalid API key format in LLMFS_API_KEYS: {}", &key[..8.min(key.len())]);
+                if !key.starts_with("tw_sk_") || key.len() < 16 {
+                    tracing::warn!("Invalid API key format in TRACEWAY_API_KEYS: {}", &key[..8.min(key.len())]);
                     continue;
                 }
                 
@@ -63,10 +63,10 @@ impl EnvApiKeyLookup {
             }
         }
         
-        // Also support single key via LLMFS_API_KEY
-        if let Ok(key) = std::env::var("LLMFS_API_KEY") {
+        // Also support single key via TRACEWAY_API_KEY
+        if let Ok(key) = std::env::var("TRACEWAY_API_KEY") {
             let key = key.trim();
-            if key.starts_with("llmfs_sk_") && key.len() >= 16 {
+            if key.starts_with("tw_sk_") && key.len() >= 16 {
                 let prefix = key[..16].to_string();
                 let key_hash = auth::hash_api_key(key);
                 
@@ -77,7 +77,7 @@ impl EnvApiKeyLookup {
                     scopes: Scope::all(),
                 });
                 
-                info!("Loaded API key from LLMFS_API_KEY");
+                info!("Loaded API key from TRACEWAY_API_KEY");
             }
         }
         
@@ -181,7 +181,7 @@ impl ApiKeyLookup for CompositeApiKeyLookup {
 
 /// Create auth config from environment
 pub fn auth_config_from_env() -> AuthConfig {
-    let is_cloud = std::env::var("LLMFS_CLOUD").is_ok()
+    let is_cloud = std::env::var("TRACEWAY_CLOUD").is_ok()
         || std::env::var("STORAGE_BACKEND").is_ok();
 
     if is_cloud {

@@ -112,7 +112,7 @@
 			<!-- Logo -->
 			<div class="px-4 py-4 border-b border-border">
 				<a href="/" class="text-text font-bold text-base tracking-tight hover:text-accent transition-colors">
-					llmtrace
+					Traceway
 				</a>
 			</div>
 

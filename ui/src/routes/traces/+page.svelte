@@ -159,9 +159,9 @@ curl -s http://localhost:3000/api/spans -X POST \
 					<summary class="text-xs text-text-secondary cursor-pointer hover:text-text transition-colors">
 						Python SDK
 					</summary>
-					<pre class="mt-2 bg-bg-tertiary rounded p-3 text-xs text-text-secondary font-mono overflow-x-auto whitespace-pre">pip install llmtrace
+					<pre class="mt-2 bg-bg-tertiary rounded p-3 text-xs text-text-secondary font-mono overflow-x-auto whitespace-pre">pip install traceway
 
-from llmtrace import TraceContext
+from traceway import TraceContext
 
 ctx = TraceContext()
 with ctx.span("my-task") as s:
@@ -173,9 +173,9 @@ with ctx.span("my-task") as s:
 					<summary class="text-xs text-text-secondary cursor-pointer hover:text-text transition-colors">
 						TypeScript SDK
 					</summary>
-					<pre class="mt-2 bg-bg-tertiary rounded p-3 text-xs text-text-secondary font-mono overflow-x-auto whitespace-pre">npm install llmtrace
+					<pre class="mt-2 bg-bg-tertiary rounded p-3 text-xs text-text-secondary font-mono overflow-x-auto whitespace-pre">npm install traceway
 
-import {`{ TraceContext }`} from "llmtrace";
+import {`{ TraceContext }`} from "traceway";
 
 const ctx = new TraceContext();
 const span = ctx.span("my-task");

@@ -1,4 +1,4 @@
-//! SQLite storage backend for llm-fs.
+//! SQLite storage backend for Traceway.
 //!
 //! This crate provides a SQLite-based implementation of the `StorageBackend` trait,
 //! suitable for local-first development and single-machine deployments.

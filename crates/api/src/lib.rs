@@ -44,7 +44,7 @@ pub use events::{EventBus, EventSubscriber, LocalEventBus};
 #[derive(OpenApi)]
 #[openapi(
     info(
-        title = "llm-fs API",
+        title = "Traceway API",
         version = "0.1.0",
         description = "LLM tracing and observability API"
     ),
@@ -1531,8 +1531,8 @@ async fn extract_auth(
     // Check Authorization header
     if let Some(auth_str) = auth_header {
         if let Some(token) = auth_str.strip_prefix("Bearer ") {
-            // API key format: llmfs_sk_...
-            if token.starts_with("llmfs_sk_") {
+            // API key format: tw_sk_...
+            if token.starts_with("tw_sk_") {
                 let prefix = if token.len() >= 16 { &token[..16] } else {
                     return Err(auth::AuthError::InvalidApiKey);
                 };

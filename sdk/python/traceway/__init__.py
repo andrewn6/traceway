@@ -1,4 +1,4 @@
-from .client import LLMTrace, SpanContext, TraceContext
+from .client import Traceway, SpanContext, TraceContext
 from .types import (
     CreatedSpan,
     CustomKind,
@@ -20,7 +20,7 @@ from .types import (
 )
 
 __all__ = [
-    "LLMTrace",
+    "Traceway",
     "SpanContext",
     "TraceContext",
     "CreatedSpan",

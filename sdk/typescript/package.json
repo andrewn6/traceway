@@ -1,7 +1,7 @@
 {
-  "name": "llmtrace",
+  "name": "traceway",
   "version": "0.1.0",
-  "description": "TypeScript SDK for llmtrace daemon",
+  "description": "TypeScript SDK for Traceway daemon",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

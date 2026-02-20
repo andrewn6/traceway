@@ -6,11 +6,11 @@
 //!
 //! # Layout overview
 //!
-//! The mount point (default `~/.llmtrace/mem/`) contains two top-level
+//! The mount point (default `~/.traceway/mem/`) contains two top-level
 //! subtrees with very different semantics:
 //!
 //! ```text
-//! ~/.llmtrace/mem/                  (mount root)
+//! ~/.traceway/mem/                  (mount root)
 //! ├── traces/                       (read-only, auto-generated from span store)
 //! │   ├── <trace-id>/               (one directory per trace)
 //! │   │   ├── info.json             (trace metadata: name, tags, timestamps)
@@ -61,7 +61,7 @@
 //! - `create()`/`mkdir()`/`unlink()` → tracked but no span (metadata-only changes)
 //!
 //! Content is stored in a content-addressed object store at
-//! `~/.llmtrace/objects/{hash[0:2]}/{hash[2:]}`. File metadata (path, inode,
+//! `~/.traceway/objects/{hash[0:2]}/{hash[2:]}`. File metadata (path, inode,
 //! size, timestamps, current version hash) lives in SQLite.
 //!
 //! ## Root-level virtual files
@@ -69,7 +69,7 @@
 //! - **`stats.json`**: Global `AnalyticsSummary` — total traces, spans, tokens, cost, error count
 //! - **`status.txt`**: Human-readable daemon status:
 //!   ```text
-//!   llmtrace daemon
+//!   traceway daemon
 //!   uptime: 2h 13m 07s
 //!   spans: 1,247 (42 active)
 //!   traces: 89 (3 active)
@@ -78,7 +78,7 @@
 //!   proxy: http://127.0.0.1:3001 -> http://localhost:11434
 //!   ```
 
-/// Default mount point relative to the llmtrace data directory.
+/// Default mount point relative to the Traceway data directory.
 pub const DEFAULT_MOUNT_SUBDIR: &str = "mem";
 
 /// Well-known directory and file names within the mount.

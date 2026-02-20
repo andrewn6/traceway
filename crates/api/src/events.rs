@@ -94,7 +94,7 @@ pub mod cloud {
     use redis::AsyncCommands;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    const REDIS_CHANNEL: &str = "llmfs:events";
+    const REDIS_CHANNEL: &str = "traceway:events";
 
     /// Redis-backed event bus for multi-node deployments
     pub struct RedisEventBus {

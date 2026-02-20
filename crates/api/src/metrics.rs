@@ -1,7 +1,7 @@
-//! Prometheus metrics for llm-fs cloud deployment.
+//! Prometheus metrics for Traceway cloud deployment.
 //!
 //! This module provides instrumentation for monitoring the health and performance
-//! of the llm-fs service in production.
+//! of the Traceway service in production.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -88,67 +88,71 @@ impl Metrics {
         let mut output = String::new();
 
         // Counters
-        output.push_str("# HELP llmfs_span_writes_total Total number of span write operations\n");
-        output.push_str("# TYPE llmfs_span_writes_total counter\n");
+        output
+            .push_str("# HELP traceway_span_writes_total Total number of span write operations\n");
+        output.push_str("# TYPE traceway_span_writes_total counter\n");
         output.push_str(&format!(
-            "llmfs_span_writes_total {}\n",
+            "traceway_span_writes_total {}\n",
             self.span_writes_total.load(Ordering::Relaxed)
         ));
 
-        output.push_str("# HELP llmfs_span_reads_total Total number of span read operations\n");
-        output.push_str("# TYPE llmfs_span_reads_total counter\n");
+        output.push_str("# HELP traceway_span_reads_total Total number of span read operations\n");
+        output.push_str("# TYPE traceway_span_reads_total counter\n");
         output.push_str(&format!(
-            "llmfs_span_reads_total {}\n",
+            "traceway_span_reads_total {}\n",
             self.span_reads_total.load(Ordering::Relaxed)
         ));
 
-        output.push_str("# HELP llmfs_trace_writes_total Total number of trace write operations\n");
-        output.push_str("# TYPE llmfs_trace_writes_total counter\n");
+        output.push_str(
+            "# HELP traceway_trace_writes_total Total number of trace write operations\n",
+        );
+        output.push_str("# TYPE traceway_trace_writes_total counter\n");
         output.push_str(&format!(
-            "llmfs_trace_writes_total {}\n",
+            "traceway_trace_writes_total {}\n",
             self.trace_writes_total.load(Ordering::Relaxed)
         ));
 
-        output.push_str("# HELP llmfs_api_requests_total Total number of API requests\n");
-        output.push_str("# TYPE llmfs_api_requests_total counter\n");
+        output.push_str("# HELP traceway_api_requests_total Total number of API requests\n");
+        output.push_str("# TYPE traceway_api_requests_total counter\n");
         output.push_str(&format!(
-            "llmfs_api_requests_total {}\n",
+            "traceway_api_requests_total {}\n",
             self.api_requests_total.load(Ordering::Relaxed)
         ));
 
-        output.push_str("# HELP llmfs_api_errors_total Total number of API errors\n");
-        output.push_str("# TYPE llmfs_api_errors_total counter\n");
+        output.push_str("# HELP traceway_api_errors_total Total number of API errors\n");
+        output.push_str("# TYPE traceway_api_errors_total counter\n");
         output.push_str(&format!(
-            "llmfs_api_errors_total {}\n",
+            "traceway_api_errors_total {}\n",
             self.api_errors_total.load(Ordering::Relaxed)
         ));
 
-        output.push_str("# HELP llmfs_sse_connections_total Total SSE connections (cumulative)\n");
-        output.push_str("# TYPE llmfs_sse_connections_total counter\n");
+        output
+            .push_str("# HELP traceway_sse_connections_total Total SSE connections (cumulative)\n");
+        output.push_str("# TYPE traceway_sse_connections_total counter\n");
         output.push_str(&format!(
-            "llmfs_sse_connections_total {}\n",
+            "traceway_sse_connections_total {}\n",
             self.sse_connections_total.load(Ordering::Relaxed)
         ));
 
         // Gauges
-        output.push_str("# HELP llmfs_sse_connections_active Current active SSE connections\n");
-        output.push_str("# TYPE llmfs_sse_connections_active gauge\n");
+        output.push_str("# HELP traceway_sse_connections_active Current active SSE connections\n");
+        output.push_str("# TYPE traceway_sse_connections_active gauge\n");
         output.push_str(&format!(
-            "llmfs_sse_connections_active {}\n",
+            "traceway_sse_connections_active {}\n",
             self.sse_connections_active.load(Ordering::Relaxed)
         ));
 
-        output.push_str("# HELP llmfs_span_count Current number of spans in storage\n");
-        output.push_str("# TYPE llmfs_span_count gauge\n");
+        output.push_str("# HELP traceway_span_count Current number of spans in storage\n");
+        output.push_str("# TYPE traceway_span_count gauge\n");
         output.push_str(&format!(
-            "llmfs_span_count {}\n",
+            "traceway_span_count {}\n",
             self.span_count.load(Ordering::Relaxed)
         ));
 
-        output.push_str("# HELP llmfs_trace_count Current number of traces in storage\n");
-        output.push_str("# TYPE llmfs_trace_count gauge\n");
+        output.push_str("# HELP traceway_trace_count Current number of traces in storage\n");
+        output.push_str("# TYPE traceway_trace_count gauge\n");
         output.push_str(&format!(
-            "llmfs_trace_count {}\n",
+            "traceway_trace_count {}\n",
             self.trace_count.load(Ordering::Relaxed)
         ));
 
@@ -162,11 +166,11 @@ impl Metrics {
         };
 
         output.push_str(
-            "# HELP llmfs_span_write_latency_ms Average span write latency in milliseconds\n",
+            "# HELP traceway_span_write_latency_ms Average span write latency in milliseconds\n",
         );
-        output.push_str("# TYPE llmfs_span_write_latency_ms gauge\n");
+        output.push_str("# TYPE traceway_span_write_latency_ms gauge\n");
         output.push_str(&format!(
-            "llmfs_span_write_latency_ms {:.3}\n",
+            "traceway_span_write_latency_ms {:.3}\n",
             span_write_avg
         ));
 
@@ -178,9 +182,9 @@ impl Metrics {
             0.0
         };
 
-        output.push_str("# HELP llmfs_api_latency_ms Average API latency in milliseconds\n");
-        output.push_str("# TYPE llmfs_api_latency_ms gauge\n");
-        output.push_str(&format!("llmfs_api_latency_ms {:.3}\n", api_avg));
+        output.push_str("# HELP traceway_api_latency_ms Average API latency in milliseconds\n");
+        output.push_str("# TYPE traceway_api_latency_ms gauge\n");
+        output.push_str(&format!("traceway_api_latency_ms {:.3}\n", api_avg));
 
         // Error rate
         let total_requests = self.api_requests_total.load(Ordering::Relaxed);
@@ -191,9 +195,9 @@ impl Metrics {
             0.0
         };
 
-        output.push_str("# HELP llmfs_error_rate Current API error rate (0-1)\n");
-        output.push_str("# TYPE llmfs_error_rate gauge\n");
-        output.push_str(&format!("llmfs_error_rate {:.6}\n", error_rate));
+        output.push_str("# HELP traceway_error_rate Current API error rate (0-1)\n");
+        output.push_str("# TYPE traceway_error_rate gauge\n");
+        output.push_str(&format!("traceway_error_rate {:.6}\n", error_rate));
 
         output
     }

@@ -1,4 +1,4 @@
-//! Postgres storage backend for llm-fs cloud auth.
+//! Postgres storage backend for Traceway cloud auth.
 //!
 //! Handles all user-facing data in cloud mode: organizations, users,
 //! API keys, invites. Trace data stays in Turbopuffer/SQLite — this
