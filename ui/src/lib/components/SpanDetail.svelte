@@ -1,13 +1,71 @@
 <script lang="ts">
 	import type { Span, DatasetWithCount } from '$lib/api';
-	import { spanStatus, spanStartedAt, spanEndedAt, spanDurationMs, spanError, spanKindLabel, shortId, getDatasets, exportSpanToDataset, completeSpan, failSpan, deleteSpan } from '$lib/api';
+	import { spanStatus, spanStartedAt, spanEndedAt, spanDurationMs, spanError, spanKindLabel, shortId, getDatasets, exportSpanToDataset, completeSpan, failSpan, deleteSpan, getFileContent } from '$lib/api';
 	import StatusBadge from './StatusBadge.svelte';
 	import SpanKindIcon from './SpanKindIcon.svelte';
 
 	let { span, onSpanAction, allSpans = [] }: { span: Span | null; onSpanAction?: () => void; allSpans?: Span[] } = $props();
 
 	// ── Tabs ──────────────────────────────────────────────────────────
-	let activeTab: 'input' | 'output' | 'attributes' | 'events' = $state('input');
+	let activeTab: 'input' | 'output' | 'attributes' | 'events' | 'file' = $state('input');
+
+	// ── File content (for fs_read / fs_write spans) ──────────────────
+	let fileContent = $state('');
+	let fileContentLoading = $state(false);
+	let fileContentError = $state('');
+	let fileContentLoaded = $state(false);
+
+	const isFileSpan = $derived(
+		span?.kind?.type === 'fs_read' || span?.kind?.type === 'fs_write'
+	);
+
+	const fileHash = $derived(
+		span?.kind?.type === 'fs_read'
+			? span.kind.file_version
+			: span?.kind?.type === 'fs_write'
+				? span.kind.file_version
+				: null
+	);
+
+	const filePath = $derived(
+		span?.kind?.type === 'fs_read'
+			? span.kind.path
+			: span?.kind?.type === 'fs_write'
+				? span.kind.path
+				: null
+	);
+
+	async function loadFileContent() {
+		if (!fileHash || fileContentLoaded) return;
+		fileContentLoading = true;
+		fileContentError = '';
+		try {
+			fileContent = await getFileContent(fileHash);
+			fileContentLoaded = true;
+		} catch {
+			fileContentError = 'Could not load file content';
+		}
+		fileContentLoading = false;
+	}
+
+	function inferLanguage(path: string): string {
+		const ext = path.split('.').pop()?.toLowerCase() ?? '';
+		const map: Record<string, string> = {
+			ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
+			py: 'python', rs: 'rust', go: 'go', rb: 'ruby',
+			java: 'java', c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp',
+			css: 'css', scss: 'scss', html: 'html', svelte: 'svelte',
+			json: 'json', toml: 'toml', yaml: 'yaml', yml: 'yaml',
+			md: 'markdown', sh: 'bash', sql: 'sql', xml: 'xml',
+		};
+		return map[ext] ?? 'plaintext';
+	}
+
+	function formatFileSize(bytes: number): string {
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	}
 
 	// ── JSON/Text toggle for payloads ─────────────────────────────────
 	let inputViewMode: 'formatted' | 'raw' = $state('formatted');
@@ -212,8 +270,17 @@
 	$effect(() => {
 		if (span) {
 			collapsedMessages = new Set();
+			// Reset file content state
+			fileContent = '';
+			fileContentLoading = false;
+			fileContentError = '';
+			fileContentLoaded = false;
 			// Auto-select best tab
-			if (span.input !== undefined && span.input !== null) {
+			if (span.kind?.type === 'fs_read' || span.kind?.type === 'fs_write') {
+				activeTab = 'file';
+				// Auto-load file content for file spans
+				loadFileContent();
+			} else if (span.input !== undefined && span.input !== null) {
 				activeTab = 'input';
 			} else if (span.output !== undefined && span.output !== null) {
 				activeTab = 'output';
@@ -377,6 +444,13 @@
 
 		<!-- Tabs -->
 		<div class="flex border-b border-border shrink-0">
+			{#if isFileSpan}
+				<button
+					class="px-4 py-2 text-xs transition-colors border-b-2
+						{activeTab === 'file' ? 'border-accent text-text font-medium' : 'border-transparent text-text-muted hover:text-text-secondary'}"
+					onclick={() => { activeTab = 'file'; loadFileContent(); }}
+				>File</button>
+			{/if}
 			<button
 				class="px-4 py-2 text-xs transition-colors border-b-2
 					{activeTab === 'input' ? 'border-accent text-text font-medium' : 'border-transparent text-text-muted hover:text-text-secondary'}"
@@ -403,7 +477,69 @@
 
 		<!-- Tab content -->
 		<div class="flex-1 min-h-0 overflow-y-auto">
-			{#if activeTab === 'input'}
+			{#if activeTab === 'file' && isFileSpan}
+				<div class="p-4 space-y-3">
+					<!-- File header -->
+					<div class="flex items-center justify-between">
+						<div class="flex items-center gap-2 text-xs min-w-0">
+							<svg class="w-4 h-4 shrink-0 {span?.kind?.type === 'fs_read' ? 'text-accent' : 'text-success'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+							</svg>
+							<span class="font-mono text-text truncate" title={filePath ?? ''}>{filePath}</span>
+						</div>
+						{#if fileContentLoaded}
+							<button
+								class="shrink-0 px-2 py-1 text-[11px] bg-bg-tertiary text-text-secondary border border-border rounded hover:bg-bg-secondary transition-colors"
+								onclick={() => {
+									const blob = new Blob([fileContent], { type: 'text/plain' });
+									const url = URL.createObjectURL(blob);
+									const a = document.createElement('a');
+									a.href = url;
+									a.download = filePath?.split('/').pop() ?? 'file';
+									a.click();
+									URL.revokeObjectURL(url);
+								}}
+							>Download</button>
+						{/if}
+					</div>
+
+					<!-- Metadata badges -->
+					<div class="flex items-center gap-2 flex-wrap text-[11px]">
+						{#if fileHash}
+							<span class="inline-flex items-center rounded px-2 py-0.5 bg-bg-tertiary border border-border text-accent font-mono">{fileHash.slice(0, 12)}</span>
+						{/if}
+						{#if span?.kind?.type === 'fs_read' && span.kind.bytes_read != null}
+							<span class="inline-flex items-center rounded px-2 py-0.5 bg-bg-tertiary border border-border text-text-secondary">{formatFileSize(span.kind.bytes_read)}</span>
+						{:else if span?.kind?.type === 'fs_write' && span.kind.bytes_written != null}
+							<span class="inline-flex items-center rounded px-2 py-0.5 bg-bg-tertiary border border-border text-text-secondary">{formatFileSize(span.kind.bytes_written)}</span>
+						{/if}
+						{#if filePath}
+							<span class="inline-flex items-center rounded px-2 py-0.5 bg-bg-tertiary border border-border text-text-muted">{inferLanguage(filePath)}</span>
+						{/if}
+						<span class="inline-flex items-center rounded px-2 py-0.5 {span?.kind?.type === 'fs_read' ? 'bg-accent/10 border-accent/20 text-accent' : 'bg-success/10 border-success/20 text-success'} border">
+							{span?.kind?.type === 'fs_read' ? 'read' : 'write'}
+						</span>
+					</div>
+
+					<!-- File content -->
+					{#if fileContentLoading}
+						<div class="text-text-muted text-xs text-center py-8">Loading file content...</div>
+					{:else if fileContentError}
+						<div class="bg-bg-tertiary border border-border rounded p-4 text-center">
+							<p class="text-text-muted text-xs">{fileContentError}</p>
+						</div>
+					{:else if !fileHash}
+						<div class="bg-bg-tertiary border border-border rounded p-4 text-center">
+							<p class="text-text-muted text-xs">No file version hash available</p>
+						</div>
+					{:else if fileContentLoaded}
+						<div class="bg-bg-tertiary border border-border rounded overflow-hidden">
+							<pre class="p-3 text-xs font-mono text-text overflow-x-auto max-h-[60vh] overflow-y-auto whitespace-pre">{fileContent}</pre>
+						</div>
+					{/if}
+				</div>
+
+			{:else if activeTab === 'input'}
 				<div class="p-4">
 					{#if inputMessages}
 						<!-- Chat message view -->
