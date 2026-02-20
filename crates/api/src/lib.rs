@@ -1,3 +1,4 @@
+pub mod auth_keys;
 pub mod auth_routes;
 pub mod events;
 pub mod jobs;

@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { page } from '$app/state';
+	import { page } from '$app/stores';
 	import { getTrace, subscribeEvents, createSpan, deleteTrace, exportJson, type Span, type SpanKind } from '$lib/api';
 	import { shortId, spanStatus, spanDurationMs } from '$lib/api';
 	import TraceTimeline from '$lib/components/TraceTimeline.svelte';
 	import SpanDetail from '$lib/components/SpanDetail.svelte';
 	import { onMount } from 'svelte';
 
-	const traceId = $derived(page.params.id ?? '');
+	let traceId = $state('');
 	let spans: Span[] = $state([]);
 	let selectedSpan: Span | null = $state(null);
 	let loading = $state(true);
@@ -29,23 +29,36 @@
 	let addingSpan = $state(false);
 
 	async function loadTrace(id: string) {
+		console.log('[TraceDetail] loadTrace called with id:', id);
 		try {
 			const result = await getTrace(id);
+			console.log('[TraceDetail] getTrace result:', result);
 			spans = result.spans;
 			if (selectedSpan) {
 				const updated = spans.find((s) => s.id === selectedSpan!.id);
 				if (updated) selectedSpan = updated;
 			}
-		} catch {
-			// not found
+		} catch (e) {
+			console.error('[TraceDetail] getTrace error:', e);
 		}
 		loading = false;
+		console.log('[TraceDetail] loading set to false, spans:', spans.length);
 	}
 
 	onMount(() => {
-		loadTrace(traceId);
+		console.log('[TraceDetail] onMount');
+		
+		// Get initial trace ID from page store
+		const unsubPage = page.subscribe(p => {
+			const newId = p.params.id ?? '';
+			if (newId && newId !== traceId) {
+				traceId = newId;
+				loading = true;
+				loadTrace(newId);
+			}
+		});
 
-		const unsub = subscribeEvents((event) => {
+		const unsubEvents = subscribeEvents((event) => {
 			if (event.type === 'span_created' && event.span.trace_id === traceId) {
 				spans = [...spans, event.span];
 			} else if ((event.type === 'span_completed' || event.type === 'span_failed') && event.span.trace_id === traceId) {
@@ -62,7 +75,10 @@
 			}
 		});
 
-		return unsub;
+		return () => {
+			unsubPage();
+			unsubEvents();
+		};
 	});
 
 	function selectSpan(span: Span) {
@@ -314,13 +330,19 @@
 	{:else if spans.length === 0}
 		<div class="text-text-muted text-sm text-center py-8 flex-1">Trace not found</div>
 	{:else}
-		<!-- Timeline -->
-		<div class="flex-1 min-h-0 border border-border rounded mx-4 bg-bg-secondary overflow-hidden">
-			<TraceTimeline
-				{spans}
-				selectedId={selectedSpan?.id ?? null}
-				onSelect={selectSpan}
-			/>
+		<!-- Simple span list (TraceTimeline disabled for debugging) -->
+		<div class="flex-1 min-h-0 border border-border rounded mx-4 bg-bg-secondary overflow-auto p-4">
+			<h2 class="text-sm font-bold mb-2">Spans ({spans.length})</h2>
+			{#each spans as span}
+				<button
+					class="block w-full text-left p-2 mb-1 rounded hover:bg-bg-tertiary {selectedSpan?.id === span.id ? 'bg-bg-tertiary' : ''}"
+					onclick={() => selectSpan(span)}
+				>
+					<span class="font-mono text-xs text-accent">{shortId(span.id)}</span>
+					<span class="ml-2">{span.name}</span>
+					<span class="ml-2 text-text-muted text-xs">{span.kind.type}</span>
+				</button>
+			{/each}
 		</div>
 
 		<!-- Span detail panel -->

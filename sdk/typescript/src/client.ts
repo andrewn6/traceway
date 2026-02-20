@@ -17,22 +17,49 @@ import type {
 } from './types.js';
 
 export interface LLMTraceOpts {
+  /**
+   * Base URL of the llmtrace server.
+   * Defaults to LLMTRACE_URL env var or http://localhost:3000
+   */
   url?: string;
+  /**
+   * API key for authentication.
+   * Defaults to LLMTRACE_API_KEY env var.
+   * Required for cloud deployments.
+   */
+  apiKey?: string;
 }
 
 export class LLMTrace {
   private baseUrl: string;
+  private apiKey?: string;
 
   constructor(opts?: LLMTraceOpts) {
-    this.baseUrl = (opts?.url ?? 'http://localhost:3000').replace(/\/$/, '');
+    this.baseUrl = (
+      opts?.url ?? 
+      (typeof process !== 'undefined' ? process.env?.LLMTRACE_URL : undefined) ?? 
+      'http://localhost:3000'
+    ).replace(/\/$/, '');
+    
+    this.apiKey = 
+      opts?.apiKey ?? 
+      (typeof process !== 'undefined' ? process.env?.LLMTRACE_API_KEY : undefined);
   }
 
   // ─── Internal helpers ──────────────────────────────────────────────
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const headers: Record<string, string> = {};
+    if (body) {
+      headers['Content-Type'] = 'application/json';
+    }
+    if (this.apiKey) {
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    }
+    
     const res = await fetch(`${this.baseUrl}/api${path}`, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : {},
+      headers,
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
@@ -43,7 +70,12 @@ export class LLMTrace {
   }
 
   private async requestText(method: string, path: string): Promise<string> {
-    const res = await fetch(`${this.baseUrl}/api${path}`, { method });
+    const headers: Record<string, string> = {};
+    if (this.apiKey) {
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    }
+    
+    const res = await fetch(`${this.baseUrl}/api${path}`, { method, headers });
     if (!res.ok) {
       throw new Error(`${method} ${path}: HTTP ${res.status}`);
     }
@@ -151,8 +183,16 @@ export class LLMTrace {
 
   // ─── Live ──────────────────────────────────────────────────────────
 
+  /**
+   * Subscribe to real-time span events via SSE.
+   * Note: EventSource doesn't support custom headers, so auth is passed via query param.
+   */
   subscribe(callback: (event: SpanEvent) => void): () => void {
-    const es = new EventSource(`${this.baseUrl}/api/events`);
+    const url = new URL(`${this.baseUrl}/api/events`);
+    if (this.apiKey) {
+      url.searchParams.set('token', this.apiKey);
+    }
+    const es = new EventSource(url.toString());
     es.onmessage = (e) => {
       try {
         callback(JSON.parse(e.data));
