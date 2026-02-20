@@ -10,8 +10,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use axum::{
+    body::Body,
     extract::{Path, Query, State},
-    http::{header, StatusCode, Uri},
+    http::{header, Request, StatusCode, Uri},
     response::{
         sse::{Event, KeepAlive},
         Html, IntoResponse, Response, Sse,
@@ -129,7 +130,7 @@ async fn openapi_spec() -> Json<utoipa::openapi::OpenApi> {
 
 // --- Events ---
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SystemEvent {
     SpanCreated { span: Span },
@@ -158,6 +159,8 @@ pub struct AppState {
     pub config_path: Arc<String>,
     pub shutdown_tx: Option<watch::Sender<bool>>,
     pub auth_config: auth::AuthConfig,
+    pub auth_store: Option<Arc<dyn auth::AuthStore>>,
+    pub api_key_lookup: Arc<dyn auth::ApiKeyLookup>,
 }
 
 pub type SharedStore = Arc<RwLock<PersistentStore<SqliteBackend>>>;
@@ -1314,10 +1317,200 @@ async fn serve_ui(uri: Uri) -> Response {
     StatusCode::NOT_FOUND.into_response()
 }
 
+// --- Auth Middleware ---
+
+/// Auth middleware shared state.
+#[derive(Clone)]
+struct AuthMiddlewareState {
+    config: auth::AuthConfig,
+    lookup: Arc<dyn auth::ApiKeyLookup>,
+}
+
+/// Tower middleware layer that injects `AuthContext` into every request.
+#[derive(Clone)]
+struct AuthLayer {
+    state: AuthMiddlewareState,
+}
+
+impl<S> tower::Layer<S> for AuthLayer {
+    type Service = AuthMiddleware<S>;
+    fn layer(&self, inner: S) -> Self::Service {
+        AuthMiddleware {
+            inner,
+            state: self.state.clone(),
+        }
+    }
+}
+
+/// Tower middleware service that extracts auth and injects `AuthContext`.
+#[derive(Clone)]
+struct AuthMiddleware<S> {
+    inner: S,
+    state: AuthMiddlewareState,
+}
+
+impl<S> tower::Service<Request<Body>> for AuthMiddleware<S>
+where
+    S: tower::Service<Request<Body>, Response = Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut request: Request<Body>) -> Self::Future {
+        let state = self.state.clone();
+        let mut inner = self.inner.clone();
+        // Swap to make sure we have a ready service
+        std::mem::swap(&mut self.inner, &mut inner);
+
+        Box::pin(async move {
+            if state.config.local_mode {
+                request.extensions_mut().insert(auth::AuthContext::local());
+                return inner.call(request).await;
+            }
+
+            // Extract header values before async boundary (Body is not Sync)
+            let auth_header = request
+                .headers()
+                .get(header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok().map(String::from));
+            let cookie_header = request
+                .headers()
+                .get(header::COOKIE)
+                .and_then(|v| v.to_str().ok().map(String::from));
+            let query_string = request.uri().query().map(String::from);
+
+            match extract_auth(
+                auth_header.as_deref(),
+                cookie_header.as_deref(),
+                query_string.as_deref(),
+                &state.config,
+                state.lookup.as_ref(),
+            ).await {
+                Ok(ctx) => {
+                    request.extensions_mut().insert(ctx);
+                    inner.call(request).await
+                }
+                Err(e) => Ok(e.into_response()),
+            }
+        })
+    }
+}
+
+/// Extract auth context from pre-extracted request headers/query.
+async fn extract_auth(
+    auth_header: Option<&str>,
+    cookie_header: Option<&str>,
+    query_string: Option<&str>,
+    config: &auth::AuthConfig,
+    lookup: &dyn auth::ApiKeyLookup,
+) -> Result<auth::AuthContext, auth::AuthError> {
+    // Check Authorization header
+    if let Some(auth_str) = auth_header {
+        if let Some(token) = auth_str.strip_prefix("Bearer ") {
+            // API key format: llmfs_sk_...
+            if token.starts_with("llmfs_sk_") {
+                let prefix = if token.len() >= 16 { &token[..16] } else {
+                    return Err(auth::AuthError::InvalidApiKey);
+                };
+                let (org_id, key_hash, scopes) = lookup
+                    .lookup_api_key(prefix)
+                    .await
+                    .ok_or(auth::AuthError::InvalidApiKey)?;
+                if !auth::verify_api_key(token, &key_hash) {
+                    return Err(auth::AuthError::InvalidApiKey);
+                }
+                return Ok(auth::AuthContext::from_api_key(org_id, scopes));
+            }
+            // JWT session token
+            let session = auth::verify_session(token, &config.jwt_secret)?;
+            return Ok(auth::AuthContext::from_session(session.org_id, session.user_id, session.scopes));
+        }
+
+        return Err(auth::AuthError::InvalidFormat);
+    }
+
+    // Check session cookie
+    if let Some(cookie_str) = cookie_header {
+        for c in cookie_str.split(';') {
+            let c = c.trim();
+            if let Some(value) = c.strip_prefix("session=") {
+                if !value.is_empty() {
+                    let session = auth::verify_session(value, &config.jwt_secret)?;
+                    return Ok(auth::AuthContext::from_session(session.org_id, session.user_id, session.scopes));
+                }
+            }
+        }
+    }
+
+    // Check query param (for SSE)
+    if let Some(query) = query_string {
+        if let Some(token) = auth_keys::extract_token_from_query(query) {
+            let session = auth::verify_session(&token, &config.jwt_secret)?;
+            return Ok(auth::AuthContext::from_session(session.org_id, session.user_id, session.scopes));
+        }
+    }
+
+    Err(auth::AuthError::MissingAuth)
+}
+
 // --- Router ---
 
 pub fn router(store: SharedStore) -> Router {
     router_with_start_time(store, Instant::now(), serde_json::Value::Object(Default::default()), String::new(), None)
+}
+
+/// Builder for creating a router with cloud-aware configuration.
+pub struct RouterBuilder {
+    store: SharedStore,
+    start_time: Instant,
+    config: serde_json::Value,
+    config_path: String,
+    shutdown_tx: Option<watch::Sender<bool>>,
+    auth_config: auth::AuthConfig,
+    auth_store: Option<Arc<dyn auth::AuthStore>>,
+    api_key_lookup: Option<Arc<dyn auth::ApiKeyLookup>>,
+}
+
+impl RouterBuilder {
+    pub fn new(store: SharedStore) -> Self {
+        Self {
+            store,
+            start_time: Instant::now(),
+            config: serde_json::Value::Object(Default::default()),
+            config_path: String::new(),
+            shutdown_tx: None,
+            auth_config: auth::AuthConfig::local(),
+            auth_store: None,
+            api_key_lookup: None,
+        }
+    }
+
+    pub fn start_time(mut self, t: Instant) -> Self { self.start_time = t; self }
+    pub fn config(mut self, c: serde_json::Value) -> Self { self.config = c; self }
+    pub fn config_path(mut self, p: String) -> Self { self.config_path = p; self }
+    pub fn shutdown_tx(mut self, tx: watch::Sender<bool>) -> Self { self.shutdown_tx = Some(tx); self }
+    pub fn auth_config(mut self, c: auth::AuthConfig) -> Self { self.auth_config = c; self }
+    pub fn auth_store(mut self, s: Arc<dyn auth::AuthStore>) -> Self { self.auth_store = Some(s); self }
+    pub fn api_key_lookup(mut self, l: Arc<dyn auth::ApiKeyLookup>) -> Self { self.api_key_lookup = Some(l); self }
+
+    pub fn build(self) -> Router {
+        build_router(
+            self.store,
+            self.start_time,
+            self.config,
+            self.config_path,
+            self.shutdown_tx,
+            self.auth_config,
+            self.auth_store,
+            self.api_key_lookup,
+        )
+    }
 }
 
 pub fn router_with_start_time(
@@ -1327,7 +1520,23 @@ pub fn router_with_start_time(
     config_path: String,
     shutdown_tx: Option<watch::Sender<bool>>,
 ) -> Router {
+    build_router(store, start_time, config, config_path, shutdown_tx, auth::AuthConfig::local(), None, None)
+}
+
+fn build_router(
+    store: SharedStore,
+    start_time: Instant,
+    config: serde_json::Value,
+    config_path: String,
+    shutdown_tx: Option<watch::Sender<bool>>,
+    auth_config: auth::AuthConfig,
+    auth_store: Option<Arc<dyn auth::AuthStore>>,
+    api_key_lookup: Option<Arc<dyn auth::ApiKeyLookup>>,
+) -> Router {
     let (events_tx, _) = broadcast::channel(256);
+    let api_key_lookup = api_key_lookup.unwrap_or_else(|| {
+        Arc::new(auth_keys::NoopApiKeyLookup) as Arc<dyn auth::ApiKeyLookup>
+    });
     let state = AppState {
         store,
         events_tx,
@@ -1335,7 +1544,9 @@ pub fn router_with_start_time(
         config: Arc::new(RwLock::new(config)),
         config_path: Arc::new(config_path),
         shutdown_tx,
-        auth_config: auth::AuthConfig::local(), // Default to local mode
+        auth_config: auth_config.clone(),
+        auth_store,
+        api_key_lookup: api_key_lookup.clone(),
     };
 
     let cors = CorsLayer::new()
@@ -1343,7 +1554,14 @@ pub fn router_with_start_time(
         .allow_methods(Any)
         .allow_headers(Any);
 
-    let api = Router::new()
+    // Auth middleware state (injected as Extension for `from_fn`)
+    let auth_mw_state = AuthMiddlewareState {
+        config: state.auth_config.clone(),
+        lookup: state.api_key_lookup.clone(),
+    };
+
+    // Protected routes (auth middleware applied)
+    let protected = Router::new()
         // Traces
         .route("/traces", get(list_traces).post(create_trace).delete(clear_all_traces))
         .route("/traces/:trace_id", get(get_trace).delete(delete_trace))
@@ -1372,20 +1590,30 @@ pub fn router_with_start_time(
         // Stats & Export
         .route("/stats", get(get_stats))
         .route("/export/json", get(export_json))
-        // Health & Observability
-        .route("/health", get(health))
-        .route("/ready", get(ready))
-        .route("/live", get(live))
-        .route("/metrics", get(prometheus_metrics))
         // Config & Shutdown
         .route("/config", get(get_config).put(update_config))
         .route("/shutdown", post(post_shutdown))
         // SSE
         .route("/events", get(events))
+        // Auth routes that require auth (me, org, api-keys)
+        .merge(auth_routes::protected_auth_router())
+        .layer(AuthLayer { state: auth_mw_state });
+
+    // Public routes (no auth required)
+    let public = Router::new()
+        // Health & Observability
+        .route("/health", get(health))
+        .route("/ready", get(ready))
+        .route("/live", get(live))
+        .route("/metrics", get(prometheus_metrics))
         // OpenAPI spec
         .route("/openapi.json", get(openapi_spec))
-        // Auth routes
-        .merge(auth_routes::auth_router());
+        // Auth routes that don't require auth (config, signup, login, logout)
+        .merge(auth_routes::public_auth_router());
+
+    let api = Router::new()
+        .merge(protected)
+        .merge(public);
 
     Router::new()
         .nest("/api", api)

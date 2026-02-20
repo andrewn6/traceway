@@ -6,12 +6,14 @@ pub mod api_key;
 pub mod context;
 pub mod middleware;
 pub mod session;
+pub mod store;
 
 // Re-exports
 pub use api_key::{ApiKey, ApiKeyId, generate_api_key, hash_api_key, verify_api_key};
 pub use context::{AuthContext, AuthError};
 pub use middleware::{Auth, AuthConfig, ApiKeyLookup};
 pub use session::{SessionToken, create_session, verify_session};
+pub use store::{AuthStore, AuthStoreError};
 
 // --- ID Types ---
 
@@ -63,6 +65,8 @@ pub struct User {
     pub id: UserId,
     pub email: String,
     pub name: Option<String>,
+    #[serde(skip_serializing)]
+    pub password_hash: Option<String>,
     pub org_id: OrgId,
     pub role: Role,
     pub created_at: DateTime<Utc>,
@@ -76,10 +80,25 @@ impl User {
             id: Uuid::now_v7(),
             email: email.into(),
             name: None,
+            password_hash: None,
             org_id,
             role,
             created_at: now,
             updated_at: now,
+        }
+    }
+
+    pub fn with_password(mut self, password: &str) -> Self {
+        self.password_hash = Some(
+            bcrypt::hash(password, bcrypt::DEFAULT_COST).expect("bcrypt hash failed"),
+        );
+        self
+    }
+
+    pub fn verify_password(&self, password: &str) -> bool {
+        match &self.password_hash {
+            Some(hash) => bcrypt::verify(password, hash).unwrap_or(false),
+            None => false,
         }
     }
 }

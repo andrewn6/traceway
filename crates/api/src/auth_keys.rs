@@ -5,8 +5,6 @@
 //! - Auth middleware wiring for cloud mode
 //! - Query parameter auth extraction for SSE endpoints
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use auth::{ApiKeyLookup, AuthConfig, OrgId, Scope};
 use tracing::{debug, info};
@@ -109,6 +107,75 @@ pub struct NoopApiKeyLookup;
 impl ApiKeyLookup for NoopApiKeyLookup {
     async fn lookup_api_key(&self, _prefix: &str) -> Option<(OrgId, String, Vec<Scope>)> {
         None
+    }
+}
+
+/// Database-backed API key lookup using `AuthStore`.
+///
+/// Delegates to `AuthStore::lookup_api_key_by_prefix` and returns the
+/// (org_id, key_hash, scopes) tuple the middleware expects.
+pub struct StoreApiKeyLookup {
+    store: std::sync::Arc<dyn auth::AuthStore>,
+}
+
+impl StoreApiKeyLookup {
+    pub fn new(store: std::sync::Arc<dyn auth::AuthStore>) -> Self {
+        Self { store }
+    }
+}
+
+#[async_trait]
+impl ApiKeyLookup for StoreApiKeyLookup {
+    async fn lookup_api_key(&self, prefix: &str) -> Option<(OrgId, String, Vec<Scope>)> {
+        match self.store.lookup_api_key_by_prefix(prefix).await {
+            Ok(Some(key)) => {
+                // Check expiry
+                if let Some(expires) = key.expires_at {
+                    if expires < chrono::Utc::now() {
+                        debug!(prefix, "API key expired");
+                        return None;
+                    }
+                }
+                // Update last_used_at in background (best-effort)
+                let store = self.store.clone();
+                let key_id = key.id;
+                tokio::spawn(async move {
+                    let _ = store.update_api_key_last_used(key_id).await;
+                });
+                Some((key.org_id, key.key_hash, key.scopes))
+            }
+            Ok(None) => None,
+            Err(e) => {
+                tracing::error!("API key lookup failed: {}", e);
+                None
+            }
+        }
+    }
+}
+
+/// Composite lookup: tries the database store first, then falls back to env-based keys.
+pub struct CompositeApiKeyLookup {
+    store_lookup: StoreApiKeyLookup,
+    env_lookup: EnvApiKeyLookup,
+}
+
+impl CompositeApiKeyLookup {
+    pub fn new(store: std::sync::Arc<dyn auth::AuthStore>) -> Self {
+        Self {
+            store_lookup: StoreApiKeyLookup::new(store),
+            env_lookup: EnvApiKeyLookup::from_env(),
+        }
+    }
+}
+
+#[async_trait]
+impl ApiKeyLookup for CompositeApiKeyLookup {
+    async fn lookup_api_key(&self, prefix: &str) -> Option<(OrgId, String, Vec<Scope>)> {
+        // Try DB first, then env
+        if let Some(result) = self.store_lookup.lookup_api_key(prefix).await {
+            return Some(result);
+        }
+        self.env_lookup.lookup_api_key(prefix).await
     }
 }
 
