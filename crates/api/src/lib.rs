@@ -376,19 +376,42 @@ pub struct EnqueueResponse {
     pub enqueued: usize,
 }
 
+// --- Scope enforcement helper ---
+
+/// Check that the auth context has the required scope, returning 403 if not.
+fn require_scope(ctx: &auth::AuthContext, scope: auth::Scope) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    if ctx.has_scope(scope) {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": format!("insufficient permissions: requires {:?}", scope),
+                "code": "insufficient_scope"
+            })),
+        ))
+    }
+}
+
 // --- Trace handlers ---
 
-async fn list_traces(State(state): State<AppState>) -> Json<TraceListResponse> {
+async fn list_traces(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+) -> Result<Json<TraceListResponse>, (StatusCode, Json<serde_json::Value>)> {
+    require_scope(&ctx, auth::Scope::TracesRead)?;
     let r = state.store.read().await;
     let traces: Vec<Trace> = r.all_traces().cloned().collect();
     let count = traces.len();
-    Json(TraceListResponse { traces, count })
+    Ok(Json(TraceListResponse { traces, count }))
 }
 
 async fn create_trace(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Json(req): Json<CreateTraceRequest>,
-) -> (StatusCode, Json<Trace>) {
+) -> Result<(StatusCode, Json<Trace>), (StatusCode, Json<serde_json::Value>)> {
+    require_scope(&ctx, auth::Scope::TracesWrite)?;
     let trace = Trace::new(req.name).with_tags(req.tags);
     let mut w = state.store.write().await;
     w.save_trace(trace.clone()).await;
@@ -396,13 +419,15 @@ async fn create_trace(
     let _ = state
         .events_tx
         .send(SystemEvent::TraceCreated { trace: trace.clone() });
-    (StatusCode::CREATED, Json(trace))
+    Ok((StatusCode::CREATED, Json(trace)))
 }
 
 async fn get_trace(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(trace_id): Path<TraceId>,
 ) -> Result<Json<SpanList>, StatusCode> {
+    require_scope(&ctx, auth::Scope::TracesRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let r = state.store.read().await;
     let span_ids = r.spans_for_trace(trace_id);
     if span_ids.is_empty() {
@@ -422,9 +447,11 @@ async fn get_trace(
 // --- Span handlers ---
 
 async fn list_spans(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Query(params): Query<SpanQueryParams>,
-) -> Json<SpanList> {
+) -> Result<Json<SpanList>, (StatusCode, Json<serde_json::Value>)> {
+    require_scope(&ctx, auth::Scope::TracesRead)?;
     let r = state.store.read().await;
     let filter = SpanFilter {
         kind: params.kind,
@@ -440,13 +467,15 @@ async fn list_spans(
     };
     let spans: Vec<Span> = r.filter_spans(&filter).into_iter().cloned().collect();
     let count = spans.len();
-    Json(SpanList { spans, count })
+    Ok(Json(SpanList { spans, count }))
 }
 
 async fn get_span(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(span_id): Path<SpanId>,
 ) -> Result<Json<Span>, StatusCode> {
+    require_scope(&ctx, auth::Scope::TracesRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let r = state.store.read().await;
     r.get(span_id)
         .cloned()
@@ -455,9 +484,11 @@ async fn get_span(
 }
 
 async fn create_span(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Json(req): Json<CreateSpanRequest>,
-) -> (StatusCode, Json<CreatedSpan>) {
+) -> Result<(StatusCode, Json<CreatedSpan>), (StatusCode, Json<serde_json::Value>)> {
+    require_scope(&ctx, auth::Scope::TracesWrite)?;
     let mut builder = SpanBuilder::new(req.trace_id, req.name, req.kind);
     if let Some(parent_id) = req.parent_id {
         builder = builder.parent(parent_id);
@@ -475,14 +506,18 @@ async fn create_span(
 
     let _ = state.events_tx.send(SystemEvent::SpanCreated { span });
     tracing::debug!(%id, %trace_id, "span created");
-    (StatusCode::CREATED, Json(CreatedSpan { id, trace_id }))
+    Ok((StatusCode::CREATED, Json(CreatedSpan { id, trace_id })))
 }
 
 async fn complete_span(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(span_id): Path<SpanId>,
     body: Option<Json<CompleteSpanRequest>>,
 ) -> StatusCode {
+    if !ctx.has_scope(auth::Scope::TracesWrite) {
+        return StatusCode::FORBIDDEN;
+    }
     let output = body.and_then(|b| b.0.output);
 
     let mut w = state.store.write().await;
@@ -507,10 +542,14 @@ async fn complete_span(
 }
 
 async fn fail_span(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(span_id): Path<SpanId>,
     Json(req): Json<FailSpanRequest>,
 ) -> StatusCode {
+    if !ctx.has_scope(auth::Scope::TracesWrite) {
+        return StatusCode::FORBIDDEN;
+    }
     let mut w = state.store.write().await;
 
     // Check if already terminal → 409 Conflict
@@ -532,20 +571,26 @@ async fn fail_span(
     }
 }
 
-async fn get_stats(State(state): State<AppState>) -> Json<Stats> {
+async fn get_stats(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+) -> Result<Json<Stats>, (StatusCode, Json<serde_json::Value>)> {
+    require_scope(&ctx, auth::Scope::TracesRead)?;
     let r = state.store.read().await;
-    Json(Stats {
+    Ok(Json(Stats {
         trace_count: r.trace_count(),
         span_count: r.span_count(),
-    })
+    }))
 }
 
 // --- File handlers ---
 
 async fn list_files(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Query(params): Query<FileQueryParams>,
-) -> Json<FileListResponse> {
+) -> Result<Json<FileListResponse>, (StatusCode, Json<serde_json::Value>)> {
+    require_scope(&ctx, auth::Scope::TracesRead)?;
     let r = state.store.read().await;
     let filter = FileFilter {
         path_prefix: params.path_prefix,
@@ -555,13 +600,15 @@ async fn list_files(
     };
     let files: Vec<FileVersion> = r.list_files(&filter).into_iter().cloned().collect();
     let count = files.len();
-    Json(FileListResponse { files, count })
+    Ok(Json(FileListResponse { files, count }))
 }
 
 async fn get_file_versions(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(path): Path<String>,
 ) -> Result<Json<FileVersionsResponse>, StatusCode> {
+    require_scope(&ctx, auth::Scope::TracesRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let r = state.store.read().await;
     let versions: Vec<FileVersion> = r.get_file_versions(&path).into_iter().cloned().collect();
     if versions.is_empty() {
@@ -578,9 +625,11 @@ async fn get_file_versions(
 // --- File content handler ---
 
 async fn get_file_content(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(hash): Path<String>,
 ) -> Result<Response, StatusCode> {
+    require_scope(&ctx, auth::Scope::TracesRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let r = state.store.read().await;
     let content = r.load_file_content(&hash).await.map_err(|_| StatusCode::NOT_FOUND)?;
     drop(r);
@@ -609,9 +658,11 @@ async fn get_file_content(
 // --- Export handler ---
 
 async fn export_json(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Query(params): Query<ExportParams>,
-) -> Json<ExportData> {
+) -> Result<Json<ExportData>, (StatusCode, Json<serde_json::Value>)> {
+    require_scope(&ctx, auth::Scope::TracesRead)?;
     let r = state.store.read().await;
     let mut traces: HashMap<TraceId, Vec<Span>> = HashMap::new();
 
@@ -635,12 +686,13 @@ async fn export_json(
         }
     }
 
-    Json(ExportData { traces })
+    Ok(Json(ExportData { traces }))
 }
 
 // --- SSE handler ---
 
 async fn events(
+    auth::Auth(_ctx): auth::Auth,
     State(state): State<AppState>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
     let rx = state.events_tx.subscribe();
@@ -657,9 +709,13 @@ async fn events(
 // --- Delete handlers ---
 
 async fn delete_span(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(span_id): Path<SpanId>,
 ) -> StatusCode {
+    if !ctx.has_scope(auth::Scope::TracesWrite) {
+        return StatusCode::FORBIDDEN;
+    }
     let mut w = state.store.write().await;
     if w.delete_span(span_id).await {
         drop(w);
@@ -672,9 +728,11 @@ async fn delete_span(
 }
 
 async fn delete_trace(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(trace_id): Path<TraceId>,
 ) -> Result<Json<DeletedTrace>, StatusCode> {
+    require_scope(&ctx, auth::Scope::TracesWrite).map_err(|_| StatusCode::FORBIDDEN)?;
     let mut w = state.store.write().await;
     let spans_deleted = w.delete_trace(trace_id).await;
     drop(w);
@@ -692,15 +750,19 @@ async fn delete_trace(
     }
 }
 
-async fn clear_all_traces(State(state): State<AppState>) -> Json<ClearedAll> {
+async fn clear_all_traces(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+) -> Result<Json<ClearedAll>, (StatusCode, Json<serde_json::Value>)> {
+    require_scope(&ctx, auth::Scope::TracesWrite)?;
     let mut w = state.store.write().await;
     w.clear().await;
     drop(w);
     let _ = state.events_tx.send(SystemEvent::Cleared);
     tracing::debug!("all traces cleared");
-    Json(ClearedAll {
+    Ok(Json(ClearedAll {
         message: "All traces cleared".to_string(),
-    })
+    }))
 }
 
 // --- Health handler ---
@@ -780,7 +842,11 @@ async fn prometheus_metrics(State(state): State<AppState>) -> Response {
 
 // --- Dataset handlers ---
 
-async fn list_datasets(State(state): State<AppState>) -> Json<DatasetListResponse> {
+async fn list_datasets(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+) -> Result<Json<DatasetListResponse>, (StatusCode, Json<serde_json::Value>)> {
+    require_scope(&ctx, auth::Scope::DatasetsRead)?;
     let r = state.store.read().await;
     let datasets: Vec<DatasetResponse> = r
         .all_datasets()
@@ -790,13 +856,15 @@ async fn list_datasets(State(state): State<AppState>) -> Json<DatasetListRespons
         })
         .collect();
     let count = datasets.len();
-    Json(DatasetListResponse { datasets, count })
+    Ok(Json(DatasetListResponse { datasets, count }))
 }
 
 async fn create_dataset(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Json(req): Json<CreateDatasetRequest>,
-) -> (StatusCode, Json<Dataset>) {
+) -> Result<(StatusCode, Json<Dataset>), (StatusCode, Json<serde_json::Value>)> {
+    require_scope(&ctx, auth::Scope::DatasetsWrite)?;
     let dataset = Dataset::new(req.name, req.description);
     let mut w = state.store.write().await;
     w.save_dataset(dataset.clone()).await;
@@ -804,13 +872,15 @@ async fn create_dataset(
     let _ = state
         .events_tx
         .send(SystemEvent::DatasetCreated { dataset: dataset.clone() });
-    (StatusCode::CREATED, Json(dataset))
+    Ok((StatusCode::CREATED, Json(dataset)))
 }
 
 async fn get_dataset(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(dataset_id): Path<DatasetId>,
 ) -> Result<Json<DatasetResponse>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let r = state.store.read().await;
     let ds = r.get_dataset(dataset_id).ok_or(StatusCode::NOT_FOUND)?;
     Ok(Json(DatasetResponse {
@@ -820,10 +890,12 @@ async fn get_dataset(
 }
 
 async fn update_dataset(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(dataset_id): Path<DatasetId>,
     Json(req): Json<UpdateDatasetRequest>,
 ) -> Result<Json<Dataset>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
     let mut w = state.store.write().await;
     let ds = w.get_dataset(dataset_id).ok_or(StatusCode::NOT_FOUND)?.clone();
     let mut updated = ds;
@@ -839,9 +911,13 @@ async fn update_dataset(
 }
 
 async fn delete_dataset_handler(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(dataset_id): Path<DatasetId>,
 ) -> StatusCode {
+    if !ctx.has_scope(auth::Scope::DatasetsWrite) {
+        return StatusCode::FORBIDDEN;
+    }
     let mut w = state.store.write().await;
     if w.delete_dataset(dataset_id).await {
         drop(w);
@@ -857,9 +933,11 @@ async fn delete_dataset_handler(
 // --- Datapoint handlers ---
 
 async fn list_datapoints(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(dataset_id): Path<DatasetId>,
 ) -> Result<Json<DatapointListResponse>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let r = state.store.read().await;
     if r.get_dataset(dataset_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -874,10 +952,12 @@ async fn list_datapoints(
 }
 
 async fn create_datapoint(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(dataset_id): Path<DatasetId>,
     Json(req): Json<CreateDatapointRequest>,
 ) -> Result<(StatusCode, Json<Datapoint>), StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
     let mut w = state.store.write().await;
     if w.get_dataset(dataset_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -892,9 +972,13 @@ async fn create_datapoint(
 }
 
 async fn delete_datapoint_handler(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path((dataset_id, dp_id)): Path<(DatasetId, DatapointId)>,
 ) -> StatusCode {
+    if !ctx.has_scope(auth::Scope::DatasetsWrite) {
+        return StatusCode::FORBIDDEN;
+    }
     let mut w = state.store.write().await;
     // Verify the datapoint belongs to this dataset
     if let Some(dp) = w.get_datapoint(dp_id) {
@@ -914,10 +998,12 @@ async fn delete_datapoint_handler(
 // --- Export span → datapoint ---
 
 async fn export_span_to_dataset(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(dataset_id): Path<DatasetId>,
     Json(req): Json<ExportSpanRequest>,
 ) -> Result<(StatusCode, Json<Datapoint>), StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
     let mut w = state.store.write().await;
     if w.get_dataset(dataset_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -1040,10 +1126,14 @@ fn parse_csv_import(data: &[u8]) -> Result<Vec<DatapointKind>, String> {
 }
 
 async fn import_file(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(dataset_id): Path<DatasetId>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<ImportResponse>), (StatusCode, String)> {
+    if !ctx.has_scope(auth::Scope::DatasetsWrite) {
+        return Err((StatusCode::FORBIDDEN, "insufficient permissions: requires DatasetsWrite".to_string()));
+    }
     // Verify dataset exists
     {
         let r = state.store.read().await;
@@ -1097,9 +1187,11 @@ async fn import_file(
 // --- Queue handlers ---
 
 async fn list_queue(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(dataset_id): Path<DatasetId>,
 ) -> Result<Json<QueueListResponse>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let r = state.store.read().await;
     if r.get_dataset(dataset_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -1127,10 +1219,12 @@ async fn list_queue(
 }
 
 async fn enqueue_datapoints(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(dataset_id): Path<DatasetId>,
     Json(req): Json<EnqueueRequest>,
 ) -> Result<(StatusCode, Json<EnqueueResponse>), StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
     let mut w = state.store.write().await;
     if w.get_dataset(dataset_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -1155,10 +1249,12 @@ async fn enqueue_datapoints(
 }
 
 async fn claim_queue_item(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(item_id): Path<QueueItemId>,
     Json(req): Json<ClaimRequest>,
 ) -> Result<Json<QueueItem>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
     let mut w = state.store.write().await;
     let item = w
         .claim_queue_item(item_id, req.claimed_by)
@@ -1172,10 +1268,12 @@ async fn claim_queue_item(
 }
 
 async fn submit_queue_item(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(item_id): Path<QueueItemId>,
     Json(req): Json<SubmitRequest>,
 ) -> Result<Json<QueueItem>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
     let mut w = state.store.write().await;
 
     // Get the queue item to find the datapoint
@@ -1215,9 +1313,11 @@ async fn submit_queue_item(
 // --- Analytics handlers ---
 
 async fn post_analytics(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Json(query): Json<AnalyticsQuery>,
-) -> Json<AnalyticsResponse> {
+) -> Result<Json<AnalyticsResponse>, (StatusCode, Json<serde_json::Value>)> {
+    require_scope(&ctx, auth::Scope::AnalyticsRead)?;
     let r = state.store.read().await;
     let filter = SpanFilter {
         kind: query.filter.kind.clone(),
@@ -1231,28 +1331,40 @@ async fn post_analytics(
     };
     let spans = r.filter_spans(&filter);
     let response = analytics::compute_analytics(&spans, &query);
-    Json(response)
+    Ok(Json(response))
 }
 
-async fn analytics_summary(State(state): State<AppState>) -> Json<AnalyticsSummary> {
+async fn analytics_summary(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+) -> Result<Json<AnalyticsSummary>, (StatusCode, Json<serde_json::Value>)> {
+    require_scope(&ctx, auth::Scope::AnalyticsRead)?;
     let r = state.store.read().await;
     let spans: Vec<&trace::Span> = r.all_spans().collect();
     let trace_count = r.trace_count();
     let summary = analytics::compute_summary(&spans, trace_count);
-    Json(summary)
+    Ok(Json(summary))
 }
 
 // --- Config handlers ---
 
-async fn get_config(State(state): State<AppState>) -> Json<serde_json::Value> {
+async fn get_config(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    require_scope(&ctx, auth::Scope::Admin)?;
     let config = state.config.read().await;
-    Json(config.clone())
+    Ok(Json(config.clone()))
 }
 
 async fn update_config(
+    auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Json(new_config): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    if !ctx.has_scope(auth::Scope::Admin) {
+        return Err((StatusCode::FORBIDDEN, "insufficient permissions: requires Admin".to_string()));
+    }
     // Write TOML to the config file path
     let config_path = state.config_path.as_str();
     if config_path.is_empty() {
@@ -1280,7 +1392,13 @@ async fn update_config(
     Ok(Json(new_config))
 }
 
-async fn post_shutdown(State(state): State<AppState>) -> StatusCode {
+async fn post_shutdown(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+) -> StatusCode {
+    if !ctx.has_scope(auth::Scope::Admin) {
+        return StatusCode::FORBIDDEN;
+    }
     if let Some(ref tx) = state.shutdown_tx {
         tracing::info!("shutdown requested via API");
         let _ = tx.send(true);
