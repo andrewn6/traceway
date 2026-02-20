@@ -103,9 +103,30 @@ class TraceContext:
 class LLMTrace:
     """Client for the llmtrace daemon API."""
 
-    def __init__(self, url: str = "http://localhost:3000"):
-        self._base_url = url.rstrip("/")
-        self._client = httpx.Client(base_url=self._base_url)
+    def __init__(
+        self,
+        url: str | None = None,
+        api_key: str | None = None,
+    ):
+        """Initialize the LLMTrace client.
+        
+        Args:
+            url: Base URL of the llmtrace server. Defaults to LLMTRACE_URL env var
+                 or http://localhost:3000
+            api_key: API key for authentication. Defaults to LLMTRACE_API_KEY env var.
+                     Required for cloud deployments.
+        """
+        self._base_url = (
+            url or os.environ.get("LLMTRACE_URL") or "http://localhost:3000"
+        ).rstrip("/")
+        
+        self._api_key = api_key or os.environ.get("LLMTRACE_API_KEY")
+        
+        headers = {}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        
+        self._client = httpx.Client(base_url=self._base_url, headers=headers)
 
     def close(self) -> None:
         self._client.close()
