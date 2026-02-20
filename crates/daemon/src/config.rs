@@ -70,7 +70,7 @@ impl Default for LoggingConfig {
 }
 
 impl Config {
-    /// Load config from `~/.llmtrace/config.toml`, returning defaults if file is missing.
+    /// Load config from `~/.traceway/config.toml`, returning defaults if file is missing.
     pub fn load() -> Self {
         let path = Self::default_path();
         Self::load_from(&path)
@@ -79,7 +79,7 @@ impl Config {
     pub fn default_path() -> PathBuf {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".llmtrace")
+            .join(".traceway")
             .join("config.toml")
     }
 
@@ -102,7 +102,7 @@ impl Config {
     pub fn data_dir() -> PathBuf {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".llmtrace")
+            .join(".traceway")
     }
 
     pub fn db_path(&self) -> PathBuf {

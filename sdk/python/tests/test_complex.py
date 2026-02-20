@@ -6,14 +6,14 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from llmtrace import LLMTrace, CustomKind, LlmCallKind, FsReadKind, FsWriteKind
+from traceway import Traceway, CustomKind, LlmCallKind, FsReadKind, FsWriteKind
 
-BASE = os.environ.get("LLMTRACE_URL", "http://localhost:3000")
+BASE = os.environ.get("TRACEWAY_URL", "http://localhost:3000")
 
 
 def test_multi_span_trace_with_kinds():
     """Simulate a realistic agent trace: read files, call LLM, write output."""
-    client = LLMTrace(BASE)
+    client = Traceway(BASE)
     client.clear_all()
 
     with client.trace("agent-run") as t:
@@ -80,7 +80,7 @@ def test_multi_span_trace_with_kinds():
 
 def test_nested_spans():
     """Test parent-child span relationships."""
-    client = LLMTrace(BASE)
+    client = Traceway(BASE)
 
     with client.trace("nested-test") as t:
         trace_id = t.trace_id
@@ -133,7 +133,7 @@ def test_nested_spans():
 
 def test_span_filtering():
     """Test querying spans with filters."""
-    client = LLMTrace(BASE)
+    client = Traceway(BASE)
     client.clear_all()
 
     # Create two traces with different span kinds
@@ -173,7 +173,7 @@ def test_span_filtering():
 
 def test_export_and_stats():
     """Test data export and stats endpoints."""
-    client = LLMTrace(BASE)
+    client = Traceway(BASE)
     client.clear_all()
 
     # Create some data
@@ -205,7 +205,7 @@ def test_analytics_summary():
     """Test the analytics summary endpoint."""
     import httpx
 
-    client = LLMTrace(BASE)
+    client = Traceway(BASE)
     client.clear_all()
 
     with client.trace("analytics-test") as t:
@@ -242,7 +242,7 @@ def test_analytics_summary():
 
 def test_trace_lifecycle():
     """Test full CRUD: create, read, delete, verify gone."""
-    client = LLMTrace(BASE)
+    client = Traceway(BASE)
 
     # Create
     with client.trace("lifecycle-test") as t:

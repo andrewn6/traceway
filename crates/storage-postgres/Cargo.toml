@@ -2,7 +2,7 @@
 name = "storage-postgres"
 version.workspace = true
 edition.workspace = true
-description = "Postgres storage backend for llm-fs cloud auth"
+description = "Postgres storage backend for Traceway cloud auth"
 
 [dependencies]
 auth = { path = "../auth" }

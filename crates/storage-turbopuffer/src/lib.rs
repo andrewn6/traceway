@@ -1,4 +1,4 @@
-//! Turbopuffer storage backend for llm-fs cloud deployment.
+//! Turbopuffer storage backend for Traceway cloud deployment.
 //!
 //! This module provides a cloud-native storage backend using Turbopuffer's
 //! vector database as the primary storage layer. It supports:
@@ -70,7 +70,7 @@ pub struct TurbopufferConfig {
     pub api_key: String,
     /// Base URL for Turbopuffer API (default: https://api.turbopuffer.com)
     pub base_url: String,
-    /// Namespace prefix for multi-tenancy (e.g., "llmfs_org123")
+    /// Namespace prefix for multi-tenancy (e.g., "traceway_org123")
     pub namespace: String,
     /// Request timeout in seconds
     pub timeout_secs: u64,
@@ -82,7 +82,7 @@ impl TurbopufferConfig {
             .map_err(|_| TurbopufferError::Config("TURBOPUFFER_API_KEY not set".to_string()))?;
 
         let namespace =
-            std::env::var("TURBOPUFFER_NAMESPACE").unwrap_or_else(|_| "llmfs".to_string());
+            std::env::var("TURBOPUFFER_NAMESPACE").unwrap_or_else(|_| "traceway".to_string());
 
         let base_url = std::env::var("TURBOPUFFER_BASE_URL")
             .unwrap_or_else(|_| "https://api.turbopuffer.com".to_string());

@@ -1,5 +1,5 @@
-export { LLMTrace, TraceContext, SpanContext } from './client.js';
-export type { LLMTraceOpts } from './client.js';
+export { Traceway, TraceContext, SpanContext } from './client.js';
+export type { TracewayOpts } from './client.js';
 export type {
   Span,
   SpanKind,

@@ -35,7 +35,7 @@
 <div class="min-h-screen flex items-center justify-center bg-bg">
 	<div class="w-full max-w-sm space-y-6">
 		<div class="text-center">
-			<h1 class="text-2xl font-bold text-text">llmtrace</h1>
+			<h1 class="text-2xl font-bold text-text">Traceway</h1>
 			<p class="text-text-muted text-sm mt-1">Create your account</p>
 		</div>
 

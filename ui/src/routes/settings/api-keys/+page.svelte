@@ -78,7 +78,7 @@
 
 	<p class="text-text-muted text-sm">
 		API keys allow SDKs and external tools to send traces to your organization.
-		Set <code class="bg-bg-tertiary px-1 rounded text-xs">LLMTRACE_API_KEY</code> in your environment.
+		Set <code class="bg-bg-tertiary px-1 rounded text-xs">TRACEWAY_API_KEY</code> in your environment.
 	</p>
 
 	{#if error}

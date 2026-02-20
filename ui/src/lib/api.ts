@@ -1,4 +1,4 @@
-// In production, set VITE_API_URL to your API server (e.g., https://api.llm-fs.example.com)
+// In production, set VITE_API_URL to your API server (e.g., https://api.traceway.example.com)
 // Falls back to relative /api for embedded mode or local dev with proxy
 const API_BASE = (import.meta.env.VITE_API_URL as string) || '/api';
 

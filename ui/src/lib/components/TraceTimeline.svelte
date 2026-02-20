@@ -15,21 +15,15 @@
 	} = $props();
 
 	// ── Constants ──────────────────────────────────────────────────────
-	const ROW_HEIGHT = 34;
+	const ROW_HEIGHT = 32;
 	const OVERSCAN = 10;
-	const INDENT_PX = 16;
-	const MINIMAP_HEIGHT = 48;
+	const INDENT_PX = 18;
 
-	// ── Colors (raw values for canvas) ─────────────────────────────────
-	const CANVAS_COLORS: Record<string, string> = {
-		fs_read: '#58a6ff',
-		fs_write: '#3fb950',
-		llm_call: '#a78bfa',
-		custom: '#484f58',
-		running: '#d29922',
-		failed: '#f85149',
-		default: '#484f58'
-	};
+	// ── Search / filter ───────────────────────────────────────────────
+	let searchQuery = $state('');
+
+	// ── View mode ─────────────────────────────────────────────────────
+	let viewMode: 'tree' | 'flat' = $state('tree');
 
 	// ── Collapse state ─────────────────────────────────────────────────
 	let collapsed: Set<string> = $state(new Set());
@@ -75,7 +69,6 @@
 		return idx;
 	});
 
-	// Count all descendants of a span
 	function countDescendants(id: string): number {
 		const children = childIndex.get(id);
 		if (!children) return 0;
@@ -84,30 +77,7 @@
 		return count;
 	}
 
-	// ── DFS flat tree (respects collapse) ──────────────────────────────
-	const flatTree = $derived.by((): TreeNode[] => {
-		const result: TreeNode[] = [];
-		function walk(parentId: string | null, depth: number) {
-			const children = childIndex.get(parentId);
-			if (!children) return;
-			// Sort children by start time
-			const sorted = [...children].sort(
-				(a, b) => new Date(spanStartedAt(a)).getTime() - new Date(spanStartedAt(b)).getTime()
-			);
-			for (const span of sorted) {
-				const hasChildren = childIndex.has(span.id);
-				const descendantCount = hasChildren ? countDescendants(span.id) : 0;
-				result.push({ span, depth, hasChildren, descendantCount });
-				if (hasChildren && !collapsed.has(span.id)) {
-					walk(span.id, depth + 1);
-				}
-			}
-		}
-		walk(null, 0);
-		return result;
-	});
-
-	// ── Time range ─────────────────────────────────────────────────────
+	// ── Time range for relative offset display ────────────────────────
 	const timeRange = $derived.by(() => {
 		if (spans.length === 0) return { min: 0, max: 1 };
 		const starts = spans.map((s) => new Date(spanStartedAt(s)).getTime());
@@ -118,6 +88,52 @@
 		const min = Math.min(...starts);
 		const max = Math.max(...ends);
 		return { min, max: max === min ? min + 1 : max };
+	});
+
+	// ── DFS flat tree (respects collapse + search) ─────────────────────
+	const flatTree = $derived.by((): TreeNode[] => {
+		const query = searchQuery.toLowerCase().trim();
+
+		if (viewMode === 'flat') {
+			// Flat: sorted by start time, all depth 0
+			const sorted = [...spans].sort(
+				(a, b) => new Date(spanStartedAt(a)).getTime() - new Date(spanStartedAt(b)).getTime()
+			);
+			const filtered = query
+				? sorted.filter((s) => s.name.toLowerCase().includes(query) || kindLabel(s).toLowerCase().includes(query))
+				: sorted;
+			return filtered.map((span) => ({
+				span,
+				depth: 0,
+				hasChildren: childIndex.has(span.id),
+				descendantCount: 0
+			}));
+		}
+
+		// Tree mode
+		const result: TreeNode[] = [];
+		function walk(parentId: string | null, depth: number) {
+			const children = childIndex.get(parentId);
+			if (!children) return;
+			const sorted = [...children].sort(
+				(a, b) => new Date(spanStartedAt(a)).getTime() - new Date(spanStartedAt(b)).getTime()
+			);
+			for (const span of sorted) {
+				if (query && !span.name.toLowerCase().includes(query) && !kindLabel(span).toLowerCase().includes(query)) {
+					// Still walk children in case they match
+					walk(span.id, depth + 1);
+					continue;
+				}
+				const hasChildren = childIndex.has(span.id);
+				const descendantCount = hasChildren ? countDescendants(span.id) : 0;
+				result.push({ span, depth, hasChildren, descendantCount });
+				if (hasChildren && !collapsed.has(span.id)) {
+					walk(span.id, depth + 1);
+				}
+			}
+		}
+		walk(null, 0);
+		return result;
 	});
 
 	// ── Virtual scroll ─────────────────────────────────────────────────
@@ -144,16 +160,15 @@
 	}
 
 	// ── Span helpers ───────────────────────────────────────────────────
-	function kindType(s: Span): string {
-		if (!s.kind) return 'custom';
+	function kindLabel(s: Span): string {
+		if (!s.kind) return 'unknown';
+		if (s.kind.type === 'custom') return s.kind.kind;
 		return s.kind.type;
 	}
 
-	function canvasColor(s: Span): string {
-		const status = spanStatus(s);
-		if (status === 'failed') return CANVAS_COLORS.failed;
-		if (status === 'running') return CANVAS_COLORS.running;
-		return CANVAS_COLORS[kindType(s)] ?? CANVAS_COLORS.default;
+	function kindType(s: Span): string {
+		if (!s.kind) return 'custom';
+		return s.kind.type;
 	}
 
 	function modelBadge(s: Span): string | null {
@@ -161,18 +176,20 @@
 		return null;
 	}
 
-	function tokenBadge(s: Span): string | null {
-		let inp: number | null = null;
-		let out: number | null = null;
-		if (s.kind?.type === 'llm_call') {
-			inp = s.kind.input_tokens ?? null;
-			out = s.kind.output_tokens ?? null;
-		}
+	function tokenCount(s: Span): string | null {
+		if (s.kind?.type !== 'llm_call') return null;
+		const inp = s.kind.input_tokens ?? null;
+		const out = s.kind.output_tokens ?? null;
 		if (inp == null && out == null) return null;
-		const parts: string[] = [];
-		if (inp != null) parts.push(`${inp.toLocaleString()}in`);
-		if (out != null) parts.push(`${out.toLocaleString()}out`);
-		return parts.join(' / ');
+		const total = (inp ?? 0) + (out ?? 0);
+		return total.toLocaleString();
+	}
+
+	function costBadge(s: Span): string | null {
+		if (s.kind?.type === 'llm_call' && s.kind.cost != null) {
+			return `$${s.kind.cost.toFixed(4)}`;
+		}
+		return null;
 	}
 
 	function bytesBadge(s: Span): string | null {
@@ -188,213 +205,89 @@
 		return `${(n / (1024 * 1024)).toFixed(1)}MB`;
 	}
 
-	function barPercents(s: Span): { left: number; width: number } {
+	function formatDuration(ms: number | null): string {
+		if (ms === null) return '...';
+		if (ms < 1000) return `${ms}ms`;
+		return `${(ms / 1000).toFixed(2)}s`;
+	}
+
+	function relativeOffset(s: Span): string {
 		const start = new Date(spanStartedAt(s)).getTime();
-		const end = spanEndedAt(s) ? new Date(spanEndedAt(s)!).getTime() : Date.now();
-		const range = timeRange.max - timeRange.min;
-		const left = ((start - timeRange.min) / range) * 100;
-		const width = Math.max(((end - start) / range) * 100, 0.5);
-		return { left, width };
+		const offset = start - timeRange.min;
+		if (offset < 1000) return `+${offset}ms`;
+		return `+${(offset / 1000).toFixed(2)}s`;
 	}
 
 	function statusDotClass(s: Span): string {
 		const st = spanStatus(s);
 		if (st === 'running') return 'bg-warning animate-pulse';
 		if (st === 'failed') return 'bg-danger';
-		return '';
+		return 'bg-success';
 	}
 
-	function barColorClass(s: Span): string {
-		const st = spanStatus(s);
-		if (st === 'failed') return 'bg-danger';
-		if (st === 'running') return 'bg-warning';
-		const k = kindType(s);
-		if (k === 'fs_read') return 'bg-accent';
-		if (k === 'fs_write') return 'bg-success';
-		if (k === 'llm_call') return 'bg-purple-400';
-		return 'bg-text-muted';
-	}
-
-	// ── Minimap canvas ─────────────────────────────────────────────────
-	let canvas: HTMLCanvasElement | undefined = $state(undefined);
-	let canvasWidth = $state(300);
-	let dragging = $state(false);
-	let resizeObserver: ResizeObserver | undefined;
-
-	function drawMinimap(
-		canvasEl: HTMLCanvasElement,
-		tree: TreeNode[],
-		range: { min: number; max: number },
-		scroll: number,
-		height: number,
-		selected: string | null,
-		width: number
-	) {
-		const ctx = canvasEl.getContext('2d');
-		if (!ctx) return;
-
-		const dpr = window.devicePixelRatio || 1;
-		const w = width;
-		const h = MINIMAP_HEIGHT;
-		
-		// Only resize if needed
-		const targetWidth = Math.floor(w * dpr);
-		const targetHeight = Math.floor(h * dpr);
-		if (canvasEl.width !== targetWidth || canvasEl.height !== targetHeight) {
-			canvasEl.width = targetWidth;
-			canvasEl.height = targetHeight;
-		}
-		
-		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-		// Clear
-		ctx.clearRect(0, 0, w, h);
-
-		const rows = tree.length;
-		if (rows === 0) return;
-
-		const rowH = Math.max(h / rows, 1);
-		const rangeMs = range.max - range.min;
-
-		// Draw span bars
-		for (let i = 0; i < tree.length; i++) {
-			const node = tree[i];
-			const s = node.span;
-			const start = new Date(spanStartedAt(s)).getTime();
-			const end = spanEndedAt(s) ? new Date(spanEndedAt(s)!).getTime() : Date.now();
-			const x = ((start - range.min) / rangeMs) * w;
-			const barW = Math.max(((end - start) / rangeMs) * w, 1);
-			const y = i * rowH;
-
-			ctx.fillStyle = canvasColor(s);
-			ctx.globalAlpha = 0.8;
-			ctx.fillRect(x, y, barW, Math.max(rowH - 0.5, 0.5));
-		}
-
-		// Draw viewport rectangle
-		ctx.globalAlpha = 1;
-		const vpStartRow = scroll / ROW_HEIGHT;
-		const vpEndRow = (scroll + height) / ROW_HEIGHT;
-		const vpY = (vpStartRow / rows) * h;
-		const vpH = Math.max(((vpEndRow - vpStartRow) / rows) * h, 4);
-
-		ctx.fillStyle = 'rgba(88,166,255,0.08)';
-		ctx.fillRect(0, vpY, w, vpH);
-		ctx.strokeStyle = 'rgba(88,166,255,0.3)';
-		ctx.lineWidth = 1;
-		ctx.strokeRect(0.5, vpY + 0.5, w - 1, vpH - 1);
-
-		// Highlight selected span row
-		if (selected) {
-			const selIdx = tree.findIndex((n) => n.span.id === selected);
-			if (selIdx >= 0) {
-				const selY = (selIdx / rows) * h;
-				ctx.fillStyle = 'rgba(88,166,255,0.25)';
-				ctx.fillRect(0, selY, w, Math.max(rowH, 2));
+	// Scroll selected span into view
+	$effect(() => {
+		if (selectedId && scrollContainer) {
+			const idx = flatTree.findIndex((n) => n.span.id === selectedId);
+			if (idx >= 0) {
+				const top = idx * ROW_HEIGHT;
+				const bottom = top + ROW_HEIGHT;
+				const viewTop = scrollContainer.scrollTop;
+				const viewBottom = viewTop + containerHeight;
+				if (top < viewTop || bottom > viewBottom) {
+					scrollContainer.scrollTop = top - containerHeight / 2 + ROW_HEIGHT / 2;
+				}
 			}
 		}
-	}
-
-	// Observe canvas container width
-	function onCanvasResize(entries: ResizeObserverEntry[]) {
-		for (const entry of entries) {
-			canvasWidth = entry.contentRect.width;
-		}
-	}
-
-	onMount(() => {
-		if (canvas?.parentElement) {
-			resizeObserver = new ResizeObserver(onCanvasResize);
-			resizeObserver.observe(canvas.parentElement);
-			canvasWidth = canvas.parentElement.clientWidth;
-		}
 	});
-	
-	onDestroy(() => {
-		resizeObserver?.disconnect();
-	});
-
-	$effect(() => {
-		// Capture all values to avoid reactivity issues
-		const tree = flatTree;
-		const range = timeRange;
-		const scroll = scrollTop;
-		const height = containerHeight;
-		const selected = selectedId;
-		const width = canvasWidth;
-		const canvasEl = canvas;
-		
-		if (canvasEl) {
-			// Use requestAnimationFrame to avoid blocking
-			requestAnimationFrame(() => {
-				drawMinimap(canvasEl, tree, range, scroll, height, selected, width);
-			});
-		}
-	});
-
-	// ── Minimap pointer interactions ───────────────────────────────────
-	function minimapSeek(clientY: number) {
-		if (!canvas || !scrollContainer) return;
-		const rect = canvas.getBoundingClientRect();
-		const y = clientY - rect.top;
-		const ratio = y / MINIMAP_HEIGHT;
-		const targetRow = Math.floor(ratio * flatTree.length);
-		const clampedRow = Math.max(0, Math.min(flatTree.length - 1, targetRow));
-
-		// Select the span at target row
-		if (flatTree[clampedRow]) {
-			onSelect?.(flatTree[clampedRow].span);
-		}
-
-		// Scroll to center that row
-		const targetScroll = clampedRow * ROW_HEIGHT - containerHeight / 2 + ROW_HEIGHT / 2;
-		scrollContainer.scrollTop = Math.max(0, Math.min(targetScroll, totalHeight - containerHeight));
-	}
-
-	function onMinimapPointerDown(e: PointerEvent) {
-		dragging = true;
-		(e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
-		minimapSeek(e.clientY);
-	}
-
-	function onMinimapPointerMove(e: PointerEvent) {
-		if (!dragging) return;
-		minimapSeek(e.clientY);
-	}
-
-	function onMinimapPointerUp(e: PointerEvent) {
-		dragging = false;
-		(e.target as HTMLCanvasElement).releasePointerCapture(e.pointerId);
-	}
 </script>
 
-<div class="flex flex-col h-full min-h-0">
-	<!-- Header controls -->
-	<div class="flex items-center justify-between px-3 py-1.5 border-b border-border text-xs text-text-muted shrink-0">
-		<div class="flex items-center gap-3">
-			<span class="uppercase tracking-wide">Span</span>
-			<span class="text-border">|</span>
-			<span class="uppercase tracking-wide">Timeline</span>
-			<span class="text-border">|</span>
-			<span class="uppercase tracking-wide">Duration</span>
+<div class="flex flex-col h-full min-h-0 bg-bg-secondary border-r border-border">
+	<!-- Toolbar -->
+	<div class="flex items-center gap-1.5 px-2 py-1.5 border-b border-border shrink-0">
+		<!-- View mode toggle -->
+		<div class="flex items-center bg-bg-tertiary rounded text-[10px]">
+			<button
+				class="px-2 py-1 rounded transition-colors {viewMode === 'tree' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text'}"
+				onclick={() => viewMode = 'tree'}
+			>Tree</button>
+			<button
+				class="px-2 py-1 rounded transition-colors {viewMode === 'flat' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text'}"
+				onclick={() => viewMode = 'flat'}
+			>Flat</button>
 		</div>
-		<div class="flex items-center gap-2">
-			<button class="hover:text-text transition-colors" onclick={expandAll}>expand</button>
-			<span class="text-border">/</span>
-			<button class="hover:text-text transition-colors" onclick={collapseAll}>collapse</button>
+
+		{#if viewMode === 'tree'}
+			<div class="flex items-center gap-0.5 text-[10px] text-text-muted">
+				<button class="hover:text-text transition-colors px-1" onclick={expandAll}>expand</button>
+				<span>/</span>
+				<button class="hover:text-text transition-colors px-1" onclick={collapseAll}>collapse</button>
+			</div>
+		{/if}
+
+		<div class="flex-1"></div>
+
+		<!-- Search -->
+		<div class="relative">
+			<input
+				type="text"
+				bind:value={searchQuery}
+				placeholder="Filter..."
+				class="w-28 bg-bg-tertiary border border-border rounded px-2 py-0.5 text-[11px] text-text placeholder:text-text-muted focus:w-40 focus:border-accent/50 transition-all outline-none"
+			/>
+			{#if searchQuery}
+				<button
+					class="absolute right-1 top-1/2 -translate-y-1/2 text-text-muted hover:text-text text-xs"
+					onclick={() => searchQuery = ''}
+				>x</button>
+			{/if}
 		</div>
 	</div>
 
-	<!-- Minimap -->
-	<div class="shrink-0 border-b border-border bg-bg-secondary cursor-pointer" style="height: {MINIMAP_HEIGHT}px">
-		<canvas
-			bind:this={canvas}
-			class="w-full block"
-			style="height: {MINIMAP_HEIGHT}px"
-			onpointerdown={onMinimapPointerDown}
-			onpointermove={onMinimapPointerMove}
-			onpointerup={onMinimapPointerUp}
-		></canvas>
+	<!-- Span count -->
+	<div class="flex items-center justify-between px-3 py-1 border-b border-border text-[10px] text-text-muted shrink-0 uppercase tracking-wider">
+		<span>{flatTree.length} span{flatTree.length !== 1 ? 's' : ''}</span>
+		<span>duration</span>
 	</div>
 
 	<!-- Virtual scroll area -->
@@ -410,42 +303,45 @@
 				{@const s = node.span}
 				{@const status = spanStatus(s)}
 				{@const duration = spanDurationMs(s)}
-				{@const bar = barPercents(s)}
 				{@const model = modelBadge(s)}
-				{@const tokens = tokenBadge(s)}
+				{@const tokens = tokenCount(s)}
+				{@const cost = costBadge(s)}
 				{@const bytes = bytesBadge(s)}
-				{@const dotClass = statusDotClass(s)}
 				<button
-					class="absolute left-0 right-0 flex items-center text-xs transition-colors hover:bg-bg-tertiary
-						{selectedId === s.id ? 'bg-bg-tertiary' : ''}"
+					class="absolute left-0 right-0 flex items-center text-xs transition-colors group
+						{selectedId === s.id ? 'bg-accent/10 border-l-2 border-l-accent' : 'hover:bg-bg-tertiary border-l-2 border-l-transparent'}"
 					style="top: {idx * ROW_HEIGHT}px; height: {ROW_HEIGHT}px"
 					onclick={() => onSelect?.(s)}
 				>
-					<!-- Span info column -->
-					<div class="flex items-center gap-1 shrink-0 px-2 overflow-hidden" style="width: 40%; min-width: 200px;">
-						<!-- Indent + collapse toggle -->
-						<div class="flex items-center shrink-0" style="width: {node.depth * INDENT_PX + 20}px">
-							<div style="width: {node.depth * INDENT_PX}px"></div>
-							{#if node.hasChildren}
-								<!-- svelte-ignore node_invalid_placement_ssr -->
-								<!-- svelte-ignore a11y_click_events_have_key_events -->
-								<span
-									role="switch"
-									aria-checked={!collapsed.has(s.id)}
-									tabindex={-1}
-									class="w-5 h-5 flex items-center justify-center text-text-muted hover:text-text transition-colors cursor-pointer"
-									onclick={(e: MouseEvent) => { e.stopPropagation(); toggleCollapse(s.id); }}
-								>
-									{#if collapsed.has(s.id)}
-										<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M4 2l6 4-6 4V2z"/></svg>
-									{:else}
-										<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M2 4l4 6 4-6H2z"/></svg>
-									{/if}
-								</span>
-							{:else}
-								<div class="w-5"></div>
-							{/if}
-						</div>
+					<!-- Span info -->
+					<div class="flex items-center gap-1 flex-1 px-2 overflow-hidden min-w-0">
+						<!-- Indent + collapse -->
+						{#if viewMode === 'tree'}
+							<div class="flex items-center shrink-0" style="width: {node.depth * INDENT_PX + 18}px">
+								<div style="width: {node.depth * INDENT_PX}px"></div>
+								{#if node.hasChildren}
+									<!-- svelte-ignore a11y_click_events_have_key_events -->
+									<span
+										role="switch"
+										aria-checked={!collapsed.has(s.id)}
+										tabindex={-1}
+										class="w-[18px] h-[18px] flex items-center justify-center text-text-muted hover:text-text transition-colors cursor-pointer"
+										onclick={(e: MouseEvent) => { e.stopPropagation(); toggleCollapse(s.id); }}
+									>
+										{#if collapsed.has(s.id)}
+											<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M4 2l6 4-6 4V2z"/></svg>
+										{:else}
+											<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M2 4l4 6 4-6H2z"/></svg>
+										{/if}
+									</span>
+								{:else}
+									<div class="w-[18px]"></div>
+								{/if}
+							</div>
+						{/if}
+
+						<!-- Status dot -->
+						<span class="w-2 h-2 rounded-full shrink-0 {statusDotClass(s)}"></span>
 
 						<!-- Icon -->
 						<div class="shrink-0">
@@ -453,41 +349,32 @@
 						</div>
 
 						<!-- Name -->
-						<span class="text-text truncate">{s.name}</span>
+						<span class="text-text truncate text-[11px] font-medium">{s.name}</span>
 
-						<!-- Status dot (running/failed only) -->
-						{#if dotClass}
-							<span class="w-1.5 h-1.5 rounded-full shrink-0 {dotClass}"></span>
-						{/if}
-
-						<!-- Badges -->
+						<!-- Inline badges -->
 						{#if model}
-							<span class="shrink-0 text-purple-400 bg-purple-400/10 border border-purple-400/20 rounded px-1 py-0 text-[10px] leading-tight truncate max-w-20">{model}</span>
+							<span class="shrink-0 text-purple-400 text-[9px] opacity-70">{model}</span>
 						{/if}
 						{#if tokens}
-							<span class="shrink-0 text-text-muted bg-bg-tertiary rounded px-1 py-0 text-[10px] leading-tight">{tokens}</span>
+							<span class="shrink-0 text-text-muted text-[9px]">{tokens}tok</span>
+						{/if}
+						{#if cost}
+							<span class="shrink-0 text-text-muted text-[9px]">{cost}</span>
 						{/if}
 						{#if bytes}
-							<span class="shrink-0 text-text-muted bg-bg-tertiary rounded px-1 py-0 text-[10px] leading-tight">{bytes}</span>
+							<span class="shrink-0 text-text-muted text-[9px]">{bytes}</span>
 						{/if}
 
-						<!-- Collapsed descendant count -->
+						<!-- Collapsed count -->
 						{#if node.hasChildren && collapsed.has(s.id)}
-							<span class="shrink-0 text-text-muted bg-bg-tertiary rounded px-1 py-0 text-[10px] leading-tight">+{node.descendantCount}</span>
+							<span class="shrink-0 text-text-muted text-[9px] bg-bg-tertiary rounded px-1">+{node.descendantCount}</span>
 						{/if}
 					</div>
 
-					<!-- Timeline bar column -->
-					<div class="flex-1 relative h-5 mx-2">
-						<div
-							class="absolute top-1 h-3 rounded {barColorClass(s)} opacity-80"
-							style="left: {bar.left}%; width: {bar.width}%"
-						></div>
-					</div>
-
-					<!-- Duration column -->
-					<div class="shrink-0 w-16 text-right pr-3 text-text-muted font-mono">
-						{duration !== null ? `${duration}ms` : '...'}
+					<!-- Duration / offset (right side) -->
+					<div class="shrink-0 flex flex-col items-end pr-3 text-right min-w-14">
+						<span class="text-[11px] text-text-secondary font-mono">{formatDuration(duration)}</span>
+						<span class="text-[9px] text-text-muted font-mono">{relativeOffset(s)}</span>
 					</div>
 				</button>
 			{/each}

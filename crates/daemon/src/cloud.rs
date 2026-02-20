@@ -1,7 +1,7 @@
-//! Cloud deployment module for llm-fs daemon.
+//! Cloud deployment module for Traceway daemon.
 //!
 //! This module provides cloud-specific configuration and initialization
-//! for deploying llm-fs to container environments like Railway, Fly.io, etc.
+//! for deploying Traceway to container environments like Railway, Fly.io, etc.
 
 use std::env;
 use tracing::{info, warn};
@@ -18,7 +18,7 @@ pub struct CloudConfig {
     /// Turbopuffer API key (from TURBOPUFFER_API_KEY)
     pub turbopuffer_api_key: Option<String>,
 
-    /// Turbopuffer namespace (from TURBOPUFFER_NAMESPACE, default "llmfs")
+    /// Turbopuffer namespace (from TURBOPUFFER_NAMESPACE, default "traceway")
     pub turbopuffer_namespace: String,
 
     /// Storage backend type (from STORAGE_BACKEND: "sqlite" or "turbopuffer")
@@ -62,7 +62,7 @@ impl CloudConfig {
         let turbopuffer_api_key = env::var("TURBOPUFFER_API_KEY").ok();
 
         let turbopuffer_namespace =
-            env::var("TURBOPUFFER_NAMESPACE").unwrap_or_else(|_| "llmfs".to_string());
+            env::var("TURBOPUFFER_NAMESPACE").unwrap_or_else(|_| "traceway".to_string());
 
         let storage_backend = match env::var("STORAGE_BACKEND")
             .unwrap_or_else(|_| "sqlite".to_string())

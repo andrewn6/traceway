@@ -2,7 +2,7 @@
 name = "storage-sqlite"
 version.workspace = true
 edition.workspace = true
-description = "SQLite storage backend for llm-fs"
+description = "SQLite storage backend for Traceway"
 
 [dependencies]
 storage = { path = "../storage", features = ["sqlite"] }

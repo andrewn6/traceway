@@ -12,7 +12,7 @@ pub struct ApiKey {
     pub id: ApiKeyId,
     pub org_id: OrgId,
     pub name: String,
-    pub key_prefix: String, // First 8 chars for identification: "llmfs_sk"
+    pub key_prefix: String, // First 8 chars for identification: "tw_sk"
     pub key_hash: String,   // bcrypt hash of full key
     pub scopes: Vec<Scope>,
     pub created_at: DateTime<Utc>,
@@ -28,7 +28,7 @@ pub struct GeneratedApiKey {
     pub key_prefix: String,
 }
 
-const KEY_PREFIX: &str = "llmfs_sk_";
+const KEY_PREFIX: &str = "tw_sk_";
 const KEY_BYTES: usize = 24;
 
 /// Generate a new API key
@@ -50,9 +50,9 @@ pub fn generate_api_key(
     // Encode as URL-safe base64
     let random_part = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(random_bytes);
 
-    // Full key: llmfs_sk_<base64>
+    // Full key: tw_sk_<base64>
     let full_key = format!("{}{}", KEY_PREFIX, random_part);
-    let key_prefix = full_key[..16].to_string(); // "llmfs_sk_" + first few chars
+    let key_prefix = full_key[..16].to_string(); // "tw_sk_" + first few chars
 
     // Hash for storage
     let key_hash = hash_api_key(&full_key);
@@ -114,7 +114,7 @@ mod tests {
         let (generated, stored) =
             generate_api_key(org_id, "Test Key".to_string(), Scope::default_sdk());
 
-        assert!(generated.key.starts_with("llmfs_sk_"));
+        assert!(generated.key.starts_with("tw_sk_"));
         assert!(is_api_key(&generated.key));
         assert!(verify_api_key(&generated.key, &stored.key_hash));
         assert!(!verify_api_key("wrong_key", &stored.key_hash));
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn test_extract_prefix() {
-        let key = "llmfs_sk_abc123xyz789";
-        assert_eq!(extract_prefix(key), Some("llmfs_sk_abc123x"));
+        let key = "tw_sk_abc123xyz789abcdef";
+        assert_eq!(extract_prefix(key), Some("tw_sk_abc123xyz7"));
     }
 }

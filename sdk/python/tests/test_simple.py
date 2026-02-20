@@ -6,14 +6,14 @@ import sys
 # Allow running without installing: add the SDK to sys.path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from llmtrace import LLMTrace, CustomKind
+from traceway import Traceway, CustomKind
 
-BASE = os.environ.get("LLMTRACE_URL", "http://localhost:3000")
+BASE = os.environ.get("TRACEWAY_URL", "http://localhost:3000")
 
 
 def test_create_and_complete_span():
     """Round-trip: create trace → create span → complete → verify."""
-    client = LLMTrace(BASE)
+    client = Traceway(BASE)
 
     # Clean slate
     client.clear_all()
@@ -55,7 +55,7 @@ def test_create_and_complete_span():
 
 def test_fail_span():
     """A span that raises should be marked as failed."""
-    client = LLMTrace(BASE)
+    client = Traceway(BASE)
 
     with client.trace("fail-test") as t:
         trace_id = t.trace_id

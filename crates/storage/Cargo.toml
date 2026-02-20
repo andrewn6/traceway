@@ -2,7 +2,7 @@
 name = "storage"
 version.workspace = true
 edition.workspace = true
-description = "Storage abstraction layer for llm-fs"
+description = "Storage abstraction layer for Traceway"
 
 [features]
 default = []

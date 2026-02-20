@@ -34,7 +34,7 @@
 	let history: HistoryEntry[] = $state([]);
 	let historyOpen = $state(false);
 
-	const HISTORY_KEY = 'llmtrace:query-history';
+	const HISTORY_KEY = 'traceway:query-history';
 	const MAX_HISTORY = 50;
 
 	// ─── Relative time presets for the Since dropdown ────────────────────
@@ -189,7 +189,7 @@
 </script>
 
 <svelte:head>
-	<title>Query | llmtrace</title>
+	<title>Query | Traceway</title>
 </svelte:head>
 
 <div class="space-y-4">

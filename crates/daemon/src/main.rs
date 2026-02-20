@@ -24,7 +24,7 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_COMPONENT_RESTARTS: u32 = 3;
 
 #[derive(Parser, Debug)]
-#[command(name = "llmtrace", about = "LLM trace daemon with transparent proxy")]
+#[command(name = "traceway", about = "Traceway daemon with transparent proxy")]
 struct Args {
     /// API server address
     #[arg(long)]
@@ -106,7 +106,7 @@ impl ResolvedConfig {
             log_level: args
                 .log_level
                 .clone()
-                .or_else(|| std::env::var("LLMTRACE_LOG").ok())
+                .or_else(|| std::env::var("TRACEWAY_LOG").ok())
                 .unwrap_or_else(|| config.logging.level.clone()),
             foreground: !args.daemon,
             dev_ingest: args.dev_ingest,
@@ -163,7 +163,7 @@ fn check_port_available(addr: &str) -> Result<(), String> {
             Err(format!(
                 "port {} is already in use. Another daemon may be running.\n\
                  Check with: lsof -i :{}\n\
-                 Or update the address in ~/.llmtrace/config.toml",
+                 Or update the address in ~/.traceway/config.toml",
                 addr,
                 addr.split(':').last().unwrap_or(addr)
             ))
@@ -384,7 +384,7 @@ async fn main() {
     // Setup logging (needs to happen before any tracing calls)
     setup_logging(&resolved.log_level, resolved.foreground);
 
-    info!("llmtrace daemon starting");
+    info!("traceway daemon starting");
 
     // --- PID file ---
     let pid_file = PidFile::new(Config::pid_path());
@@ -542,7 +542,7 @@ async fn run_cloud_mode() {
     setup_cloud_logging(&cloud_config);
     cloud_config.log_config();
 
-    info!("llmfs cloud daemon starting");
+    info!("traceway cloud daemon starting");
 
     let start_time = Instant::now();
 
@@ -588,7 +588,7 @@ async fn run_cloud_mode() {
         cloud::StorageBackendType::Sqlite => {
             let db_path = std::env::var("DB_PATH")
                 .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("/tmp/llmfs.db"));
+                .unwrap_or_else(|_| PathBuf::from("/tmp/traceway.db"));
 
             info!(path = %db_path.display(), "Using SQLite storage");
 
@@ -615,7 +615,7 @@ async fn run_cloud_mode() {
         cloud::StorageBackendType::Turbopuffer => {
             warn!("Turbopuffer backend selected but not yet integrated - using SQLite");
 
-            let db_path = PathBuf::from("/tmp/llmfs.db");
+            let db_path = PathBuf::from("/tmp/traceway.db");
             let backend = SqliteBackend::open(&db_path).expect("Failed to open SQLite");
             let persistent = PersistentStore::open(backend).await.expect("Failed to load data");
             Arc::new(RwLock::new(persistent))

@@ -16,34 +16,34 @@ import type {
   HealthStatus,
 } from './types.js';
 
-export interface LLMTraceOpts {
+export interface TracewayOpts {
   /**
-   * Base URL of the llmtrace server.
-   * Defaults to LLMTRACE_URL env var or http://localhost:3000
+   * Base URL of the Traceway server.
+   * Defaults to TRACEWAY_URL env var or http://localhost:3000
    */
   url?: string;
   /**
    * API key for authentication.
-   * Defaults to LLMTRACE_API_KEY env var.
+   * Defaults to TRACEWAY_API_KEY env var.
    * Required for cloud deployments.
    */
   apiKey?: string;
 }
 
-export class LLMTrace {
+export class Traceway {
   private baseUrl: string;
   private apiKey?: string;
 
-  constructor(opts?: LLMTraceOpts) {
+  constructor(opts?: TracewayOpts) {
     this.baseUrl = (
       opts?.url ?? 
-      (typeof process !== 'undefined' ? process.env?.LLMTRACE_URL : undefined) ?? 
+      (typeof process !== 'undefined' ? process.env?.TRACEWAY_URL : undefined) ?? 
       'http://localhost:3000'
     ).replace(/\/$/, '');
     
     this.apiKey = 
       opts?.apiKey ?? 
-      (typeof process !== 'undefined' ? process.env?.LLMTRACE_API_KEY : undefined);
+      (typeof process !== 'undefined' ? process.env?.TRACEWAY_API_KEY : undefined);
   }
 
   // ─── Internal helpers ──────────────────────────────────────────────
@@ -217,7 +217,7 @@ export class LLMTrace {
 
 export class TraceContext {
   constructor(
-    private client: LLMTrace,
+    private client: Traceway,
     public readonly traceId: string,
     public readonly name: string,
   ) {}
@@ -265,7 +265,7 @@ export class SpanContext {
   output: unknown = undefined;
 
   constructor(
-    private client: LLMTrace,
+    private client: Traceway,
     public readonly spanId: string,
     public readonly traceId: string,
   ) {}

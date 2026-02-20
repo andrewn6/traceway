@@ -105,8 +105,8 @@ async fn extract_auth(
 
         // Bearer token (API key or JWT)
         if let Some(token) = auth_str.strip_prefix("Bearer ") {
-            // API key format: llmfs_sk_...
-            if token.starts_with("llmfs_sk_") {
+            // API key format: tw_sk_...
+            if token.starts_with("tw_sk_") {
                 return validate_api_key(token, lookup).await;
             }
             // JWT session token

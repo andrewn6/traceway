@@ -29,7 +29,7 @@ from .types import (
 class SpanContext:
     """Context manager for a span that auto-completes on exit or fails on exception."""
 
-    def __init__(self, client: "LLMTrace", span_id: str, trace_id: str):
+    def __init__(self, client: "Traceway", span_id: str, trace_id: str):
         self._client = client
         self._span_id = span_id
         self._trace_id = trace_id
@@ -50,7 +50,7 @@ class SpanContext:
 class TraceContext:
     """Context manager for a trace that groups all operations under one trace ID."""
 
-    def __init__(self, client: "LLMTrace", trace_id: str):
+    def __init__(self, client: "Traceway", trace_id: str):
         self._client = client
         self._trace_id = trace_id
 
@@ -100,27 +100,27 @@ class TraceContext:
             yield ctx
 
 
-class LLMTrace:
-    """Client for the llmtrace daemon API."""
+class Traceway:
+    """Client for the Traceway daemon API."""
 
     def __init__(
         self,
         url: str | None = None,
         api_key: str | None = None,
     ):
-        """Initialize the LLMTrace client.
+        """Initialize the Traceway client.
         
         Args:
-            url: Base URL of the llmtrace server. Defaults to LLMTRACE_URL env var
+            url: Base URL of the Traceway server. Defaults to TRACEWAY_URL env var
                  or http://localhost:3000
-            api_key: API key for authentication. Defaults to LLMTRACE_API_KEY env var.
+            api_key: API key for authentication. Defaults to TRACEWAY_API_KEY env var.
                      Required for cloud deployments.
         """
         self._base_url = (
-            url or os.environ.get("LLMTRACE_URL") or "http://localhost:3000"
+            url or os.environ.get("TRACEWAY_URL") or "http://localhost:3000"
         ).rstrip("/")
         
-        self._api_key = api_key or os.environ.get("LLMTRACE_API_KEY")
+        self._api_key = api_key or os.environ.get("TRACEWAY_API_KEY")
         
         headers = {}
         if self._api_key:
@@ -131,7 +131,7 @@ class LLMTrace:
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> "LLMTrace":
+    def __enter__(self) -> "Traceway":
         return self
 
     def __exit__(self, *_: Any) -> None:
@@ -265,7 +265,7 @@ class LLMTrace:
         """Create a trace context. All spans created within will share the same trace ID.
 
         Calls POST /api/traces to register the trace on the server.
-        Sets LLMTRACE_TRACE_ID env var for subprocess propagation.
+        Sets TRACEWAY_TRACE_ID env var for subprocess propagation.
 
         Example:
             with client.trace("chat-completion") as t:
@@ -276,15 +276,15 @@ class LLMTrace:
         """
         trace = self.create_trace(name=name or None)
         trace_id = trace.id
-        old_env = os.environ.get("LLMTRACE_TRACE_ID")
-        os.environ["LLMTRACE_TRACE_ID"] = trace_id
+        old_env = os.environ.get("TRACEWAY_TRACE_ID")
+        os.environ["TRACEWAY_TRACE_ID"] = trace_id
         try:
             yield TraceContext(self, trace_id)
         finally:
             if old_env is not None:
-                os.environ["LLMTRACE_TRACE_ID"] = old_env
+                os.environ["TRACEWAY_TRACE_ID"] = old_env
             else:
-                os.environ.pop("LLMTRACE_TRACE_ID", None)
+                os.environ.pop("TRACEWAY_TRACE_ID", None)
 
     @contextmanager
     def span(
