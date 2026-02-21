@@ -18,3 +18,5 @@ bcrypt = "0.16"
 jsonwebtoken = "9"
 rand = "0.8"
 base64 = "0.22"
+reqwest = { workspace = true, features = ["json"] }
+tracing.workspace = true

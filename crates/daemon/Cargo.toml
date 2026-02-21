@@ -12,6 +12,7 @@ metrics = ["prometheus"]
 trace = { path = "../trace" }
 storage = { path = "../storage" }
 storage-sqlite = { path = "../storage-sqlite" }
+storage-turbopuffer = { path = "../storage-turbopuffer" }
 auth = { path = "../auth" }
 api = { path = "../api" }
 axum.workspace = true

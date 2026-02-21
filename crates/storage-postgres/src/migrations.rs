@@ -8,7 +8,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     (
         "001_auth_tables",
         r#"
-        CREATE TABLE IF NOT EXISTS organizations (
+	CREATE TABLE IF NOT EXISTS organizations (
             id          UUID PRIMARY KEY,
             name        TEXT NOT NULL,
             slug        TEXT NOT NULL UNIQUE,
@@ -62,6 +62,21 @@ const MIGRATIONS: &[(&str, &str)] = &[
             name        TEXT PRIMARY KEY,
             applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+        "#,
+    ),
+    (
+        "002_password_reset_tokens",
+        r#"
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            id          UUID PRIMARY KEY,
+            user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            token_hash  TEXT NOT NULL UNIQUE,
+            expires_at  TIMESTAMPTZ NOT NULL,
+            used        BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_password_reset_token ON password_reset_tokens(token_hash);
+        CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id);
         "#,
     ),
 ];

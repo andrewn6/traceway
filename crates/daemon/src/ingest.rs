@@ -16,8 +16,8 @@ use std::time::Duration;
 use tokio::sync::{watch, RwLock};
 use tracing::{debug, info, warn};
 
+use api::AnyBackend;
 use storage::PersistentStore;
-use storage_sqlite::SqliteBackend;
 use trace::{SpanBuilder, SpanKind, Trace};
 
 /// Models used in synthetic LLM call spans.
@@ -69,7 +69,7 @@ fn pick<'a>(items: &'a [&str], seed: &mut u64) -> &'a str {
 
 /// Run the synthetic ingest loop until shutdown is signalled.
 pub async fn run_synthetic_ingest(
-    store: Arc<RwLock<PersistentStore<SqliteBackend>>>,
+    store: Arc<RwLock<PersistentStore<AnyBackend>>>,
     interval: Duration,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
@@ -106,7 +106,7 @@ pub async fn run_synthetic_ingest(
 }
 
 async fn generate_trace(
-    store: &Arc<RwLock<PersistentStore<SqliteBackend>>>,
+    store: &Arc<RwLock<PersistentStore<AnyBackend>>>,
     seed: &mut u64,
     trace_name: &str,
 ) -> Result<(), String> {

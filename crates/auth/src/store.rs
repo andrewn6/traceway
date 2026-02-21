@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 
-use crate::{ApiKey, ApiKeyId, Invite, OrgId, Organization, Scope, User, UserId};
+use crate::{ApiKey, ApiKeyId, Invite, OrgId, Organization, PasswordResetToken, Scope, User, UserId};
 
 /// Error type for auth storage operations
 #[derive(Debug, thiserror::Error)]
@@ -73,4 +73,21 @@ pub trait AuthStore: Send + Sync {
     async fn list_invites_for_org(&self, org_id: OrgId) -> Result<Vec<Invite>, AuthStoreError>;
 
     async fn delete_invite(&self, id: uuid::Uuid) -> Result<bool, AuthStoreError>;
+
+    // --- Password Reset ---
+
+    async fn save_password_reset(
+        &self,
+        token: &PasswordResetToken,
+    ) -> Result<(), AuthStoreError>;
+
+    async fn get_password_reset_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<PasswordResetToken>, AuthStoreError>;
+
+    async fn mark_password_reset_used(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<(), AuthStoreError>;
 }
