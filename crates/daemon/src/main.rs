@@ -644,6 +644,21 @@ async fn run_cloud_mode() {
 
     info!("Storage ready");
 
+    // ── Email sender ─────────────────────────────────────────────────
+    let email_sender: Arc<dyn auth::EmailSender> = match auth::ResendSender::from_env() {
+        Ok(sender) => {
+            info!("Email sender ready (Resend)");
+            Arc::new(sender)
+        }
+        Err(_) => {
+            warn!("RESEND_API_KEY not set - emails will be suppressed");
+            Arc::new(auth::NoopEmailSender)
+        }
+    };
+
+    let app_url = std::env::var("APP_URL")
+        .unwrap_or_else(|_| format!("http://localhost:{}", cloud_config.port));
+
     // ── Shutdown signal handling ─────────────────────────────────────
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
@@ -670,7 +685,9 @@ async fn run_cloud_mode() {
             .config_path(String::new())
             .shutdown_tx(shutdown_tx_clone)
             .auth_config(auth_config)
-            .api_key_lookup(api_key_lookup);
+            .api_key_lookup(api_key_lookup)
+            .email_sender(email_sender)
+            .app_url(app_url);
 
         if let Some(s) = auth_store {
             builder = builder.auth_store(s);

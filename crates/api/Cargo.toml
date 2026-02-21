@@ -32,6 +32,10 @@ uuid.workspace = true
 toml.workspace = true
 async-trait.workspace = true
 thiserror.workspace = true
+sha2.workspace = true
+bcrypt = "0.16"
+rand = "0.8"
+base64 = "0.22"
 
 # Cloud dependencies (optional)
 redis = { version = "0.25", features = ["tokio-comp", "connection-manager", "aio"], optional = true }
