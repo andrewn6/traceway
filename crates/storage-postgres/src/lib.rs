@@ -8,8 +8,8 @@ pub mod migrations;
 
 use async_trait::async_trait;
 use auth::{
-    ApiKey, ApiKeyId, AuthStore, AuthStoreError, Invite, OrgId, Organization, Role, Scope,
-    User, UserId,
+    ApiKey, ApiKeyId, AuthStore, AuthStoreError, Invite, OrgId, Organization, PasswordResetToken,
+    Role, Scope, User, UserId,
 };
 use chrono::{DateTime, Utc};
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -349,6 +349,55 @@ impl AuthStore for PostgresAuthStore {
             .map_err(db_err)?;
         Ok(result.rows_affected() > 0)
     }
+
+    // ── Password Reset ───────────────────────────────────────────────
+
+    async fn save_password_reset(
+        &self,
+        token: &PasswordResetToken,
+    ) -> Result<(), AuthStoreError> {
+        sqlx::query(
+            r#"INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at, used, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6)"#,
+        )
+        .bind(token.id)
+        .bind(token.user_id)
+        .bind(&token.token_hash)
+        .bind(token.expires_at)
+        .bind(token.used)
+        .bind(token.created_at)
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn get_password_reset_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<PasswordResetToken>, AuthStoreError> {
+        let row = sqlx::query_as::<_, PasswordResetRow>(
+            "SELECT id, user_id, token_hash, expires_at, used, created_at FROM password_reset_tokens WHERE token_hash = $1",
+        )
+        .bind(token_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_err)?;
+
+        Ok(row.map(|r| r.into()))
+    }
+
+    async fn mark_password_reset_used(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<(), AuthStoreError> {
+        sqlx::query("UPDATE password_reset_tokens SET used = TRUE WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(db_err)?;
+        Ok(())
+    }
 }
 
 // ── Row types for sqlx ───────────────────────────────────────────────
@@ -454,6 +503,29 @@ impl From<InviteRow> for Invite {
             invited_by: r.invited_by,
             token_hash: r.token_hash,
             expires_at: r.expires_at,
+            created_at: r.created_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct PasswordResetRow {
+    id: uuid::Uuid,
+    user_id: uuid::Uuid,
+    token_hash: String,
+    expires_at: DateTime<Utc>,
+    used: bool,
+    created_at: DateTime<Utc>,
+}
+
+impl From<PasswordResetRow> for PasswordResetToken {
+    fn from(r: PasswordResetRow) -> Self {
+        Self {
+            id: r.id,
+            user_id: r.user_id,
+            token_hash: r.token_hash,
+            expires_at: r.expires_at,
+            used: r.used,
             created_at: r.created_at,
         }
     }

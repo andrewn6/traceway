@@ -85,7 +85,7 @@ impl TurbopufferConfig {
             std::env::var("TURBOPUFFER_NAMESPACE").unwrap_or_else(|_| "traceway".to_string());
 
         let base_url = std::env::var("TURBOPUFFER_BASE_URL")
-            .unwrap_or_else(|_| "https://api.turbopuffer.com".to_string());
+            .unwrap_or_else(|_| "https://gcp-us-central1.turbopuffer.com".to_string());
 
         let timeout_secs = std::env::var("TURBOPUFFER_TIMEOUT")
             .ok()
@@ -103,7 +103,7 @@ impl TurbopufferConfig {
     pub fn new(api_key: impl Into<String>, namespace: impl Into<String>) -> Self {
         Self {
             api_key: api_key.into(),
-            base_url: "https://api.turbopuffer.com".to_string(),
+            base_url: "https://gcp-us-central1.turbopuffer.com".to_string(),
             namespace: namespace.into(),
             timeout_secs: 30,
         }
@@ -297,7 +297,10 @@ impl TurbopufferBackend {
         Ok(results.into_iter().next())
     }
 
-    /// Extract data field from a row
+    /// Extract data field from a query result row.
+    ///
+    /// With `include_attributes: true`, turbopuffer returns attributes flat
+    /// at the top level of each row: `{"id": ..., "data": "...", ...}`.
     fn extract_data<T: for<'de> Deserialize<'de>>(row: &serde_json::Value) -> Option<T> {
         row.get("data")
             .and_then(|d| {

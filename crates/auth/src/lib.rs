@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 pub mod api_key;
 pub mod context;
+pub mod email;
 pub mod middleware;
 pub mod session;
 pub mod store;
@@ -11,6 +12,7 @@ pub mod store;
 // Re-exports
 pub use api_key::{ApiKey, ApiKeyId, generate_api_key, hash_api_key, verify_api_key};
 pub use context::{AuthContext, AuthError};
+pub use email::{Email, EmailError, EmailSender, NoopEmailSender, ResendSender};
 pub use middleware::{Auth, AuthConfig, ApiKeyLookup};
 pub use session::{SessionToken, create_session, verify_session};
 pub use store::{AuthStore, AuthStoreError};
@@ -225,4 +227,22 @@ pub struct Invite {
     pub token_hash: String,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+}
+
+// --- Password Reset Token ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PasswordResetToken {
+    pub id: Uuid,
+    pub user_id: UserId,
+    pub token_hash: String,
+    pub expires_at: DateTime<Utc>,
+    pub used: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+impl PasswordResetToken {
+    pub fn is_valid(&self) -> bool {
+        !self.used && self.expires_at > Utc::now()
+    }
 }

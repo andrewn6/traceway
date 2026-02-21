@@ -11,6 +11,7 @@ cloud = ["redis"]
 trace = { path = "../trace" }
 storage = { path = "../storage" }
 storage-sqlite = { path = "../storage-sqlite" }
+storage-turbopuffer = { path = "../storage-turbopuffer" }
 auth = { path = "../auth" }
 axum.workspace = true
 utoipa.workspace = true

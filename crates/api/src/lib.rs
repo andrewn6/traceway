@@ -1,3 +1,4 @@
+pub mod any_backend;
 pub mod auth_keys;
 pub mod auth_routes;
 pub mod events;
@@ -30,7 +31,8 @@ use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use tower_http::cors::{Any, CorsLayer};
 
 use storage::{analytics, FileFilter, PersistentStore, SpanFilter};
-use storage_sqlite::SqliteBackend;
+
+pub use any_backend::AnyBackend;
 use trace::{
     AnalyticsQuery, AnalyticsResponse, AnalyticsSummary, Datapoint, DatapointId, DatapointKind,
     DatapointSource, Dataset, DatasetId, FileVersion, Message, QueueItem, QueueItemId,
@@ -152,7 +154,7 @@ pub enum SystemEvent {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub store: Arc<RwLock<PersistentStore<SqliteBackend>>>,
+    pub store: Arc<RwLock<PersistentStore<AnyBackend>>>,
     pub events_tx: broadcast::Sender<SystemEvent>,
     pub start_time: Instant,
     pub config: Arc<RwLock<serde_json::Value>>,
@@ -161,9 +163,12 @@ pub struct AppState {
     pub auth_config: auth::AuthConfig,
     pub auth_store: Option<Arc<dyn auth::AuthStore>>,
     pub api_key_lookup: Arc<dyn auth::ApiKeyLookup>,
+    pub email_sender: Arc<dyn auth::EmailSender>,
+    /// Base URL for links in emails (e.g. "https://app.traceway.dev")
+    pub app_url: String,
 }
 
-pub type SharedStore = Arc<RwLock<PersistentStore<SqliteBackend>>>;
+pub type SharedStore = Arc<RwLock<PersistentStore<AnyBackend>>>;
 
 // --- Request types ---
 
@@ -1593,6 +1598,8 @@ pub struct RouterBuilder {
     auth_config: auth::AuthConfig,
     auth_store: Option<Arc<dyn auth::AuthStore>>,
     api_key_lookup: Option<Arc<dyn auth::ApiKeyLookup>>,
+    email_sender: Option<Arc<dyn auth::EmailSender>>,
+    app_url: Option<String>,
 }
 
 impl RouterBuilder {
@@ -1606,6 +1613,8 @@ impl RouterBuilder {
             auth_config: auth::AuthConfig::local(),
             auth_store: None,
             api_key_lookup: None,
+            email_sender: None,
+            app_url: None,
         }
     }
 
@@ -1616,6 +1625,8 @@ impl RouterBuilder {
     pub fn auth_config(mut self, c: auth::AuthConfig) -> Self { self.auth_config = c; self }
     pub fn auth_store(mut self, s: Arc<dyn auth::AuthStore>) -> Self { self.auth_store = Some(s); self }
     pub fn api_key_lookup(mut self, l: Arc<dyn auth::ApiKeyLookup>) -> Self { self.api_key_lookup = Some(l); self }
+    pub fn email_sender(mut self, e: Arc<dyn auth::EmailSender>) -> Self { self.email_sender = Some(e); self }
+    pub fn app_url(mut self, u: String) -> Self { self.app_url = Some(u); self }
 
     pub fn build(self) -> Router {
         build_router(
@@ -1627,6 +1638,8 @@ impl RouterBuilder {
             self.auth_config,
             self.auth_store,
             self.api_key_lookup,
+            self.email_sender,
+            self.app_url,
         )
     }
 }
@@ -1638,7 +1651,7 @@ pub fn router_with_start_time(
     config_path: String,
     shutdown_tx: Option<watch::Sender<bool>>,
 ) -> Router {
-    build_router(store, start_time, config, config_path, shutdown_tx, auth::AuthConfig::local(), None, None)
+    build_router(store, start_time, config, config_path, shutdown_tx, auth::AuthConfig::local(), None, None, None, None)
 }
 
 fn build_router(
@@ -1650,11 +1663,17 @@ fn build_router(
     auth_config: auth::AuthConfig,
     auth_store: Option<Arc<dyn auth::AuthStore>>,
     api_key_lookup: Option<Arc<dyn auth::ApiKeyLookup>>,
+    email_sender: Option<Arc<dyn auth::EmailSender>>,
+    app_url: Option<String>,
 ) -> Router {
     let (events_tx, _) = broadcast::channel(256);
     let api_key_lookup = api_key_lookup.unwrap_or_else(|| {
         Arc::new(auth_keys::NoopApiKeyLookup) as Arc<dyn auth::ApiKeyLookup>
     });
+    let email_sender = email_sender.unwrap_or_else(|| {
+        Arc::new(auth::NoopEmailSender) as Arc<dyn auth::EmailSender>
+    });
+    let app_url = app_url.unwrap_or_else(|| "http://localhost:3000".to_string());
     let state = AppState {
         store,
         events_tx,
@@ -1665,6 +1684,8 @@ fn build_router(
         auth_config: auth_config.clone(),
         auth_store,
         api_key_lookup: api_key_lookup.clone(),
+        email_sender,
+        app_url,
     };
 
     let cors = CorsLayer::new()
@@ -1762,3 +1783,6 @@ pub async fn serve_with_shutdown(
         .await
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
 }
+// test
+// test
+// test

@@ -14,6 +14,7 @@ use clap::Parser;
 use tokio::sync::{watch, RwLock};
 use tracing::{error, info, warn};
 
+use api::AnyBackend;
 use storage::PersistentStore;
 use storage_sqlite::SqliteBackend;
 
@@ -179,7 +180,7 @@ async fn shutdown_signal(mut shutdown_rx: watch::Receiver<bool>) {
 
 /// Run the API server with supervision (restart on crash).
 async fn run_api_supervised(
-    store: Arc<RwLock<PersistentStore<SqliteBackend>>>,
+    store: Arc<RwLock<PersistentStore<AnyBackend>>>,
     addr: String,
     start_time: Instant,
     config_json: serde_json::Value,
@@ -243,7 +244,7 @@ async fn run_api_supervised(
 
 /// Run the proxy server with supervision (restart on crash).
 async fn run_proxy_supervised(
-    store: Arc<RwLock<PersistentStore<SqliteBackend>>>,
+    store: Arc<RwLock<PersistentStore<AnyBackend>>>,
     addr: String,
     target_url: String,
     shutdown_rx: watch::Receiver<bool>,
@@ -413,7 +414,7 @@ async fn main() {
         std::fs::create_dir_all(parent).ok();
     }
     let backend = match SqliteBackend::open(&resolved.db_path) {
-        Ok(b) => b,
+        Ok(b) => AnyBackend::Sqlite(b),
         Err(e) => {
             error!("failed to open database: {}", e);
             std::process::exit(1);
@@ -597,7 +598,7 @@ async fn run_cloud_mode() {
             }
 
             let backend = match SqliteBackend::open(&db_path) {
-                Ok(b) => b,
+                Ok(b) => AnyBackend::Sqlite(b),
                 Err(e) => {
                     error!("Failed to open database: {}", e);
                     std::process::exit(1);
@@ -613,12 +614,31 @@ async fn run_cloud_mode() {
             }
         }
         cloud::StorageBackendType::Turbopuffer => {
-            warn!("Turbopuffer backend selected but not yet integrated - using SQLite");
+            info!("Using Turbopuffer storage");
 
-            let db_path = PathBuf::from("/tmp/traceway.db");
-            let backend = SqliteBackend::open(&db_path).expect("Failed to open SQLite");
-            let persistent = PersistentStore::open(backend).await.expect("Failed to load data");
-            Arc::new(RwLock::new(persistent))
+            let tp_config = match storage_turbopuffer::TurbopufferConfig::from_env() {
+                Ok(c) => c,
+                Err(e) => {
+                    error!("Failed to configure Turbopuffer: {}", e);
+                    std::process::exit(1);
+                }
+            };
+
+            let tp_backend = match storage_turbopuffer::TurbopufferBackend::new(tp_config) {
+                Ok(b) => AnyBackend::Turbopuffer(b),
+                Err(e) => {
+                    error!("Failed to create Turbopuffer backend: {}", e);
+                    std::process::exit(1);
+                }
+            };
+
+            match PersistentStore::open(tp_backend).await {
+                Ok(p) => Arc::new(RwLock::new(p)),
+                Err(e) => {
+                    error!("Failed to load data from Turbopuffer: {}", e);
+                    std::process::exit(1);
+                }
+            }
         }
     };
 
