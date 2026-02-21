@@ -208,6 +208,7 @@ export const shutdownDaemon = () => post<unknown>('/shutdown', {});
 // ─── Analytics ───────────────────────────────────────────────────────
 
 export const getAnalyticsSummary = () => get<AnalyticsSummary>('/analytics/summary');
+export const queryAnalytics = (query: AnalyticsQuery) => post<AnalyticsResponse>('/analytics', query);
 
 // ─── Dataset Endpoints ───────────────────────────────────────────────
 
