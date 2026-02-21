@@ -434,3 +434,59 @@ export async function login(email: string, password: string): Promise<AuthResult
 export async function logout(): Promise<void> {
 	await postRaw('/auth/logout');
 }
+
+// ─── Invite Types ────────────────────────────────────────────────────
+
+export interface InviteInfo {
+	id: string;
+	email: string;
+	role: string;
+	invited_by: string;
+	expires_at: string;
+	created_at: string;
+}
+
+// ─── Invite Endpoints ────────────────────────────────────────────────
+
+export const getInvites = () => get<InviteInfo[]>('/org/invites');
+export const createInvite = (email: string, role?: string) =>
+	post<InviteInfo>('/org/invites', { email, role: role ?? 'member' });
+export const deleteInvite = (id: string) => del<unknown>(`/org/invites/${id}`);
+
+export async function acceptInvite(
+	token: string,
+	password: string,
+	name?: string
+): Promise<AuthResult> {
+	const res = await postRaw('/auth/accept-invite', {
+		token,
+		password,
+		name: name || undefined
+	});
+	if (res.ok) {
+		const data: AuthResponse = await res.json();
+		return { ok: true, data };
+	}
+	const text = await res.text();
+	return { ok: false, error: text || `Accept invite failed (${res.status})` };
+}
+
+// ─── Password Reset Endpoints ────────────────────────────────────────
+
+export async function forgotPassword(email: string): Promise<{ ok: boolean; message?: string }> {
+	const res = await postRaw('/auth/forgot-password', { email });
+	if (res.ok) {
+		return res.json();
+	}
+	const text = await res.text();
+	return { ok: false, message: text || `Request failed (${res.status})` };
+}
+
+export async function resetPassword(token: string, password: string): Promise<{ ok: boolean; message?: string }> {
+	const res = await postRaw('/auth/reset-password', { token, password });
+	if (res.ok) {
+		return res.json();
+	}
+	const text = await res.text();
+	return { ok: false, message: text || `Reset failed (${res.status})` };
+}

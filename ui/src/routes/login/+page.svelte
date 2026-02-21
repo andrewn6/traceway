@@ -51,18 +51,21 @@
 				/>
 			</div>
 
-			<div>
-				<label for="password" class="block text-xs text-text-secondary mb-1">Password</label>
-				<input
-					id="password"
-					type="password"
-					bind:value={password}
-					required
-					autocomplete="current-password"
-					class="w-full bg-bg-tertiary border border-border rounded px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
-					placeholder="Enter your password"
-				/>
+		<div>
+			<div class="flex items-center justify-between mb-1">
+				<label for="password" class="block text-xs text-text-secondary">Password</label>
+				<a href="/forgot-password" class="text-xs text-accent hover:underline">Forgot password?</a>
 			</div>
+			<input
+				id="password"
+				type="password"
+				bind:value={password}
+				required
+				autocomplete="current-password"
+				class="w-full bg-bg-tertiary border border-border rounded px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
+				placeholder="Enter your password"
+			/>
+		</div>
 
 			<button
 				type="submit"

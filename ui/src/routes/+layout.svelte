@@ -14,7 +14,7 @@
 	let authChecked = $state(false);
 
 	// Auth pages don't need sidebar or auth check
-	const authPages = ['/login', '/signup'];
+	const authPages = ['/login', '/signup', '/accept-invite', '/forgot-password', '/reset-password'];
 	const isAuthPage = $derived(authPages.includes(page.url.pathname));
 	const isCloudMode = $derived(authConfig.mode === 'cloud');
 	const isAuthenticated = $derived(authMe !== null || authConfig.mode === 'local');
