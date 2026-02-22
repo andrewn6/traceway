@@ -1,41 +1,32 @@
 <script>
 	import InView from '$lib/InView.svelte';
+	import ArchDiagram from '$lib/ArchDiagram.svelte';
 
 	let scrollY = $state(0);
-	let navOpaque = $derived(scrollY > 40);
+	let navOpaque = $derived(scrollY > 60);
 </script>
 
 <svelte:window bind:scrollY={scrollY} />
 
-<!-- NAV -->
+<!-- NAV — full width, spread, monospace, Pierre-inspired but not copy -->
 <nav
-	class="fixed top-0 left-0 right-0 z-50 transition-all duration-300 {navOpaque
-		? 'bg-bg/80 backdrop-blur-xl border-b border-border'
-		: 'bg-transparent'}"
+	class="fixed top-0 left-0 right-0 z-50 mix-blend-difference transition-all duration-500"
 >
-	<div class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-		<a href="/" class="flex items-center gap-2.5">
-			<div class="flex h-7 w-7 items-center justify-center rounded-md bg-accent/10 border border-accent/20">
-				<span class="text-accent font-mono text-sm font-bold">T</span>
-			</div>
-			<span class="text-text font-medium text-[15px] tracking-tight">traceway</span>
-		</a>
-		<div class="hidden items-center gap-8 md:flex">
-			<a href="#features" class="text-text-secondary hover:text-text text-sm transition-colors">Features</a>
-			<a href="#how-it-works" class="text-text-secondary hover:text-text text-sm transition-colors">How it works</a>
-			<a href="#pricing" class="text-text-secondary hover:text-text text-sm transition-colors">Pricing</a>
-			<a href="https://github.com/traceway" target="_blank" rel="noopener" class="text-text-secondary hover:text-text text-sm transition-colors">GitHub</a>
-		</div>
-		<div class="flex items-center gap-3">
-			<a
-				href="https://docs.traceway.dev"
-				class="text-text-secondary hover:text-text hidden text-sm transition-colors sm:block"
-			>
-				Docs
+	<div class="flex items-baseline justify-between px-6 py-5 md:px-10">
+		<div class="flex items-baseline gap-6">
+			<a href="/" class="font-mono text-sm uppercase tracking-tight text-white/80 hover:text-white transition-colors">
+				traceway
 			</a>
+			<span class="font-mono text-[11px] text-white/30 hidden sm:inline">2025</span>
+		</div>
+		<div class="flex items-baseline gap-6 md:gap-8">
+			<a href="#features" class="font-mono text-[11px] uppercase text-white/50 hover:text-white transition-colors hidden md:inline">Features</a>
+			<a href="#architecture" class="font-mono text-[11px] uppercase text-white/50 hover:text-white transition-colors hidden md:inline">Architecture</a>
+			<a href="https://github.com/traceway" target="_blank" rel="noopener" class="font-mono text-[11px] uppercase text-white/50 hover:text-white transition-colors">GitHub</a>
+			<a href="https://docs.traceway.dev" class="font-mono text-[11px] uppercase text-white/50 hover:text-white transition-colors hidden sm:inline">Docs</a>
 			<a
 				href="https://platform.traceway.dev"
-				class="rounded-lg bg-accent/10 px-4 py-1.5 text-sm font-medium text-accent border border-accent/20 transition-all hover:bg-accent/20"
+				class="font-mono text-[11px] uppercase text-white/80 border border-white/20 rounded-full px-4 py-1 hover:bg-white/10 transition-all"
 			>
 				Open app
 			</a>
@@ -43,138 +34,150 @@
 	</div>
 </nav>
 
-<!-- HERO -->
-<section class="relative flex min-h-screen items-center overflow-hidden pt-20">
-	<!-- Subtle grid background -->
-	<div class="absolute inset-0 opacity-[0.03]" style="background-image: url(&quot;data:image/svg+xml,%3Csvg width='60' height='60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M60 0H0v60' fill='none' stroke='%23fff' stroke-width='0.5'/%3E%3C/svg%3E&quot;);"></div>
-	<!-- Radial glow -->
-	<div class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[600px] w-[800px] rounded-full bg-accent/[0.04] blur-[120px]"></div>
+<!-- HERO — editorial, left-aligned, fills the screen -->
+<section class="relative min-h-screen flex flex-col justify-center overflow-hidden">
+	<!-- Background grid -->
+	<div class="absolute inset-0 opacity-[0.025]" style="background-image: url(&quot;data:image/svg+xml,%3Csvg width='40' height='40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M40 0H0v40' fill='none' stroke='%23fff' stroke-width='0.3'/%3E%3C/svg%3E&quot;);"></div>
+	<!-- Glow -->
+	<div class="absolute top-1/3 right-0 w-[600px] h-[600px] bg-accent/[0.03] blur-[150px] rounded-full"></div>
 
-	<div class="relative mx-auto max-w-6xl px-6">
+	<div class="relative px-6 md:px-10 max-w-[1400px]">
 		<InView>
-			<div class="flex flex-col items-center text-center">
-				<div class="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-bg-secondary px-4 py-1.5">
-					<span class="h-1.5 w-1.5 rounded-full bg-accent animate-pulse"></span>
-					<span class="text-text-secondary text-xs font-mono">open source</span>
+			<div class="flex flex-col gap-6 pt-32 md:pt-0">
+				<!-- Eyebrow -->
+				<div class="flex items-center gap-3">
+					<span class="h-px w-8 bg-accent/40"></span>
+					<span class="font-mono text-[11px] uppercase tracking-widest text-accent/70">Open source LLM observability</span>
 				</div>
 
-				<h1 class="max-w-3xl text-4xl font-semibold tracking-tight text-text sm:text-5xl md:text-6xl lg:text-7xl leading-[1.1]">
-					Observability for
-					<span class="text-accent">LLM apps</span>
+				<!-- Main headline — large, uppercase, monospace, not centered -->
+				<h1 class="font-mono text-[clamp(2.5rem,8vw,7rem)] font-semibold leading-[0.95] tracking-tighter text-text uppercase">
+					Trace every<br />
+					<span class="text-accent">LLM call</span>
 				</h1>
 
-				<p class="mt-6 max-w-xl text-base text-text-secondary leading-relaxed sm:text-lg">
-					Trace every call. Measure latency and cost. Debug prompts in real time.
-					Run locally or deploy to the cloud.
+				<!-- Subtext — left aligned, narrow measure -->
+				<p class="max-w-md text-[15px] leading-relaxed text-text-secondary mt-2">
+					Capture inputs, outputs, latency, tokens, and cost automatically.
+					Debug prompts in real time. Run on your laptop or deploy to the cloud.
 				</p>
 
-				<div class="mt-10 flex flex-col items-center gap-4 sm:flex-row">
+				<!-- CTAs — minimal -->
+				<div class="flex items-center gap-5 mt-6">
 					<a
 						href="https://platform.traceway.dev"
-						class="group flex items-center gap-2 rounded-lg bg-accent px-6 py-2.5 text-sm font-medium text-bg transition-all hover:brightness-110 hover:shadow-[0_0_24px_rgba(110,231,183,0.25)]"
+						class="group flex items-center gap-2 bg-accent text-bg font-mono text-sm uppercase tracking-wide px-6 py-2.5 rounded transition-all hover:brightness-110 hover:shadow-[0_0_30px_rgba(110,231,183,0.2)]"
 					>
 						Get started
-						<svg class="h-4 w-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-							<path d="M5 12h14M12 5l7 7-7 7" />
-						</svg>
+						<svg class="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" viewBox="0 0 8 8" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0.826 7.536L0.112 6.822L5.768 1.18H2.03V0.2H7.462V5.66H6.426V1.936L0.826 7.536Z" fill="currentColor"/></svg>
 					</a>
 					<a
 						href="https://github.com/traceway"
 						target="_blank"
 						rel="noopener"
-						class="flex items-center gap-2 rounded-lg border border-border bg-bg-secondary px-6 py-2.5 text-sm font-medium text-text-secondary transition-all hover:border-border hover:text-text hover:bg-bg-tertiary"
+						class="font-mono text-[12px] uppercase text-text-secondary hover:text-text transition-colors border-b border-text-muted hover:border-text-secondary pb-0.5"
 					>
-						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-						View on GitHub
+						View source
 					</a>
 				</div>
+			</div>
+		</InView>
 
-				<!-- Terminal preview / code snippet -->
-				<div class="mt-16 w-full max-w-2xl">
-					<div class="rounded-xl border border-border bg-bg-secondary overflow-hidden shadow-2xl shadow-black/20">
-						<div class="flex items-center gap-2 border-b border-border px-4 py-3">
-							<div class="h-2.5 w-2.5 rounded-full bg-text-muted/40"></div>
-							<div class="h-2.5 w-2.5 rounded-full bg-text-muted/40"></div>
-							<div class="h-2.5 w-2.5 rounded-full bg-text-muted/40"></div>
-							<span class="ml-3 text-xs text-text-muted font-mono">terminal</span>
-						</div>
-						<div class="p-5 font-mono text-[13px] leading-relaxed">
-							<div class="text-text-muted">$ pip install traceway</div>
-							<div class="mt-3 text-text-muted">$ traceway init</div>
-							<div class="mt-1 text-accent-dim">&#10003; Connected to traceway daemon</div>
-							<div class="mt-3 text-text-muted">$ python app.py</div>
-							<div class="mt-1 text-text-secondary">Tracing OpenAI calls...</div>
-							<div class="mt-1 text-accent-dim">&#10003; 3 traces captured (247ms avg, $0.0012 total)</div>
-							<div class="mt-1 text-text-secondary">Dashboard: <span class="text-accent underline">http://localhost:3000</span></div>
-						</div>
+		<!-- Terminal — right-aligned on desktop, below on mobile -->
+		<InView delay={200}>
+			<div class="mt-16 md:mt-0 md:absolute md:right-10 md:bottom-[15vh] md:w-[480px]">
+				<div class="rounded border border-border bg-bg-secondary/80 backdrop-blur overflow-hidden shadow-2xl shadow-black/30">
+					<div class="flex items-center gap-2 border-b border-border/60 px-4 py-2.5">
+						<div class="h-2 w-2 rounded-full bg-text-muted/30"></div>
+						<div class="h-2 w-2 rounded-full bg-text-muted/30"></div>
+						<div class="h-2 w-2 rounded-full bg-text-muted/30"></div>
+						<span class="ml-3 text-[10px] text-text-muted font-mono uppercase">terminal</span>
+					</div>
+					<div class="p-4 font-mono text-[12px] leading-relaxed">
+						<div class="text-text-muted">$ cargo install --path crates/daemon</div>
+						<div class="mt-2 text-text-muted">$ traceway --foreground --target-url https://api.openai.com</div>
+						<div class="mt-0.5 text-accent-dim">&#10003; API server listening on 127.0.0.1:3000</div>
+						<div class="mt-0.5 text-accent-dim">&#10003; Proxy listening on 127.0.0.1:3001</div>
+						<div class="mt-0.5 text-text-secondary">  target: https://api.openai.com</div>
+						<div class="mt-2 text-text-muted">$ OPENAI_BASE_URL=http://localhost:3001 python app.py</div>
+						<div class="mt-0.5 text-text-secondary">Tracing calls through proxy...</div>
+						<div class="mt-0.5 text-accent-dim">&#10003; 3 traces captured (247ms avg, $0.0012 total)</div>
+						<div class="mt-0.5 text-text-secondary">Dashboard: <span class="text-accent">http://localhost:3000</span></div>
 					</div>
 				</div>
 			</div>
 		</InView>
 	</div>
+
+	<!-- Bottom of hero — scroll hint -->
+	<div class="absolute bottom-8 left-6 md:left-10 font-mono text-[10px] uppercase tracking-widest text-text-muted animate-pulse">
+		scroll
+	</div>
 </section>
 
-<!-- FEATURES -->
-<section id="features" class="py-32 relative">
-	<div class="mx-auto max-w-6xl px-6">
+<!-- FEATURES — asymmetric grid, not cookie-cutter centered -->
+<section id="features" class="py-28 relative">
+	<div class="px-6 md:px-10 max-w-[1400px]">
 		<InView>
-			<div class="text-center mb-16">
-				<p class="text-accent font-mono text-sm mb-3">Features</p>
-				<h2 class="text-3xl font-semibold tracking-tight text-text sm:text-4xl">
-					Everything you need to debug LLM apps
-				</h2>
-				<p class="mt-4 text-text-secondary max-w-lg mx-auto">
+			<div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-16">
+				<div>
+					<span class="font-mono text-[11px] uppercase tracking-widest text-accent/70">01 / Features</span>
+					<h2 class="text-3xl font-semibold tracking-tight text-text mt-3 sm:text-4xl">
+						Everything you need to<br class="hidden sm:block" /> debug LLM applications
+					</h2>
+				</div>
+				<p class="text-sm text-text-secondary max-w-sm leading-relaxed">
 					From local development to production monitoring.
 					One tool for the entire lifecycle.
 				</p>
 			</div>
 		</InView>
 
-		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+		<div class="grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-3 border border-border">
 			{#each [
 				{
 					title: 'Full trace capture',
-					desc: 'Every LLM call logged automatically — inputs, outputs, latency, tokens, cost. Nested spans for complex chains.',
-					icon: '&#9776;',
+					desc: 'Every LLM call logged automatically. Inputs, outputs, latency, tokens, cost. Nested spans for complex chains.',
+					num: '01',
 					delay: 0
 				},
 				{
 					title: 'Real-time dashboard',
 					desc: 'Live analytics with interactive charts. Filter by model, time range, status. See trends at a glance.',
-					icon: '&#9632;',
-					delay: 80
+					num: '02',
+					delay: 60
 				},
 				{
 					title: 'Local-first',
 					desc: 'Runs as a lightweight daemon on your machine. No cloud account needed. Your data stays on disk.',
-					icon: '&#8962;',
-					delay: 160
+					num: '03',
+					delay: 120
 				},
 				{
 					title: 'Cloud ready',
 					desc: 'When you need scale, deploy to the cloud with Postgres + Turbopuffer. Same API, same dashboard.',
-					icon: '&#9729;',
+					num: '04',
 					delay: 0
 				},
 				{
 					title: 'OpenAI compatible',
-					desc: 'Drop-in proxy that intercepts OpenAI API calls. No code changes required. Works with any OpenAI-compatible provider.',
-					icon: '&#9889;',
-					delay: 80
+					desc: 'Drop-in proxy that intercepts API calls. No code changes required. Works with any OpenAI-compatible provider.',
+					num: '05',
+					delay: 60
 				},
 				{
 					title: 'Open source',
 					desc: 'MIT licensed. Self-host, fork, contribute. Built in Rust for speed and reliability.',
-					icon: '&#9734;',
-					delay: 160
+					num: '06',
+					delay: 120
 				}
 			] as card}
 				<InView delay={card.delay}>
-					<div class="group rounded-xl border border-border bg-bg-card p-6 transition-all duration-300 hover:border-accent/20 hover:bg-bg-secondary">
-						<div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/[0.07] text-accent text-lg border border-accent/10">
-							{@html card.icon}
+					<div class="bg-bg p-6 md:p-8 transition-colors duration-300 hover:bg-bg-secondary group h-full">
+						<div class="flex items-start justify-between mb-6">
+							<span class="font-mono text-[10px] text-text-muted uppercase">{card.num}</span>
 						</div>
-						<h3 class="text-[15px] font-medium text-text mb-2">{card.title}</h3>
+						<h3 class="text-[15px] font-medium text-text mb-3">{card.title}</h3>
 						<p class="text-sm text-text-secondary leading-relaxed">{card.desc}</p>
 					</div>
 				</InView>
@@ -183,42 +186,32 @@
 	</div>
 </section>
 
-<!-- HOW IT WORKS -->
-<section id="how-it-works" class="py-32 relative border-t border-border/50">
-	<div class="mx-auto max-w-6xl px-6">
+<!-- ARCHITECTURE — clean diagram with straight lines -->
+<section id="architecture" class="py-28 relative">
+	<div class="px-6 md:px-10 max-w-[1400px]">
 		<InView>
-			<div class="text-center mb-16">
-				<p class="text-accent font-mono text-sm mb-3">Architecture</p>
-				<h2 class="text-3xl font-semibold tracking-tight text-text sm:text-4xl">
-					How Traceway works
-				</h2>
-				<p class="mt-4 text-text-secondary max-w-lg mx-auto">
-					A lightweight proxy sits between your app and the LLM provider,
-					capturing every request.
+			<div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-16">
+				<div>
+					<span class="font-mono text-[11px] uppercase tracking-widest text-accent/70">02 / Architecture</span>
+					<h2 class="text-3xl font-semibold tracking-tight text-text mt-3 sm:text-4xl">
+						How Traceway works
+					</h2>
+				</div>
+				<p class="text-sm text-text-secondary max-w-sm leading-relaxed">
+					A lightweight proxy sits between your app and the LLM provider, capturing every request.
 				</p>
 			</div>
 		</InView>
 
 		<InView delay={100}>
-			<div class="mx-auto max-w-3xl">
-				<div class="rounded-xl border border-border bg-bg-secondary overflow-hidden">
-					<div class="flex items-center gap-2 border-b border-border px-4 py-3">
-						<span class="text-xs text-text-muted font-mono">architecture</span>
+			<div class="max-w-4xl">
+				<div class="rounded border border-border bg-bg-secondary overflow-hidden">
+					<div class="border-b border-border/60 px-4 py-2.5">
+						<span class="text-[10px] text-text-muted font-mono uppercase">Architecture</span>
 					</div>
-					{@html `<pre class="p-6 font-mono text-xs sm:text-sm leading-relaxed text-text-secondary overflow-x-auto"><code>  <span class="text-text">Your App</span>            <span class="text-text">Traceway Daemon</span>         <span class="text-text">LLM Provider</span>
-  <span class="text-accent/60">┌─────────┐</span>          <span class="text-accent/60">┌──────────────┐</span>       <span class="text-accent/60">┌────────────┐</span>
-  <span class="text-accent/60">│</span>         <span class="text-accent/60">│</span>  request  <span class="text-accent/60">│</span>   <span class="text-accent">Proxy</span>      <span class="text-accent/60">│</span>       <span class="text-accent/60">│</span>            <span class="text-accent/60">│</span>
-  <span class="text-accent/60">│</span>  LLM    <span class="text-accent/60">│</span>─────────▶<span class="text-accent/60">│</span>   ┃          <span class="text-accent/60">│</span>──────▶<span class="text-accent/60">│</span>  OpenAI   <span class="text-accent/60">│</span>
-  <span class="text-accent/60">│</span>  calls  <span class="text-accent/60">│</span>◁─────────<span class="text-accent/60">│</span>   ┃ <span class="text-accent">Trace</span>    <span class="text-accent/60">│</span>◁──────<span class="text-accent/60">│</span>  Anthropic<span class="text-accent/60">│</span>
-  <span class="text-accent/60">│</span>         <span class="text-accent/60">│</span>  response <span class="text-accent/60">│</span>   ▼          <span class="text-accent/60">│</span>       <span class="text-accent/60">│</span>  etc.     <span class="text-accent/60">│</span>
-  <span class="text-accent/60">└─────────┘</span>          <span class="text-accent/60">│</span> <span class="text-accent/60">┌──────────┐</span> <span class="text-accent/60">│</span>       <span class="text-accent/60">└────────────┘</span>
-                       <span class="text-accent/60">│</span> <span class="text-accent/60">│</span> <span class="text-accent">Storage</span>  <span class="text-accent/60">│</span> <span class="text-accent/60">│</span>
-                       <span class="text-accent/60">│</span> <span class="text-accent/60">│</span> <span class="text-text-muted">SQLite /</span> <span class="text-accent/60">│</span> <span class="text-accent/60">│</span>
-  <span class="text-accent/60">┌─────────┐</span>          <span class="text-accent/60">│</span> <span class="text-accent/60">│</span> <span class="text-text-muted">Postgres</span> <span class="text-accent/60">│</span> <span class="text-accent/60">│</span>
-  <span class="text-accent/60">│</span>         <span class="text-accent/60">│</span>   API    <span class="text-accent/60">│</span> <span class="text-accent/60">└──────────┘</span> <span class="text-accent/60">│</span>
-  <span class="text-accent/60">│</span>  <span class="text-accent">Web UI</span> <span class="text-accent/60">│</span>◁────────▶<span class="text-accent/60">│</span>   <span class="text-accent">REST API</span>   <span class="text-accent/60">│</span>
-  <span class="text-accent/60">│</span>         <span class="text-accent/60">│</span>          <span class="text-accent/60">│</span>              <span class="text-accent/60">│</span>
-  <span class="text-accent/60">└─────────┘</span>          <span class="text-accent/60">└──────────────┘</span></code></pre>`}
+					<div class="p-6 overflow-x-auto">
+						<ArchDiagram />
+					</div>
 				</div>
 			</div>
 		</InView>
@@ -226,29 +219,26 @@
 </section>
 
 <!-- LOCAL vs CLOUD -->
-<section id="pricing" class="py-32 relative border-t border-border/50">
-	<div class="mx-auto max-w-6xl px-6">
+<section id="pricing" class="py-28 relative">
+	<div class="px-6 md:px-10 max-w-[1400px]">
 		<InView>
-			<div class="text-center mb-16">
-				<p class="text-accent font-mono text-sm mb-3">Deployment</p>
-				<h2 class="text-3xl font-semibold tracking-tight text-text sm:text-4xl">
+			<div class="mb-16">
+				<span class="font-mono text-[11px] uppercase tracking-widest text-accent/70">03 / Deployment</span>
+				<h2 class="text-3xl font-semibold tracking-tight text-text mt-3 sm:text-4xl">
 					Local or cloud. Your call.
 				</h2>
-				<p class="mt-4 text-text-secondary max-w-lg mx-auto">
-					Start on your laptop in seconds. Scale to production when ready.
-				</p>
 			</div>
 		</InView>
 
-		<div class="grid gap-6 md:grid-cols-2 max-w-4xl mx-auto">
+		<div class="grid gap-px bg-border md:grid-cols-2 border border-border">
 			<InView delay={0}>
-				<div class="rounded-xl border border-border bg-bg-card p-8 h-full">
-					<div class="mb-4 font-mono text-xs text-accent/70 uppercase tracking-wider">Local</div>
-					<h3 class="text-xl font-semibold text-text mb-3">Free, forever</h3>
-					<p class="text-sm text-text-secondary leading-relaxed mb-6">
+				<div class="bg-bg p-8 md:p-10 h-full">
+					<div class="font-mono text-[10px] text-text-muted uppercase tracking-wider mb-6">Local</div>
+					<h3 class="text-2xl font-semibold text-text mb-4">Free, forever</h3>
+					<p class="text-sm text-text-secondary leading-relaxed mb-8">
 						Run the daemon on your machine. SQLite storage. Zero dependencies beyond the binary.
 					</p>
-					<ul class="space-y-3 text-sm">
+					<ul class="space-y-3 text-sm mb-8">
 						{#each [
 							'Single binary, no containers',
 							'SQLite storage (zero config)',
@@ -257,29 +247,27 @@
 							'Unlimited traces'
 						] as item}
 							<li class="flex items-center gap-3 text-text-secondary">
-								<span class="text-accent text-xs">&#10003;</span>
+								<span class="text-accent text-[10px] font-mono">+</span>
 								{item}
 							</li>
 						{/each}
 					</ul>
-					<div class="mt-8">
-						<code class="text-xs font-mono text-text-muted bg-bg-tertiary px-3 py-1.5 rounded-md border border-border">
-							curl -sSf https://traceway.dev/install | sh
-						</code>
-					</div>
+					<code class="text-[11px] font-mono text-text-muted bg-bg-tertiary px-3 py-1.5 rounded border border-border">
+						cargo install --path crates/daemon
+					</code>
 				</div>
 			</InView>
 
-			<InView delay={100}>
-				<div class="rounded-xl border border-accent/20 bg-bg-card p-8 relative overflow-hidden h-full">
-					<div class="absolute top-0 right-0 w-32 h-32 bg-accent/[0.03] blur-3xl rounded-full"></div>
+			<InView delay={80}>
+				<div class="bg-bg p-8 md:p-10 relative h-full">
+					<div class="absolute top-0 right-0 w-48 h-48 bg-accent/[0.03] blur-[80px] rounded-full"></div>
 					<div class="relative">
-						<div class="mb-4 font-mono text-xs text-accent uppercase tracking-wider">Cloud</div>
-						<h3 class="text-xl font-semibold text-text mb-3">Production scale</h3>
-						<p class="text-sm text-text-secondary leading-relaxed mb-6">
+						<div class="font-mono text-[10px] text-accent uppercase tracking-wider mb-6">Cloud</div>
+						<h3 class="text-2xl font-semibold text-text mb-4">Production scale</h3>
+						<p class="text-sm text-text-secondary leading-relaxed mb-8">
 							Same daemon, cloud storage. Postgres for traces, Turbopuffer for vector search.
 						</p>
-						<ul class="space-y-3 text-sm">
+						<ul class="space-y-3 text-sm mb-8">
 							{#each [
 								'Postgres + Turbopuffer backend',
 								'Team access & auth',
@@ -288,19 +276,17 @@
 								'Managed or self-hosted'
 							] as item}
 								<li class="flex items-center gap-3 text-text-secondary">
-									<span class="text-accent text-xs">&#10003;</span>
+									<span class="text-accent text-[10px] font-mono">+</span>
 									{item}
 								</li>
 							{/each}
 						</ul>
-						<div class="mt-8">
-							<a
-								href="https://platform.traceway.dev"
-								class="inline-flex items-center gap-2 rounded-lg bg-accent/10 px-4 py-2 text-sm font-medium text-accent border border-accent/20 transition-all hover:bg-accent/20"
-							>
-								Get started
-							</a>
-						</div>
+						<a
+							href="https://platform.traceway.dev"
+							class="inline-flex items-center gap-2 font-mono text-[11px] uppercase text-accent border border-accent/30 rounded-full px-5 py-2 transition-all hover:bg-accent/10"
+						>
+							Get started
+						</a>
 					</div>
 				</div>
 			</InView>
@@ -309,97 +295,97 @@
 </section>
 
 <!-- CODE SNIPPET -->
-<section class="py-32 relative border-t border-border/50">
-	<div class="mx-auto max-w-6xl px-6">
+<section class="py-28 relative">
+	<div class="px-6 md:px-10 max-w-[1400px]">
 		<InView>
-			<div class="text-center mb-16">
-				<p class="text-accent font-mono text-sm mb-3">Integration</p>
-				<h2 class="text-3xl font-semibold tracking-tight text-text sm:text-4xl">
-					Two lines to start tracing
-				</h2>
-				<p class="mt-4 text-text-secondary max-w-lg mx-auto">
-					Point your OpenAI client at the Traceway proxy. That's it.
+			<div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-16">
+				<div>
+					<span class="font-mono text-[11px] uppercase tracking-widest text-accent/70">04 / Integration</span>
+					<h2 class="text-3xl font-semibold tracking-tight text-text mt-3 sm:text-4xl">
+						One line to start tracing
+					</h2>
+				</div>
+				<p class="text-sm text-text-secondary max-w-sm leading-relaxed">
+					Change your base_url to the Traceway proxy. No SDK, no wrapper, no other code changes.
 				</p>
 			</div>
 		</InView>
 
 		<InView delay={80}>
-			<div class="mx-auto max-w-2xl">
-				<div class="rounded-xl border border-border bg-bg-secondary overflow-hidden">
-					<div class="flex items-center justify-between border-b border-border px-4 py-3">
-						<span class="text-xs text-text-muted font-mono">app.py</span>
-						<span class="text-xs text-text-muted font-mono">python</span>
+			<div class="max-w-2xl">
+				<div class="rounded border border-border bg-bg-secondary overflow-hidden">
+					<div class="flex items-center justify-between border-b border-border/60 px-4 py-2.5">
+						<span class="text-[10px] text-text-muted font-mono uppercase">app.py</span>
+						<span class="text-[10px] text-text-muted font-mono uppercase">python</span>
 					</div>
-					<div class="p-5 font-mono text-[13px] leading-relaxed overflow-x-auto">
-						<div><span class="text-text-muted">import</span> <span class="text-text">openai</span></div>
-						<div class="mt-2"></div>
-						<div><span class="text-text">client</span> <span class="text-text-muted">=</span> <span class="text-text">openai.OpenAI(</span></div>
-						<div class="text-accent">    base_url=<span class="text-accent-dim">"http://localhost:3000/proxy/v1"</span><span class="text-text-muted">,</span>  <span class="text-text-muted"># &#8592; Traceway proxy</span></div>
-						<div><span class="text-text">)</span></div>
-						<div class="mt-2"></div>
-						<div class="text-text-muted"># Use the client normally — everything is traced</div>
-						<div><span class="text-text">response</span> <span class="text-text-muted">=</span> <span class="text-text">client.chat.completions.create(</span></div>
-						<div>    <span class="text-text">model=</span><span class="text-accent-dim">"gpt-4o"</span><span class="text-text-muted">,</span></div>
-						<div>    <span class="text-text">messages=[{</span><span class="text-accent-dim">"role"</span><span class="text-text-muted">:</span> <span class="text-accent-dim">"user"</span><span class="text-text-muted">,</span> <span class="text-accent-dim">"content"</span><span class="text-text-muted">:</span> <span class="text-accent-dim">"Hello!"</span><span class="text-text">}]</span></div>
-						<div><span class="text-text">)</span></div>
-					</div>
+					{@html `<div class="p-5 font-mono text-[12px] leading-relaxed overflow-x-auto">
+<div><span class="text-text-muted">import</span> <span class="text-text">openai</span></div>
+<div class="mt-3"></div>
+<div class="text-text-muted"># Point at the Traceway proxy instead of OpenAI directly</div>
+<div><span class="text-text">client</span> <span class="text-text-muted">=</span> <span class="text-text">openai.OpenAI(</span></div>
+<div class="text-accent">    base_url=<span class="text-accent-dim">"http://localhost:3001/v1"</span><span class="text-text-muted">,</span>  <span class="text-text-muted"># proxy on :3001</span></div>
+<div><span class="text-text">)</span></div>
+<div class="mt-3"></div>
+<div class="text-text-muted"># Use normally. Every call is traced automatically.</div>
+<div><span class="text-text">response</span> <span class="text-text-muted">=</span> <span class="text-text">client.chat.completions.create(</span></div>
+<div>    <span class="text-text">model=</span><span class="text-accent-dim">"gpt-4o"</span><span class="text-text-muted">,</span></div>
+<div>    <span class="text-text">messages=[{"role": "user", "content": "Hello!"}]</span></div>
+<div><span class="text-text">)</span></div>
+</div>`}
 				</div>
 			</div>
 		</InView>
 	</div>
 </section>
 
-<!-- SCREENSHOT PLACEHOLDER -->
-<section class="py-32 relative border-t border-border/50">
-	<div class="mx-auto max-w-6xl px-6">
+<!-- DASHBOARD PREVIEW -->
+<section class="py-28 relative">
+	<div class="px-6 md:px-10 max-w-[1400px]">
 		<InView>
-			<div class="text-center mb-12">
-				<h2 class="text-3xl font-semibold tracking-tight text-text sm:text-4xl">
+			<div class="mb-12">
+				<span class="font-mono text-[11px] uppercase tracking-widest text-accent/70">05 / Dashboard</span>
+				<h2 class="text-3xl font-semibold tracking-tight text-text mt-3 sm:text-4xl">
 					See your traces in real time
 				</h2>
-				<p class="mt-4 text-text-secondary max-w-lg mx-auto">
-					Interactive dashboard with filtering, search, and analytics built in.
-				</p>
 			</div>
 		</InView>
 
 		<InView delay={80}>
-			<div class="mx-auto max-w-4xl rounded-xl border border-border bg-bg-secondary overflow-hidden shadow-2xl shadow-black/30">
-				<!-- Fake dashboard screenshot placeholder -->
-				<div class="border-b border-border px-4 py-2.5 flex items-center gap-3">
-					<div class="h-2.5 w-2.5 rounded-full bg-text-muted/30"></div>
-					<div class="h-2.5 w-2.5 rounded-full bg-text-muted/30"></div>
-					<div class="h-2.5 w-2.5 rounded-full bg-text-muted/30"></div>
-					<div class="ml-6 flex-1 h-5 rounded bg-bg-tertiary max-w-xs"></div>
+			<div class="max-w-5xl rounded border border-border bg-bg-secondary overflow-hidden shadow-2xl shadow-black/30">
+				<!-- Window chrome -->
+				<div class="border-b border-border/60 px-4 py-2.5 flex items-center gap-3">
+					<div class="h-2 w-2 rounded-full bg-text-muted/25"></div>
+					<div class="h-2 w-2 rounded-full bg-text-muted/25"></div>
+					<div class="h-2 w-2 rounded-full bg-text-muted/25"></div>
+					<div class="ml-6 flex-1 h-4 rounded bg-bg-tertiary max-w-xs"></div>
 				</div>
-				<div class="p-6 min-h-[320px] flex flex-col gap-4">
-					<!-- Fake sidebar + content -->
+				<div class="p-5 min-h-[340px] flex flex-col gap-4">
 					<div class="flex gap-4 h-full">
-						<div class="hidden sm:flex flex-col gap-3 w-40 shrink-0">
+						<!-- Sidebar -->
+						<div class="hidden sm:flex flex-col gap-2 w-36 shrink-0">
 							{#each ['Traces', 'Analytics', 'Models', 'Settings'] as item, i}
-								<div class="h-8 rounded-md {i === 0 ? 'bg-accent/10 border border-accent/20' : 'bg-bg-tertiary'} flex items-center px-3">
-									<span class="text-xs font-mono {i === 0 ? 'text-accent' : 'text-text-muted'}">{item}</span>
+								<div class="h-7 rounded {i === 0 ? 'bg-accent/10 border border-accent/20' : 'bg-bg-tertiary/50'} flex items-center px-3">
+									<span class="text-[10px] font-mono uppercase {i === 0 ? 'text-accent' : 'text-text-muted'}">{item}</span>
 								</div>
 							{/each}
 						</div>
+						<!-- Content -->
 						<div class="flex-1 flex flex-col gap-3">
-							<!-- Fake stat cards -->
 							<div class="grid grid-cols-3 gap-3">
 								{#each [
 									{ label: 'Total traces', value: '12,847' },
 									{ label: 'Avg latency', value: '234ms' },
 									{ label: 'Total cost', value: '$4.82' }
 								] as stat}
-									<div class="rounded-lg bg-bg-tertiary p-3 border border-border/50">
-										<div class="text-[10px] text-text-muted font-mono uppercase">{stat.label}</div>
+									<div class="rounded bg-bg-tertiary/50 p-3 border border-border/30">
+										<div class="text-[9px] text-text-muted font-mono uppercase">{stat.label}</div>
 										<div class="text-lg font-semibold text-text mt-1 font-mono">{stat.value}</div>
 									</div>
 								{/each}
 							</div>
-							<!-- Fake chart area -->
-							<div class="flex-1 rounded-lg bg-bg-tertiary border border-border/50 min-h-[160px] flex items-end p-4 gap-1">
-								{#each [35, 42, 55, 38, 62, 71, 45, 58, 80, 65, 72, 90, 68, 55, 78, 85, 70, 62, 88, 75] as h}
-									<div class="flex-1 rounded-t bg-accent/20 transition-all" style="height: {h}%"></div>
+							<div class="flex-1 rounded bg-bg-tertiary/50 border border-border/30 min-h-[180px] flex items-end p-4 gap-[3px]">
+								{#each [35, 42, 55, 38, 62, 71, 45, 58, 80, 65, 72, 90, 68, 55, 78, 85, 70, 62, 88, 75, 60, 82, 69, 77] as h}
+									<div class="flex-1 rounded-t bg-accent/15 transition-all" style="height: {h}%"></div>
 								{/each}
 							</div>
 						</div>
@@ -410,59 +396,53 @@
 	</div>
 </section>
 
-<!-- CTA -->
-<section class="py-32 relative border-t border-border/50">
-	<div class="absolute inset-0 bg-gradient-to-b from-transparent via-accent/[0.02] to-transparent"></div>
-	<div class="relative mx-auto max-w-6xl px-6 text-center">
+<!-- CTA — minimal, bottom-of-page -->
+<section class="py-32 relative">
+	<div class="absolute inset-0 bg-gradient-to-b from-transparent via-accent/[0.015] to-transparent"></div>
+	<div class="relative px-6 md:px-10 max-w-[1400px]">
 		<InView>
-			<h2 class="text-3xl font-semibold tracking-tight text-text sm:text-4xl">
-				Start tracing in under a minute
-			</h2>
-			<p class="mt-4 text-text-secondary max-w-md mx-auto">
-				One binary. No config needed. See your first traces immediately.
-			</p>
-			<div class="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-				<a
-					href="https://platform.traceway.dev"
-					class="group flex items-center gap-2 rounded-lg bg-accent px-6 py-2.5 text-sm font-medium text-bg transition-all hover:brightness-110 hover:shadow-[0_0_24px_rgba(110,231,183,0.25)]"
-				>
-					Get started free
-					<svg class="h-4 w-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-						<path d="M5 12h14M12 5l7 7-7 7" />
-					</svg>
-				</a>
-				<a
-					href="https://github.com/traceway"
-					target="_blank"
-					rel="noopener"
-					class="flex items-center gap-2 rounded-lg border border-border bg-bg-secondary px-6 py-2.5 text-sm font-medium text-text-secondary transition-all hover:text-text hover:bg-bg-tertiary"
-				>
-					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-					Star on GitHub
-				</a>
+			<div class="flex flex-col md:flex-row md:items-end md:justify-between gap-8">
+				<div>
+					<h2 class="font-mono text-[clamp(2rem,5vw,4rem)] font-semibold leading-[1] tracking-tighter text-text uppercase">
+						Start tracing<br />in under a minute
+					</h2>
+					<p class="mt-4 text-text-secondary max-w-sm text-sm leading-relaxed">
+						One binary. No config. See your first traces immediately.
+					</p>
+				</div>
+				<div class="flex items-center gap-5">
+					<a
+						href="https://platform.traceway.dev"
+						class="group flex items-center gap-2 bg-accent text-bg font-mono text-sm uppercase tracking-wide px-6 py-2.5 rounded transition-all hover:brightness-110 hover:shadow-[0_0_30px_rgba(110,231,183,0.2)]"
+					>
+						Get started free
+						<svg class="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" viewBox="0 0 8 8" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0.826 7.536L0.112 6.822L5.768 1.18H2.03V0.2H7.462V5.66H6.426V1.936L0.826 7.536Z" fill="currentColor"/></svg>
+					</a>
+					<a
+						href="https://github.com/traceway"
+						target="_blank"
+						rel="noopener"
+						class="font-mono text-[12px] uppercase text-text-secondary hover:text-text transition-colors border-b border-text-muted hover:border-text-secondary pb-0.5"
+					>
+						Star on GitHub
+					</a>
+				</div>
 			</div>
 		</InView>
 	</div>
 </section>
 
-<!-- FOOTER -->
-<footer class="border-t border-border py-12">
-	<div class="mx-auto max-w-6xl px-6">
-		<div class="flex flex-col items-center justify-between gap-6 sm:flex-row">
-			<div class="flex items-center gap-2.5">
-				<div class="flex h-6 w-6 items-center justify-center rounded-md bg-accent/10 border border-accent/20">
-					<span class="text-accent font-mono text-xs font-bold">T</span>
-				</div>
-				<span class="text-text-secondary text-sm">traceway</span>
+<!-- FOOTER — minimal -->
+<footer class="border-t border-border/50 py-8">
+	<div class="px-6 md:px-10 max-w-[1400px]">
+		<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+			<span class="font-mono text-[11px] uppercase text-text-muted tracking-tight">traceway</span>
+			<div class="flex items-center gap-6">
+				<a href="https://docs.traceway.dev" class="font-mono text-[11px] uppercase text-text-muted hover:text-text-secondary transition-colors">Docs</a>
+				<a href="https://github.com/traceway" target="_blank" rel="noopener" class="font-mono text-[11px] uppercase text-text-muted hover:text-text-secondary transition-colors">GitHub</a>
+				<a href="https://platform.traceway.dev" class="font-mono text-[11px] uppercase text-text-muted hover:text-text-secondary transition-colors">Platform</a>
 			</div>
-			<div class="flex items-center gap-6 text-sm text-text-muted">
-				<a href="https://docs.traceway.dev" class="hover:text-text-secondary transition-colors">Docs</a>
-				<a href="https://github.com/traceway" target="_blank" rel="noopener" class="hover:text-text-secondary transition-colors">GitHub</a>
-				<a href="https://platform.traceway.dev" class="hover:text-text-secondary transition-colors">Platform</a>
-			</div>
-			<div class="text-xs text-text-muted font-mono">
-				MIT Licensed
-			</div>
+			<span class="font-mono text-[10px] text-text-muted/50">MIT Licensed</span>
 		</div>
 	</div>
 </footer>
