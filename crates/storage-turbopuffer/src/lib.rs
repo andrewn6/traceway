@@ -118,6 +118,24 @@ impl TurbopufferConfig {
         self.timeout_secs = timeout_secs;
         self
     }
+
+    /// Create a new config with a different namespace prefix (for per-org isolation)
+    pub fn with_namespace(mut self, namespace: impl Into<String>) -> Self {
+        self.namespace = namespace.into();
+        self
+    }
+
+    /// Derive a per-org config from this base config.
+    /// Produces namespace like `tw_{org_id_short}` (first 8 chars of UUID).
+    pub fn for_org(&self, org_id: &str) -> Self {
+        let org_short = &org_id[..8.min(org_id.len())];
+        Self {
+            api_key: self.api_key.clone(),
+            base_url: self.base_url.clone(),
+            namespace: format!("tw_{}", org_short),
+            timeout_secs: self.timeout_secs,
+        }
+    }
 }
 
 /// Row-based upsert request for Turbopuffer v2 API

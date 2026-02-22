@@ -1445,11 +1445,19 @@ async fn serve_ui(uri: Uri) -> Response {
 
 // --- Auth Middleware ---
 
+/// Cached auth result with expiry.
+struct CachedAuth {
+    ctx: auth::AuthContext,
+    expires: std::time::Instant,
+}
+
 /// Auth middleware shared state.
 #[derive(Clone)]
 struct AuthMiddlewareState {
     config: auth::AuthConfig,
     lookup: Arc<dyn auth::ApiKeyLookup>,
+    /// Cache: bearer token -> (AuthContext, expiry). TTL = 60s.
+    cache: Arc<std::sync::Mutex<HashMap<String, CachedAuth>>>,
 }
 
 /// Tower middleware layer that injects `AuthContext` into every request.
@@ -1511,6 +1519,21 @@ where
                 .and_then(|v| v.to_str().ok().map(String::from));
             let query_string = request.uri().query().map(String::from);
 
+            // Check cache for Bearer tokens (avoids repeated bcrypt + DB lookup)
+            let cached_ctx = auth_header.as_ref().and_then(|token| {
+                let cache = state.cache.lock().ok()?;
+                let cached = cache.get(token.as_str())?;
+                if cached.expires > Instant::now() {
+                    Some(cached.ctx.clone())
+                } else {
+                    None
+                }
+            });
+            if let Some(ctx) = cached_ctx {
+                request.extensions_mut().insert(ctx);
+                return inner.call(request).await;
+            }
+
             match extract_auth(
                 auth_header.as_deref(),
                 cookie_header.as_deref(),
@@ -1519,6 +1542,19 @@ where
                 state.lookup.as_ref(),
             ).await {
                 Ok(ctx) => {
+                    // Cache successful Bearer auth for 60 seconds
+                    if let Some(ref token) = auth_header {
+                        if let Ok(mut cache) = state.cache.lock() {
+                            if cache.len() > 100 {
+                                let now = Instant::now();
+                                cache.retain(|_, v| v.expires > now);
+                            }
+                            cache.insert(token.clone(), CachedAuth {
+                                ctx: ctx.clone(),
+                                expires: Instant::now() + std::time::Duration::from_secs(60),
+                            });
+                        }
+                    }
                     request.extensions_mut().insert(ctx);
                     inner.call(request).await
                 }
@@ -1706,6 +1742,7 @@ fn build_router(
     let auth_mw_state = AuthMiddlewareState {
         config: state.auth_config.clone(),
         lookup: state.api_key_lookup.clone(),
+        cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
     };
 
     // Protected routes (auth middleware applied)
