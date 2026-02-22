@@ -360,11 +360,18 @@ export interface ApiKeyCreated {
 	scopes: Scope[];
 }
 
+export interface PlanLimits {
+	spans_per_month: number;
+	max_team_members: number;
+	retention_days: number;
+}
+
 export interface OrgInfo {
 	id: string;
 	name: string;
 	slug: string;
 	plan: string;
+	plan_limits: PlanLimits;
 }
 
 export interface OrgMember {
