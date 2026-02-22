@@ -696,6 +696,13 @@ async fn run_cloud_mode() {
             builder = builder.auth_store(s);
         }
 
+        if let Ok(secret) = std::env::var("POLAR_WEBHOOK_SECRET") {
+            if !secret.is_empty() {
+                info!("Polar webhook signature verification enabled");
+                builder = builder.polar_webhook_secret(secret);
+            }
+        }
+
         let app = builder.build();
 
         async move {

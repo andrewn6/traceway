@@ -36,6 +36,7 @@ sha2.workspace = true
 bcrypt = "0.16"
 rand = "0.8"
 base64 = "0.22"
+hmac = "0.12"
 
 # Cloud dependencies (optional)
 redis = { version = "0.25", features = ["tokio-comp", "connection-manager", "aio"], optional = true }

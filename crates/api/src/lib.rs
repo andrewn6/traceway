@@ -1,6 +1,7 @@
 pub mod any_backend;
 pub mod auth_keys;
 pub mod auth_routes;
+pub mod billing_routes;
 pub mod events;
 pub mod jobs;
 pub mod metrics;
@@ -166,6 +167,8 @@ pub struct AppState {
     pub email_sender: Arc<dyn auth::EmailSender>,
     /// Base URL for links in emails (e.g. "https://app.traceway.dev")
     pub app_url: String,
+    /// Polar.sh webhook secret for signature verification (Standard Webhooks format)
+    pub polar_webhook_secret: Option<String>,
 }
 
 pub type SharedStore = Arc<RwLock<PersistentStore<AnyBackend>>>;
@@ -1600,6 +1603,7 @@ pub struct RouterBuilder {
     api_key_lookup: Option<Arc<dyn auth::ApiKeyLookup>>,
     email_sender: Option<Arc<dyn auth::EmailSender>>,
     app_url: Option<String>,
+    polar_webhook_secret: Option<String>,
 }
 
 impl RouterBuilder {
@@ -1615,6 +1619,7 @@ impl RouterBuilder {
             api_key_lookup: None,
             email_sender: None,
             app_url: None,
+            polar_webhook_secret: None,
         }
     }
 
@@ -1627,6 +1632,7 @@ impl RouterBuilder {
     pub fn api_key_lookup(mut self, l: Arc<dyn auth::ApiKeyLookup>) -> Self { self.api_key_lookup = Some(l); self }
     pub fn email_sender(mut self, e: Arc<dyn auth::EmailSender>) -> Self { self.email_sender = Some(e); self }
     pub fn app_url(mut self, u: String) -> Self { self.app_url = Some(u); self }
+    pub fn polar_webhook_secret(mut self, s: String) -> Self { self.polar_webhook_secret = Some(s); self }
 
     pub fn build(self) -> Router {
         build_router(
@@ -1640,6 +1646,7 @@ impl RouterBuilder {
             self.api_key_lookup,
             self.email_sender,
             self.app_url,
+            self.polar_webhook_secret,
         )
     }
 }
@@ -1651,7 +1658,7 @@ pub fn router_with_start_time(
     config_path: String,
     shutdown_tx: Option<watch::Sender<bool>>,
 ) -> Router {
-    build_router(store, start_time, config, config_path, shutdown_tx, auth::AuthConfig::local(), None, None, None, None)
+    build_router(store, start_time, config, config_path, shutdown_tx, auth::AuthConfig::local(), None, None, None, None, None)
 }
 
 fn build_router(
@@ -1665,6 +1672,7 @@ fn build_router(
     api_key_lookup: Option<Arc<dyn auth::ApiKeyLookup>>,
     email_sender: Option<Arc<dyn auth::EmailSender>>,
     app_url: Option<String>,
+    polar_webhook_secret: Option<String>,
 ) -> Router {
     let (events_tx, _) = broadcast::channel(256);
     let api_key_lookup = api_key_lookup.unwrap_or_else(|| {
@@ -1686,6 +1694,7 @@ fn build_router(
         api_key_lookup: api_key_lookup.clone(),
         email_sender,
         app_url,
+        polar_webhook_secret,
     };
 
     let cors = CorsLayer::new()
@@ -1748,7 +1757,9 @@ fn build_router(
         // OpenAPI spec
         .route("/openapi.json", get(openapi_spec))
         // Auth routes that don't require auth (config, signup, login, logout)
-        .merge(auth_routes::public_auth_router());
+        .merge(auth_routes::public_auth_router())
+        // Billing webhooks (Polar.sh)
+        .merge(billing_routes::billing_router());
 
     let api = Router::new()
         .merge(protected)

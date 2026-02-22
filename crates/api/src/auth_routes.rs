@@ -66,6 +66,14 @@ pub struct OrgResponse {
     pub name: String,
     pub slug: String,
     pub plan: String,
+    pub plan_limits: PlanLimits,
+}
+
+#[derive(Serialize)]
+pub struct PlanLimits {
+    pub spans_per_month: u64,
+    pub max_team_members: usize,
+    pub retention_days: u32,
 }
 
 #[derive(Serialize)]
@@ -343,11 +351,17 @@ async fn get_org(
     State(state): State<AppState>,
 ) -> Result<Json<OrgResponse>, (StatusCode, String)> {
     if ctx.is_local_mode {
+        let plan = auth::Plan::Free;
         return Ok(Json(OrgResponse {
             id: ctx.org_id.to_string(),
             name: "Local".into(),
             slug: "local".into(),
             plan: "free".into(),
+            plan_limits: PlanLimits {
+                spans_per_month: plan.spans_per_month(),
+                max_team_members: plan.max_team_members(),
+                retention_days: plan.retention_days(),
+            },
         }));
     }
 
@@ -366,6 +380,11 @@ async fn get_org(
         name: org.name,
         slug: org.slug,
         plan: format!("{:?}", org.plan).to_lowercase(),
+        plan_limits: PlanLimits {
+            spans_per_month: org.plan.spans_per_month(),
+            max_team_members: org.plan.max_team_members(),
+            retention_days: org.plan.retention_days(),
+        },
     }))
 }
 
