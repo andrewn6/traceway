@@ -28,6 +28,7 @@ toml.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 nix.workspace = true
+dotenvy = "0.15"
 
 # Cloud dependencies (optional)
 storage-postgres = { path = "../storage-postgres", optional = true }

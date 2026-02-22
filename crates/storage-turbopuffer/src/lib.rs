@@ -238,7 +238,8 @@ impl TurbopufferBackend {
         Ok(())
     }
 
-    /// Query documents from a namespace
+    /// Query documents from a namespace.
+    /// Returns an empty vec if the namespace does not exist yet (404).
     #[instrument(skip(self, filters))]
     async fn query(
         &self,
@@ -259,11 +260,22 @@ impl TurbopufferBackend {
 
         debug!(namespace = %ns, limit, "Querying documents");
 
-        let resp: QueryResponse = self.post(&path, &req).await?;
-        Ok(resp.rows)
+        match self.post(&path, &req).await {
+            Ok(resp) => {
+                let resp: QueryResponse = resp;
+                Ok(resp.rows)
+            }
+            Err(TurbopufferError::Api { status: 404, .. }) => {
+                // Namespace doesn't exist yet — treat as empty collection
+                debug!(namespace = %ns, "Namespace not found, returning empty result");
+                Ok(vec![])
+            }
+            Err(e) => Err(e),
+        }
     }
 
-    /// Delete documents by ID
+    /// Delete documents by ID.
+    /// Returns 0 if the namespace does not exist yet (404).
     #[instrument(skip(self, ids))]
     async fn delete_ids(
         &self,
@@ -282,11 +294,18 @@ impl TurbopufferBackend {
 
         debug!(namespace = %ns, count, "Deleting documents");
 
-        let _: serde_json::Value = self.post(&path, &req).await?;
-        Ok(count)
+        match self.post::<_, serde_json::Value>(&path, &req).await {
+            Ok(_) => Ok(count),
+            Err(TurbopufferError::Api { status: 404, .. }) => {
+                debug!(namespace = %ns, "Namespace not found on delete, returning 0");
+                Ok(0)
+            }
+            Err(e) => Err(e),
+        }
     }
 
-    /// Get a single document by ID
+    /// Get a single document by ID.
+    /// Returns None if the namespace does not exist yet.
     async fn get_by_id(
         &self,
         collection: &str,

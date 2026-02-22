@@ -105,7 +105,8 @@ pub async fn run(pool: &PgPool) -> Result<(), AuthStoreError> {
         .map_err(|e| AuthStoreError::Database(e.to_string()))?;
 
         if !applied {
-            sqlx::query(sql)
+            // Use raw_sql to support multi-statement migrations
+            sqlx::raw_sql(sql)
                 .execute(pool)
                 .await
                 .map_err(|e| AuthStoreError::Database(format!("Migration {}: {}", name, e)))?;

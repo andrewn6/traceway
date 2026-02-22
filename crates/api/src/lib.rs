@@ -810,7 +810,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         storage: StorageHealth {
             trace_count: r.trace_count(),
             span_count: r.span_count(),
-            backend: "sqlite".to_string(), // TODO: Get from store
+            backend: r.backend_type().to_string(),
         },
         region,
         instance,

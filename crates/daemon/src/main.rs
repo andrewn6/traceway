@@ -360,6 +360,9 @@ fn daemonize(args: &Args) -> ! {
 
 #[tokio::main]
 async fn main() {
+    // Load .env file if present (silently ignored if missing)
+    dotenvy::dotenv().ok();
+
     let args = Args::parse();
 
     // Cloud mode: load all config from environment
