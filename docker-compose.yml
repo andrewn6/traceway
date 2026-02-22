@@ -1,0 +1,56 @@
+services:
+  # ── Traceway daemon ────────────────────────────────────────────────────────
+  traceway:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - RUST_LOG=info
+      - STORAGE_BACKEND=turbopuffer
+      - TURBOPUFFER_API_KEY=${TURBOPUFFER_API_KEY}
+      - TURBOPUFFER_NAMESPACE=${TURBOPUFFER_NAMESPACE:-traceway}
+      - DATABASE_URL=postgres://traceway:traceway@postgres:5432/traceway
+      - JWT_SECRET=${JWT_SECRET:-changeme-in-production}
+      # - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Postgres (auth + metadata) ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: traceway
+      POSTGRES_PASSWORD: traceway
+      POSTGRES_DB: traceway
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U traceway"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Redis (optional — only needed for multi-instance SSE + job queue) ──────
+  # Uncomment if running multiple daemon replicas.
+  #
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 5
+  #   restart: unless-stopped
+
+volumes:
+  pg_data:
+  # redis_data:
