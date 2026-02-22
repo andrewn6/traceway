@@ -1,4 +1,5 @@
 # Traceway
+<img width="2870" height="1140" alt="853b4311ceb992ef099677d1ddd0696e56406a2f6b0e9ad8ca7f3a940b20da19" src="https://github.com/user-attachments/assets/ce066845-5a6a-44af-a48e-22d8c317c33e" />
 
 Observability platform for LLM applications. Capture traces, spans, token usage, cost, and file I/O — then analyze everything through a web UI and REST API.
 
