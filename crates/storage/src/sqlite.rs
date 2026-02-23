@@ -616,7 +616,7 @@ impl StorageBackend for SqliteBackend {
                 .with_timezone(&Utc);
             datasets.push(Dataset {
                 id,
-                org_id: None, // Loaded from DB if present via v3 migration
+                org_id: None, // org_id handled at the PersistentStore layer
                 name,
                 description,
                 created_at,
@@ -629,9 +629,10 @@ impl StorageBackend for SqliteBackend {
     async fn save_dataset(&self, dataset: &Dataset) -> Result<(), StorageError> {
         let conn = self.conn.lock().await;
         conn.execute(
-            "INSERT OR REPLACE INTO datasets (id, name, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT OR REPLACE INTO datasets (id, org_id, name, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 dataset.id.to_string(),
+                dataset.org_id.map(|id| id.to_string()),
                 dataset.name,
                 dataset.description,
                 dataset.created_at.to_rfc3339(),

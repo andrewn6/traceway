@@ -624,9 +624,10 @@ impl StorageBackend for SqliteBackend {
     async fn save_dataset(&self, dataset: &Dataset) -> Result<(), StorageError> {
         let conn = self.conn.lock().await;
         conn.execute(
-            "INSERT OR REPLACE INTO datasets (id, name, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT OR REPLACE INTO datasets (id, org_id, name, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 dataset.id.to_string(),
+                dataset.org_id.map(|id| id.to_string()),
                 dataset.name,
                 dataset.description,
                 dataset.created_at.to_rfc3339(),
@@ -639,23 +640,26 @@ impl StorageBackend for SqliteBackend {
     async fn get_dataset(&self, id: DatasetId) -> Result<Option<Dataset>, StorageError> {
         let conn = self.conn.lock().await;
         let result = conn.query_row(
-            "SELECT id, name, description, created_at, updated_at FROM datasets WHERE id = ?1",
+            "SELECT id, org_id, name, description, created_at, updated_at FROM datasets WHERE id = ?1",
             params![id.to_string()],
             |row| {
                 let id: String = row.get(0)?;
-                let name: String = row.get(1)?;
-                let description: Option<String> = row.get(2)?;
-                let created_at: String = row.get(3)?;
-                let updated_at: String = row.get(4)?;
-                Ok((id, name, description, created_at, updated_at))
+                let org_id: Option<String> = row.get(1)?;
+                let name: String = row.get(2)?;
+                let description: Option<String> = row.get(3)?;
+                let created_at: String = row.get(4)?;
+                let updated_at: String = row.get(5)?;
+                Ok((id, org_id, name, description, created_at, updated_at))
             },
         );
 
         match result {
-            Ok((id_str, name, description, created_at_str, updated_at_str)) => {
+            Ok((id_str, org_id_str, name, description, created_at_str, updated_at_str)) => {
                 let id: DatasetId = id_str
                     .parse()
                     .map_err(|e| StorageError::Database(format!("invalid dataset id: {}", e)))?;
+                let org_id = org_id_str
+                    .and_then(|s| s.parse().ok());
                 let created_at = DateTime::parse_from_rfc3339(&created_at_str)
                     .map_err(|e| StorageError::Database(format!("invalid created_at: {}", e)))?
                     .with_timezone(&Utc);
@@ -664,7 +668,7 @@ impl StorageBackend for SqliteBackend {
                     .with_timezone(&Utc);
                 Ok(Some(Dataset {
                     id,
-                    org_id: None,
+                    org_id,
                     name,
                     description,
                     created_at,
@@ -679,22 +683,25 @@ impl StorageBackend for SqliteBackend {
     async fn list_datasets(&self) -> Result<Vec<Dataset>, StorageError> {
         let conn = self.conn.lock().await;
         let mut stmt =
-            conn.prepare("SELECT id, name, description, created_at, updated_at FROM datasets")?;
+            conn.prepare("SELECT id, org_id, name, description, created_at, updated_at FROM datasets")?;
         let rows = stmt.query_map([], |row| {
             let id: String = row.get(0)?;
-            let name: String = row.get(1)?;
-            let description: Option<String> = row.get(2)?;
-            let created_at: String = row.get(3)?;
-            let updated_at: String = row.get(4)?;
-            Ok((id, name, description, created_at, updated_at))
+            let org_id: Option<String> = row.get(1)?;
+            let name: String = row.get(2)?;
+            let description: Option<String> = row.get(3)?;
+            let created_at: String = row.get(4)?;
+            let updated_at: String = row.get(5)?;
+            Ok((id, org_id, name, description, created_at, updated_at))
         })?;
 
         let mut datasets = Vec::new();
         for row_result in rows {
-            let (id_str, name, description, created_at_str, updated_at_str) = row_result?;
+            let (id_str, org_id_str, name, description, created_at_str, updated_at_str) = row_result?;
             let id: DatasetId = id_str
                 .parse()
                 .map_err(|e| StorageError::Database(format!("invalid dataset id: {}", e)))?;
+            let org_id = org_id_str
+                .and_then(|s| s.parse().ok());
             let created_at = DateTime::parse_from_rfc3339(&created_at_str)
                 .map_err(|e| StorageError::Database(format!("invalid created_at: {}", e)))?
                 .with_timezone(&Utc);
@@ -703,7 +710,7 @@ impl StorageBackend for SqliteBackend {
                 .with_timezone(&Utc);
             datasets.push(Dataset {
                 id,
-                org_id: None,
+                org_id,
                 name,
                 description,
                 created_at,
