@@ -101,13 +101,13 @@
 
 	// Accent colors per card type for visual variety
 	const cardAccents: Record<CardId, string> = {
-		top_model_tokens: '#58a6ff',
+		top_model_tokens: '#6ee7b7',
 		top_spans: '#a78bfa',
-		top_llm_spans: '#f472b6',
+		top_llm_spans: '#f9a8d4',
 		cost_by_model: '#34d399',
 		total_cost: '#fbbf24',
-		tokens_by_model: '#60a5fa',
-		avg_latency: '#f97316',
+		tokens_by_model: '#67e8f9',
+		avg_latency: '#fb923c',
 	};
 
 	const cardLabels: Record<CardId, string> = {
@@ -512,7 +512,7 @@
 										<div
 											class="flex-1 rounded-t transition-all duration-200 group-hover/bar:brightness-125"
 											style="height: {maxTokens > 0 ? (item.input_tokens / maxTokens) * 130 : 0}px;
-												background: linear-gradient(180deg, #60a5fa88, #60a5fa44);"
+												background: linear-gradient(180deg, #67e8f988, #67e8f944);"
 										></div>
 										<div
 											class="flex-1 rounded-t transition-all duration-200 group-hover/bar:brightness-125"
@@ -528,7 +528,7 @@
 					<!-- Legend -->
 					<div class="flex items-center justify-center gap-4 mt-2 text-[10px] text-text-muted">
 						<span class="flex items-center gap-1">
-							<span class="w-2 h-2 rounded-sm" style="background: #60a5fa88;"></span>
+							<span class="w-2 h-2 rounded-sm" style="background: #67e8f988;"></span>
 							Input
 						</span>
 						<span class="flex items-center gap-1">
@@ -574,7 +574,7 @@
 				<div class="h-px bg-border"></div>
 				<div class="flex items-center justify-between gap-4">
 					<span class="flex items-center gap-1.5">
-						<span class="w-2 h-2 rounded-sm" style="background: #60a5fa88;"></span>
+						<span class="w-2 h-2 rounded-sm" style="background: #67e8f988;"></span>
 						<span class="text-text-muted">Input</span>
 					</span>
 					<span class="text-text font-mono">{barTooltip.input.toLocaleString()}</span>
