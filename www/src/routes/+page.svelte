@@ -23,9 +23,9 @@
 			<a href="#features" class="font-mono text-[11px] uppercase text-white/50 hover:text-white transition-colors hidden md:inline">Features</a>
 			<a href="#architecture" class="font-mono text-[11px] uppercase text-white/50 hover:text-white transition-colors hidden md:inline">Architecture</a>
 			<a href="https://github.com/blastgits/traceway" target="_blank" rel="noopener" class="font-mono text-[11px] uppercase text-white/50 hover:text-white transition-colors">GitHub</a>
-			<a href="https://docs.traceway.dev" class="font-mono text-[11px] uppercase text-white/50 hover:text-white transition-colors hidden sm:inline">Docs</a>
+			<a href="https://docs.traceway.ai" class="font-mono text-[11px] uppercase text-white/50 hover:text-white transition-colors hidden sm:inline">Docs</a>
 			<a
-				href="https://platform.traceway.dev"
+				href="https://platform.traceway.ai"
 				class="font-mono text-[11px] uppercase text-white/80 border border-white/20 rounded-full px-4 py-1 hover:bg-white/10 transition-all"
 			>
 				Open app
@@ -67,7 +67,7 @@
 					<!-- CTAs — minimal -->
 					<div class="flex items-center gap-5 mt-6">
 						<a
-							href="https://platform.traceway.dev"
+							href="https://platform.traceway.ai"
 							class="group flex items-center gap-2 bg-accent text-bg font-mono text-sm uppercase tracking-wide px-6 py-2.5 rounded transition-all hover:brightness-110 hover:shadow-[0_0_30px_rgba(110,231,183,0.2)]"
 						>
 							Get started
@@ -279,7 +279,7 @@
 							{/each}
 						</ul>
 						<a
-							href="https://platform.traceway.dev"
+							href="https://platform.traceway.ai"
 							class="inline-flex items-center gap-2 font-mono text-[11px] uppercase text-accent border border-accent/30 rounded-full px-5 py-2 transition-all hover:bg-accent/10"
 						>
 							Get started
@@ -442,7 +442,7 @@
 			</p>
 			<div class="flex items-center gap-5 mt-8">
 				<a
-					href="https://platform.traceway.dev"
+					href="https://platform.traceway.ai"
 					class="group flex items-center gap-2 bg-accent text-bg font-mono text-sm uppercase tracking-wide px-6 py-2.5 rounded transition-all hover:brightness-110 hover:shadow-[0_0_30px_rgba(110,231,183,0.2)]"
 				>
 					Get started free
@@ -467,9 +467,9 @@
 		<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
 			<span class="font-mono text-[11px] uppercase text-text-muted tracking-tight">traceway</span>
 			<div class="flex items-center gap-6">
-				<a href="https://docs.traceway.dev" class="font-mono text-[11px] uppercase text-text-muted hover:text-text-secondary transition-colors">Docs</a>
+				<a href="https://docs.traceway.ai" class="font-mono text-[11px] uppercase text-text-muted hover:text-text-secondary transition-colors">Docs</a>
 				<a href="https://github.com/blastgits/traceway" target="_blank" rel="noopener" class="font-mono text-[11px] uppercase text-text-muted hover:text-text-secondary transition-colors">GitHub</a>
-				<a href="https://platform.traceway.dev" class="font-mono text-[11px] uppercase text-text-muted hover:text-text-secondary transition-colors">Platform</a>
+				<a href="https://platform.traceway.ai" class="font-mono text-[11px] uppercase text-text-muted hover:text-text-secondary transition-colors">Platform</a>
 			</div>
 			<span class="font-mono text-[10px] text-text-muted/50">MIT Licensed</span>
 		</div>

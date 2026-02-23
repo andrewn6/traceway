@@ -212,7 +212,7 @@ pub struct AppState {
     pub auth_store: Option<Arc<dyn auth::AuthStore>>,
     pub api_key_lookup: Arc<dyn auth::ApiKeyLookup>,
     pub email_sender: Arc<dyn auth::EmailSender>,
-    /// Base URL for links in emails (e.g. "https://app.traceway.dev")
+    /// Base URL for links in emails (e.g. "https://platform.traceway.ai")
     pub app_url: String,
     /// Polar.sh webhook secret for signature verification (Standard Webhooks format)
     pub polar_webhook_secret: Option<String>,
@@ -2004,8 +2004,24 @@ async fn serve_scalar_docs() -> Html<&'static str> {
   <title>Traceway API</title>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    .coming-soon-banner {
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: white;
+      text-align: center;
+      padding: 12px 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+    }
+  </style>
 </head>
 <body>
+  <div class="coming-soon-banner">Coming Soon — Traceway is currently in development</div>
   <script id="api-reference" data-url="/api/openapi.json"></script>
   <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
 </body>

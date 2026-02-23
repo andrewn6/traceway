@@ -12,7 +12,7 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"generate-types": "openapi-typescript http://localhost:3000/api/openapi.json -o src/lib/api-types.ts",
 		"generate-types:file": "openapi-typescript ../openapi.json -o src/lib/api-types.ts",
-		"start": "sirv build --host 0.0.0.0 --port ${PORT:-3000} --single"
+		"start": "node server.js"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^7.0.0",
@@ -26,8 +26,5 @@
 		"tailwindcss": "^4.1.18",
 		"typescript": "^5.9.3",
 		"vite": "^7.3.1"
-	},
-	"dependencies": {
-		"sirv-cli": "^3.0.1"
 	}
 }

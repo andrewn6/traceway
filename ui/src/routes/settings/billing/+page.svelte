@@ -144,7 +144,7 @@
 
 		<p class="text-xs text-text-muted">
 			Plans are billed monthly via <a href="https://polar.sh" target="_blank" rel="noopener noreferrer" class="text-accent hover:underline">Polar</a>.
-			Need an enterprise plan? <a href="mailto:support@traceway.dev" class="text-accent hover:underline">Contact us</a>.
+			Need an enterprise plan? <a href="mailto:support@traceway.ai" class="text-accent hover:underline">Contact us</a>.
 		</p>
 	{/if}
 </div>
