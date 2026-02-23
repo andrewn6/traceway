@@ -10,9 +10,15 @@ import httpx
 
 from .types import (
     CreatedSpan,
+    Datapoint,
+    DatapointList,
+    Dataset,
+    DatasetList,
     ExportData,
     FileVersion,
     LlmCallKind,
+    QueueItem,
+    QueueList,
     Span,
     SpanFilter,
     SpanKind,
@@ -239,6 +245,90 @@ class Traceway:
 
     def file_traces(self, path: str) -> dict[str, list[dict[str, str]]]:
         return self._request("GET", f"/files/{quote(path, safe='')}/traces")
+
+    # ─── Dataset operations ─────────────────────────────────────────────
+
+    def list_datasets(self) -> DatasetList:
+        resp = self._request("GET", "/datasets")
+        return DatasetList.from_dict(resp)
+
+    def create_dataset(self, name: str, description: str | None = None) -> Dataset:
+        data: dict[str, Any] = {"name": name}
+        if description is not None:
+            data["description"] = description
+        resp = self._request("POST", "/datasets", json=data)
+        return Dataset.from_dict(resp)
+
+    def get_dataset(self, dataset_id: str) -> Dataset:
+        resp = self._request("GET", f"/datasets/{dataset_id}")
+        return Dataset.from_dict(resp)
+
+    def update_dataset(
+        self,
+        dataset_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> Dataset:
+        data: dict[str, Any] = {}
+        if name is not None:
+            data["name"] = name
+        if description is not None:
+            data["description"] = description
+        resp = self._request("PUT", f"/datasets/{dataset_id}", json=data)
+        return Dataset.from_dict(resp)
+
+    def delete_dataset(self, dataset_id: str) -> None:
+        self._request("DELETE", f"/datasets/{dataset_id}")
+
+    # ─── Datapoint operations ─────────────────────────────────────────
+
+    def list_datapoints(self, dataset_id: str) -> DatapointList:
+        resp = self._request("GET", f"/datasets/{dataset_id}/datapoints")
+        return DatapointList.from_dict(resp)
+
+    def get_datapoint(self, dataset_id: str, datapoint_id: str) -> Datapoint:
+        resp = self._request("GET", f"/datasets/{dataset_id}/datapoints/{datapoint_id}")
+        return Datapoint.from_dict(resp)
+
+    def create_datapoint(self, dataset_id: str, kind: dict[str, Any]) -> Datapoint:
+        resp = self._request("POST", f"/datasets/{dataset_id}/datapoints", json={"kind": kind})
+        return Datapoint.from_dict(resp)
+
+    def delete_datapoint(self, dataset_id: str, datapoint_id: str) -> None:
+        self._request("DELETE", f"/datasets/{dataset_id}/datapoints/{datapoint_id}")
+
+    def export_span_to_dataset(self, dataset_id: str, span_id: str) -> Datapoint:
+        resp = self._request("POST", f"/datasets/{dataset_id}/export-span", json={"span_id": span_id})
+        return Datapoint.from_dict(resp)
+
+    # ─── Queue operations ─────────────────────────────────────────────
+
+    def list_queue(self, dataset_id: str) -> QueueList:
+        resp = self._request("GET", f"/datasets/{dataset_id}/queue")
+        return QueueList.from_dict(resp)
+
+    def enqueue_datapoints(self, dataset_id: str, datapoint_ids: list[str]) -> list[QueueItem]:
+        resp = self._request(
+            "POST",
+            f"/datasets/{dataset_id}/queue",
+            json={"datapoint_ids": datapoint_ids},
+        )
+        return [QueueItem.from_dict(q) for q in resp]
+
+    def claim_queue_item(self, item_id: str, claimed_by: str | None = None) -> QueueItem:
+        data: dict[str, Any] = {}
+        if claimed_by is not None:
+            data["claimed_by"] = claimed_by
+        resp = self._request("POST", f"/queue/{item_id}/claim", json=data if data else None)
+        return QueueItem.from_dict(resp)
+
+    def submit_queue_item(self, item_id: str, edited_data: Any = None) -> QueueItem:
+        data: dict[str, Any] = {}
+        if edited_data is not None:
+            data["edited_data"] = edited_data
+        resp = self._request("POST", f"/queue/{item_id}/submit", json=data if data else None)
+        return QueueItem.from_dict(resp)
 
     # ─── Delete operations ────────────────────────────────────────────
 

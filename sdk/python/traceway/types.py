@@ -279,6 +279,131 @@ class FileVersion:
         )
 
 
+# ─── Dataset Types ────────────────────────────────────────────────────
+
+@dataclass
+class Message:
+    role: str
+    content: str
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Message":
+        return cls(role=d["role"], content=d["content"])
+
+
+DatapointKind = Union[
+    dict,  # LlmConversation or Generic — kept as raw dicts for flexibility
+]
+
+
+@dataclass
+class Datapoint:
+    id: str
+    dataset_id: str
+    kind: DatapointKind
+    source: str
+    source_span_id: str | None = None
+    created_at: str | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Datapoint":
+        return cls(
+            id=d["id"],
+            dataset_id=d["dataset_id"],
+            kind=d["kind"],
+            source=d.get("source", "manual"),
+            source_span_id=d.get("source_span_id"),
+            created_at=d.get("created_at"),
+        )
+
+
+@dataclass
+class DatapointList:
+    datapoints: list[Datapoint]
+    count: int
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "DatapointList":
+        return cls(
+            datapoints=[Datapoint.from_dict(dp) for dp in d["datapoints"]],
+            count=d["count"],
+        )
+
+
+@dataclass
+class Dataset:
+    id: str
+    name: str
+    description: str | None = None
+    datapoint_count: int = 0
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Dataset":
+        return cls(
+            id=d["id"],
+            name=d["name"],
+            description=d.get("description"),
+            datapoint_count=d.get("datapoint_count", 0),
+            created_at=d.get("created_at"),
+            updated_at=d.get("updated_at"),
+        )
+
+
+@dataclass
+class DatasetList:
+    datasets: list[Dataset]
+    count: int
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "DatasetList":
+        return cls(
+            datasets=[Dataset.from_dict(ds) for ds in d["datasets"]],
+            count=d["count"],
+        )
+
+
+@dataclass
+class QueueItem:
+    id: str
+    dataset_id: str
+    datapoint_id: str
+    status: str
+    claimed_by: str | None = None
+    claimed_at: str | None = None
+    original_data: Any = None
+    edited_data: Any = None
+    created_at: str | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "QueueItem":
+        return cls(
+            id=d["id"],
+            dataset_id=d["dataset_id"],
+            datapoint_id=d["datapoint_id"],
+            status=d["status"],
+            claimed_by=d.get("claimed_by"),
+            claimed_at=d.get("claimed_at"),
+            original_data=d.get("original_data"),
+            edited_data=d.get("edited_data"),
+            created_at=d.get("created_at"),
+        )
+
+
+@dataclass
+class QueueList:
+    items: list[QueueItem]
+    count: int
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "QueueList":
+        return cls(
+            items=[QueueItem.from_dict(q) for q in d["items"]],
+            count=d["count"],
+        )
+
+
 # ─── Response Types ───────────────────────────────────────────────────
 
 @dataclass
