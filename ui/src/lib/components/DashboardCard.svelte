@@ -6,7 +6,7 @@
 		children,
 		colSpan = 1,
 		rowSpan = 1,
-		accent = '#58a6ff',
+		accent = '#6ee7b7',
 		index = 0,
 		onmenu,
 	}: {

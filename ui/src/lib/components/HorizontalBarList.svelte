@@ -2,7 +2,7 @@
 	let {
 		items,
 		maxItems = 5,
-		accentColor = '#4673d1',
+		accentColor = '#6ee7b7',
 	}: {
 		items: { label: string; value: number; color?: string }[];
 		maxItems?: number;

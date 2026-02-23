@@ -3,7 +3,7 @@
 		points,
 		labels = [],
 		unit = '',
-		color = '#58a6ff',
+		color = '#6ee7b7',
 		height = 120,
 	}: {
 		points: number[];
