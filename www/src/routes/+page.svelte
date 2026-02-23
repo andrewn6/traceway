@@ -121,16 +121,13 @@
 <section id="features" class="py-28 relative">
 	<div class="px-6 md:px-10 max-w-[1400px]">
 		<InView>
-			<div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-16">
-				<div>
-					<span class="font-mono text-[11px] uppercase tracking-widest text-accent/70">01 / Features</span>
-					<h2 class="text-3xl font-semibold tracking-tight text-text mt-3 sm:text-4xl">
-						Everything you need to<br class="hidden sm:block" /> debug LLM applications
-					</h2>
-				</div>
-				<p class="text-sm text-text-secondary max-w-sm leading-relaxed">
-					From local development to production monitoring.
-					One tool for the entire lifecycle.
+			<div class="mb-16">
+				<span class="font-mono text-[11px] uppercase tracking-widest text-accent/70">01 / Features</span>
+				<h2 class="text-3xl font-semibold tracking-tight text-text mt-3 sm:text-4xl">
+					Everything you need to debug LLM applications
+				</h2>
+				<p class="text-sm text-text-secondary max-w-lg leading-relaxed mt-4">
+					From local development to production monitoring. One tool for the entire lifecycle.
 				</p>
 			</div>
 		</InView>
@@ -192,14 +189,12 @@
 <section id="architecture" class="py-28 relative">
 	<div class="px-6 md:px-10 max-w-[1400px]">
 		<InView>
-			<div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-16">
-				<div>
-					<span class="font-mono text-[11px] uppercase tracking-widest text-accent/70">02 / Architecture</span>
-					<h2 class="text-3xl font-semibold tracking-tight text-text mt-3 sm:text-4xl">
-						How Traceway works
-					</h2>
-				</div>
-				<p class="text-sm text-text-secondary max-w-sm leading-relaxed">
+			<div class="mb-16">
+				<span class="font-mono text-[11px] uppercase tracking-widest text-accent/70">02 / Architecture</span>
+				<h2 class="text-3xl font-semibold tracking-tight text-text mt-3 sm:text-4xl">
+					How Traceway works
+				</h2>
+				<p class="text-sm text-text-secondary max-w-lg leading-relaxed mt-4">
 					A lightweight proxy sits between your app and the LLM provider, capturing every request.
 				</p>
 			</div>
@@ -300,14 +295,12 @@
 <section class="py-28 relative">
 	<div class="px-6 md:px-10 max-w-[1400px]">
 		<InView>
-			<div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-16">
-				<div>
-					<span class="font-mono text-[11px] uppercase tracking-widest text-accent/70">04 / Integration</span>
-					<h2 class="text-3xl font-semibold tracking-tight text-text mt-3 sm:text-4xl">
-						One line to start tracing
-					</h2>
-				</div>
-				<p class="text-sm text-text-secondary max-w-sm leading-relaxed">
+			<div class="mb-16">
+				<span class="font-mono text-[11px] uppercase tracking-widest text-accent/70">04 / Integration</span>
+				<h2 class="text-3xl font-semibold tracking-tight text-text mt-3 sm:text-4xl">
+					One line to start tracing
+				</h2>
+				<p class="text-sm text-text-secondary max-w-lg leading-relaxed mt-4">
 					Change your base_url to the Traceway proxy. Works with any provider. No SDK, no wrapper, no other code changes.
 				</p>
 			</div>
@@ -441,32 +434,28 @@
 	<div class="absolute inset-0 bg-gradient-to-b from-transparent via-accent/[0.015] to-transparent"></div>
 	<div class="relative px-6 md:px-10 max-w-[1400px]">
 		<InView>
-			<div class="flex flex-col md:flex-row md:items-end md:justify-between gap-8">
-				<div>
-					<h2 class="font-mono text-[clamp(2rem,5vw,4rem)] font-semibold leading-[1] tracking-tighter text-text uppercase">
-						Start tracing<br />in under a minute
-					</h2>
-					<p class="mt-4 text-text-secondary max-w-sm text-sm leading-relaxed">
-						One binary. No config. See your first traces immediately.
-					</p>
-				</div>
-				<div class="flex items-center gap-5">
-					<a
-						href="https://platform.traceway.dev"
-						class="group flex items-center gap-2 bg-accent text-bg font-mono text-sm uppercase tracking-wide px-6 py-2.5 rounded transition-all hover:brightness-110 hover:shadow-[0_0_30px_rgba(110,231,183,0.2)]"
-					>
-						Get started free
-						<svg class="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" viewBox="0 0 8 8" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0.826 7.536L0.112 6.822L5.768 1.18H2.03V0.2H7.462V5.66H6.426V1.936L0.826 7.536Z" fill="currentColor"/></svg>
-					</a>
-					<a
-						href="https://github.com/blastgits/traceway"
-						target="_blank"
-						rel="noopener"
-						class="font-mono text-[12px] uppercase text-text-secondary hover:text-text transition-colors border-b border-text-muted hover:border-text-secondary pb-0.5"
-					>
-						Star on GitHub
-					</a>
-				</div>
+			<h2 class="font-mono text-[clamp(2rem,5vw,4rem)] font-semibold leading-[1] tracking-tighter text-text uppercase">
+				Start tracing<br />in under a minute
+			</h2>
+			<p class="mt-4 text-text-secondary max-w-sm text-sm leading-relaxed">
+				One binary. No config. See your first traces immediately.
+			</p>
+			<div class="flex items-center gap-5 mt-8">
+				<a
+					href="https://platform.traceway.dev"
+					class="group flex items-center gap-2 bg-accent text-bg font-mono text-sm uppercase tracking-wide px-6 py-2.5 rounded transition-all hover:brightness-110 hover:shadow-[0_0_30px_rgba(110,231,183,0.2)]"
+				>
+					Get started free
+					<svg class="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" viewBox="0 0 8 8" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0.826 7.536L0.112 6.822L5.768 1.18H2.03V0.2H7.462V5.66H6.426V1.936L0.826 7.536Z" fill="currentColor"/></svg>
+				</a>
+				<a
+					href="https://github.com/blastgits/traceway"
+					target="_blank"
+					rel="noopener"
+					class="font-mono text-[12px] uppercase text-text-secondary hover:text-text transition-colors border-b border-text-muted hover:border-text-secondary pb-0.5"
+				>
+					Star on GitHub
+				</a>
 			</div>
 		</InView>
 	</div>
