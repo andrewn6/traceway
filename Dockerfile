@@ -1,11 +1,11 @@
 # UI build stage
-FROM node:20-slim AS ui-builder
+FROM oven/bun:1 AS ui-builder
 
 WORKDIR /app/ui
-COPY ui/package.json ui/package-lock.json ./
-RUN npm ci
+COPY ui/package.json ui/bun.lock ./
+RUN bun install --frozen-lockfile
 COPY ui/ ./
-RUN npm run build
+RUN bun run build
 
 # Rust build stage
 FROM rust:1.83-slim AS builder
