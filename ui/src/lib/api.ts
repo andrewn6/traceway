@@ -69,6 +69,126 @@ export type QueueList = QueueListResponse;
 export type HealthStatus = HealthResponse;
 export type SpanFilter = SpanQueryParams;
 
+// ─── Eval types ──────────────────────────────────────────────────────
+
+export type ScoringStrategy = 'exact_match' | 'contains' | 'llm_judge' | 'none';
+
+export type EvalRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export type EvalResultStatus = 'passed' | 'failed' | 'error' | 'skipped';
+
+export interface EvalConfig {
+	model: string;
+	provider?: string | null;
+	provider_url?: string | null;
+	api_key_env?: string | null;
+	system_prompt?: string | null;
+	temperature?: number | null;
+	max_tokens?: number | null;
+	extra?: unknown;
+}
+
+export interface ScoreSummary {
+	mean?: number | null;
+	median?: number | null;
+	min?: number | null;
+	max?: number | null;
+	pass_rate?: number | null;
+}
+
+export interface EvalRunResults {
+	total: number;
+	completed: number;
+	failed: number;
+	scores: ScoreSummary;
+}
+
+export interface EvalRun {
+	id: string;
+	dataset_id: string;
+	name?: string | null;
+	config: EvalConfig;
+	scoring: ScoringStrategy;
+	status: EvalRunStatus;
+	results: EvalRunResults;
+	trace_id?: string | null;
+	created_at: string;
+	completed_at?: string | null;
+	error?: string | null;
+}
+
+export interface EvalResult {
+	id: string;
+	run_id: string;
+	datapoint_id: string;
+	status: EvalResultStatus;
+	actual_output: unknown;
+	score?: number | null;
+	score_reason?: string | null;
+	latency_ms: number;
+	input_tokens?: number | null;
+	output_tokens?: number | null;
+	error?: string | null;
+	span_id?: string | null;
+}
+
+export interface EvalRunListResponse {
+	runs: EvalRun[];
+	count: number;
+}
+
+export interface EvalRunDetailResponse extends EvalRun {
+	result_items: EvalResult[];
+}
+
+export interface ComparisonCell {
+	output: unknown;
+	score: number | null;
+	latency_ms: number;
+	status: string;
+}
+
+export interface ComparisonDatapoint {
+	datapoint_id: string;
+	input: unknown;
+	expected: unknown | null;
+	results: Record<string, ComparisonCell>;
+}
+
+export interface ComparisonResponse {
+	runs: EvalRun[];
+	datapoints: ComparisonDatapoint[];
+}
+
+// ─── Capture Rule types ──────────────────────────────────────────────
+
+export interface CaptureFilters {
+	span_kind?: string | null;
+	model?: string | null;
+	provider?: string | null;
+	status?: string | null;
+	trace_tags?: string[] | null;
+	name_contains?: string | null;
+	min_latency_ms?: number | null;
+	min_tokens?: number | null;
+}
+
+export interface CaptureRule {
+	id: string;
+	dataset_id: string;
+	name: string;
+	enabled: boolean;
+	filters: CaptureFilters;
+	sample_rate: number;
+	captured_count: number;
+	created_at: string;
+}
+
+export interface CaptureRuleListResponse {
+	rules: CaptureRule[];
+	count: number;
+}
+
 // ─── Events ──────────────────────────────────────────────────────────
 
 export type SpanEvent =
@@ -84,6 +204,10 @@ export type SpanEvent =
 	| { type: 'dataset_deleted'; dataset_id: string }
 	| { type: 'datapoint_created'; datapoint: Datapoint }
 	| { type: 'queue_item_updated'; item: QueueItem }
+	| { type: 'eval_run_created'; run: EvalRun }
+	| { type: 'eval_run_updated'; run: EvalRun }
+	| { type: 'eval_run_completed'; run: EvalRun }
+	| { type: 'capture_rule_fired'; rule_id: string; datapoint: Datapoint }
 	| { type: 'cleared' };
 
 // ─── HTTP Helpers ────────────────────────────────────────────────────
@@ -244,6 +368,43 @@ export const claimQueueItem = (itemId: string, claimedBy: string) =>
 	post<QueueItem>(`/queue/${itemId}/claim`, { claimed_by: claimedBy });
 export const submitQueueItem = (itemId: string, editedData?: unknown) =>
 	post<QueueItem>(`/queue/${itemId}/submit`, { edited_data: editedData });
+
+// ─── Eval Run Endpoints ──────────────────────────────────────────────
+
+export const listEvalRuns = (datasetId: string) =>
+	get<EvalRunListResponse>(`/datasets/${datasetId}/eval`);
+
+export const createEvalRun = (datasetId: string, body: { name?: string; config: EvalConfig; scoring?: ScoringStrategy }) =>
+	post<EvalRun>(`/datasets/${datasetId}/eval`, body);
+
+export const getEvalRun = (runId: string) =>
+	get<EvalRunDetailResponse>(`/eval/${runId}`);
+
+export const deleteEvalRun = (runId: string) =>
+	del<void>(`/eval/${runId}`);
+
+export const cancelEvalRun = (runId: string) =>
+	post<void>(`/eval/${runId}/cancel`);
+
+export const getComparison = (datasetId: string, runIds: string[]) =>
+	get<ComparisonResponse>(`/datasets/${datasetId}/compare?runs=${runIds.join(',')}`);
+
+// ─── Capture Rule Endpoints ──────────────────────────────────────────
+
+export const listCaptureRules = (datasetId: string) =>
+	get<CaptureRuleListResponse>(`/datasets/${datasetId}/rules`);
+
+export const createCaptureRule = (datasetId: string, body: { name: string; filters: CaptureFilters; sample_rate?: number }) =>
+	post<CaptureRule>(`/datasets/${datasetId}/rules`, body);
+
+export const updateCaptureRule = (ruleId: string, body: { name?: string; filters?: CaptureFilters; sample_rate?: number }) =>
+	put<CaptureRule>(`/rules/${ruleId}`, body);
+
+export const deleteCaptureRule = (ruleId: string) =>
+	del<void>(`/rules/${ruleId}`);
+
+export const toggleCaptureRule = (ruleId: string) =>
+	post<CaptureRule>(`/rules/${ruleId}/toggle`);
 
 // ─── Export ──────────────────────────────────────────────────────────
 
