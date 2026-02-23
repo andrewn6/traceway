@@ -6,9 +6,13 @@
 	"scripts": {
 		"dev": "vite dev --port 5174",
 		"build": "vite build",
+		"start": "sirv build --port ${PORT:-3000} --host 0.0.0.0 --single",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+	},
+	"dependencies": {
+		"sirv-cli": "^3.0.0"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-static": "^3.0.10",
