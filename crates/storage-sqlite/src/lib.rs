@@ -14,8 +14,9 @@ use storage::{
 };
 use tokio::sync::Mutex;
 use trace::{
-    Datapoint, DatapointId, Dataset, DatasetId, FileVersion, QueueItem, QueueItemId, Span,
-    SpanId, SpanKind, SpanStatus, Trace, TraceId,
+    CaptureRule, CaptureRuleId, Datapoint, DatapointId, Dataset, DatasetId, EvalResult,
+    EvalResultId, EvalRun, EvalRunId, FileVersion, QueueItem, QueueItemId, Span, SpanId, SpanKind,
+    SpanStatus, Trace, TraceId,
 };
 
 // --- Migration system ---
@@ -101,6 +102,55 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_queue_items_dataset_id ON queue_items(dataset_id);
     CREATE INDEX IF NOT EXISTS idx_queue_items_status ON queue_items(status);
     CREATE INDEX IF NOT EXISTS idx_queue_items_created_at ON queue_items(created_at);
+    "#,
+    // v3: eval runs, eval results, capture rules
+    r#"
+    CREATE TABLE IF NOT EXISTS eval_runs (
+        id TEXT PRIMARY KEY,
+        dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+        name TEXT,
+        config_json TEXT NOT NULL,
+        scoring TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        results_json TEXT NOT NULL DEFAULT '{}',
+        trace_id TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_eval_runs_dataset_id ON eval_runs(dataset_id);
+    CREATE INDEX IF NOT EXISTS idx_eval_runs_status ON eval_runs(status);
+    CREATE INDEX IF NOT EXISTS idx_eval_runs_created_at ON eval_runs(created_at);
+
+    CREATE TABLE IF NOT EXISTS eval_results (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES eval_runs(id) ON DELETE CASCADE,
+        datapoint_id TEXT NOT NULL REFERENCES datapoints(id) ON DELETE CASCADE,
+        status TEXT NOT NULL,
+        actual_output_json TEXT NOT NULL DEFAULT 'null',
+        score REAL,
+        score_reason TEXT,
+        latency_ms INTEGER NOT NULL DEFAULT 0,
+        input_tokens INTEGER,
+        output_tokens INTEGER,
+        error TEXT,
+        span_id TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_eval_results_run_id ON eval_results(run_id);
+    CREATE INDEX IF NOT EXISTS idx_eval_results_datapoint_id ON eval_results(datapoint_id);
+
+    CREATE TABLE IF NOT EXISTS capture_rules (
+        id TEXT PRIMARY KEY,
+        dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        filters_json TEXT NOT NULL DEFAULT '{}',
+        sample_rate REAL NOT NULL DEFAULT 1.0,
+        captured_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_capture_rules_dataset_id ON capture_rules(dataset_id);
+    CREATE INDEX IF NOT EXISTS idx_capture_rules_enabled ON capture_rules(enabled);
     "#,
 ];
 
@@ -1182,6 +1232,395 @@ impl StorageBackend for SqliteBackend {
         let conn = self.conn.lock().await;
         let deleted =
             conn.execute("DELETE FROM queue_items WHERE id = ?1", params![id.to_string()])?;
+        Ok(deleted > 0)
+    }
+
+    // --- Eval Run operations ---
+
+    async fn save_eval_run(&self, run: &EvalRun) -> Result<(), StorageError> {
+        let conn = self.conn.lock().await;
+        let config_json = serde_json::to_string(&run.config)?;
+        let results_json = serde_json::to_string(&run.results)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO eval_runs (id, dataset_id, name, config_json, scoring, status, results_json, trace_id, error, created_at, completed_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                run.id.to_string(),
+                run.dataset_id.to_string(),
+                run.name,
+                config_json,
+                run.scoring.as_str(),
+                run.status.as_str(),
+                results_json,
+                run.trace_id.map(|id| id.to_string()),
+                run.error,
+                run.created_at.to_rfc3339(),
+                run.completed_at.map(|t| t.to_rfc3339()),
+            ],
+        )?;
+        Ok(())
+    }
+
+    async fn get_eval_run(&self, id: EvalRunId) -> Result<Option<EvalRun>, StorageError> {
+        let conn = self.conn.lock().await;
+        let result = conn.query_row(
+            "SELECT id, dataset_id, name, config_json, scoring, status, results_json, trace_id, error, created_at, completed_at FROM eval_runs WHERE id = ?1",
+            params![id.to_string()],
+            |row| {
+                let id: String = row.get(0)?;
+                let dataset_id: String = row.get(1)?;
+                let name: Option<String> = row.get(2)?;
+                let config_json: String = row.get(3)?;
+                let scoring: String = row.get(4)?;
+                let status: String = row.get(5)?;
+                let results_json: String = row.get(6)?;
+                let trace_id: Option<String> = row.get(7)?;
+                let error: Option<String> = row.get(8)?;
+                let created_at: String = row.get(9)?;
+                let completed_at: Option<String> = row.get(10)?;
+                Ok((id, dataset_id, name, config_json, scoring, status, results_json, trace_id, error, created_at, completed_at))
+            },
+        );
+        match result {
+            Ok((id_str, dataset_id_str, name, config_json, scoring_str, status_str, results_json, trace_id_str, error, created_at_str, completed_at_str)) => {
+                let id: EvalRunId = id_str.parse().map_err(|e| StorageError::Database(format!("invalid eval run id: {}", e)))?;
+                let dataset_id: DatasetId = dataset_id_str.parse().map_err(|e| StorageError::Database(format!("invalid dataset id: {}", e)))?;
+                let config = serde_json::from_str(&config_json)?;
+                let scoring = serde_json::from_value(serde_json::Value::String(scoring_str))?;
+                let status = serde_json::from_value(serde_json::Value::String(status_str))?;
+                let results = serde_json::from_str(&results_json)?;
+                let trace_id = trace_id_str.map(|s| s.parse()).transpose().map_err(|e| StorageError::Database(format!("invalid trace id: {}", e)))?;
+                let created_at = DateTime::parse_from_rfc3339(&created_at_str).map_err(|e| StorageError::Database(format!("invalid created_at: {}", e)))?.with_timezone(&Utc);
+                let completed_at = completed_at_str.map(|s| DateTime::parse_from_rfc3339(&s).map_err(|e| StorageError::Database(format!("invalid completed_at: {}", e))).map(|t| t.with_timezone(&Utc))).transpose()?;
+                Ok(Some(EvalRun { id, dataset_id, name, config, scoring, status, results, trace_id, created_at, completed_at, error }))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StorageError::Database(e.to_string())),
+        }
+    }
+
+    async fn list_eval_runs(&self, dataset_id: DatasetId) -> Result<Vec<EvalRun>, StorageError> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, dataset_id, name, config_json, scoring, status, results_json, trace_id, error, created_at, completed_at FROM eval_runs WHERE dataset_id = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![dataset_id.to_string()], |row| {
+            let id: String = row.get(0)?;
+            let dataset_id: String = row.get(1)?;
+            let name: Option<String> = row.get(2)?;
+            let config_json: String = row.get(3)?;
+            let scoring: String = row.get(4)?;
+            let status: String = row.get(5)?;
+            let results_json: String = row.get(6)?;
+            let trace_id: Option<String> = row.get(7)?;
+            let error: Option<String> = row.get(8)?;
+            let created_at: String = row.get(9)?;
+            let completed_at: Option<String> = row.get(10)?;
+            Ok((id, dataset_id, name, config_json, scoring, status, results_json, trace_id, error, created_at, completed_at))
+        })?;
+        let mut runs = Vec::new();
+        for row_result in rows {
+            let (id_str, dataset_id_str, name, config_json, scoring_str, status_str, results_json, trace_id_str, error, created_at_str, completed_at_str) = row_result?;
+            let id: EvalRunId = id_str.parse().map_err(|e| StorageError::Database(format!("invalid eval run id: {}", e)))?;
+            let dataset_id: DatasetId = dataset_id_str.parse().map_err(|e| StorageError::Database(format!("invalid dataset id: {}", e)))?;
+            let config = serde_json::from_str(&config_json)?;
+            let scoring = serde_json::from_value(serde_json::Value::String(scoring_str))?;
+            let status = serde_json::from_value(serde_json::Value::String(status_str))?;
+            let results = serde_json::from_str(&results_json)?;
+            let trace_id = trace_id_str.map(|s| s.parse()).transpose().map_err(|e| StorageError::Database(format!("invalid trace id: {}", e)))?;
+            let created_at = DateTime::parse_from_rfc3339(&created_at_str).map_err(|e| StorageError::Database(format!("invalid created_at: {}", e)))?.with_timezone(&Utc);
+            let completed_at = completed_at_str.map(|s| DateTime::parse_from_rfc3339(&s).map_err(|e| StorageError::Database(format!("invalid completed_at: {}", e))).map(|t| t.with_timezone(&Utc))).transpose()?;
+            runs.push(EvalRun { id, dataset_id, name, config, scoring, status, results, trace_id, created_at, completed_at, error });
+        }
+        Ok(runs)
+    }
+
+    async fn list_eval_runs_all(&self) -> Result<Vec<EvalRun>, StorageError> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, dataset_id, name, config_json, scoring, status, results_json, trace_id, error, created_at, completed_at FROM eval_runs ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let dataset_id: String = row.get(1)?;
+            let name: Option<String> = row.get(2)?;
+            let config_json: String = row.get(3)?;
+            let scoring: String = row.get(4)?;
+            let status: String = row.get(5)?;
+            let results_json: String = row.get(6)?;
+            let trace_id: Option<String> = row.get(7)?;
+            let error: Option<String> = row.get(8)?;
+            let created_at: String = row.get(9)?;
+            let completed_at: Option<String> = row.get(10)?;
+            Ok((id, dataset_id, name, config_json, scoring, status, results_json, trace_id, error, created_at, completed_at))
+        })?;
+        let mut runs = Vec::new();
+        for row_result in rows {
+            let (id_str, dataset_id_str, name, config_json, scoring_str, status_str, results_json, trace_id_str, error, created_at_str, completed_at_str) = row_result?;
+            let id: EvalRunId = id_str.parse().map_err(|e| StorageError::Database(format!("invalid eval run id: {}", e)))?;
+            let dataset_id: DatasetId = dataset_id_str.parse().map_err(|e| StorageError::Database(format!("invalid dataset id: {}", e)))?;
+            let config = serde_json::from_str(&config_json)?;
+            let scoring = serde_json::from_value(serde_json::Value::String(scoring_str))?;
+            let status = serde_json::from_value(serde_json::Value::String(status_str))?;
+            let results = serde_json::from_str(&results_json)?;
+            let trace_id = trace_id_str.map(|s| s.parse()).transpose().map_err(|e| StorageError::Database(format!("invalid trace id: {}", e)))?;
+            let created_at = DateTime::parse_from_rfc3339(&created_at_str).map_err(|e| StorageError::Database(format!("invalid created_at: {}", e)))?.with_timezone(&Utc);
+            let completed_at = completed_at_str.map(|s| DateTime::parse_from_rfc3339(&s).map_err(|e| StorageError::Database(format!("invalid completed_at: {}", e))).map(|t| t.with_timezone(&Utc))).transpose()?;
+            runs.push(EvalRun { id, dataset_id, name, config, scoring, status, results, trace_id, created_at, completed_at, error });
+        }
+        Ok(runs)
+    }
+
+    async fn delete_eval_run(&self, id: EvalRunId) -> Result<bool, StorageError> {
+        let conn = self.conn.lock().await;
+        let deleted = conn.execute("DELETE FROM eval_runs WHERE id = ?1", params![id.to_string()])?;
+        Ok(deleted > 0)
+    }
+
+    // --- Eval Result operations ---
+
+    async fn save_eval_result(&self, result: &EvalResult) -> Result<(), StorageError> {
+        let conn = self.conn.lock().await;
+        let actual_output_json = serde_json::to_string(&result.actual_output)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO eval_results (id, run_id, datapoint_id, status, actual_output_json, score, score_reason, latency_ms, input_tokens, output_tokens, error, span_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                result.id.to_string(),
+                result.run_id.to_string(),
+                result.datapoint_id.to_string(),
+                result.status.as_str(),
+                actual_output_json,
+                result.score,
+                result.score_reason,
+                result.latency_ms as i64,
+                result.input_tokens.map(|t| t as i64),
+                result.output_tokens.map(|t| t as i64),
+                result.error,
+                result.span_id.map(|id| id.to_string()),
+            ],
+        )?;
+        Ok(())
+    }
+
+    async fn get_eval_result(&self, id: EvalResultId) -> Result<Option<EvalResult>, StorageError> {
+        let conn = self.conn.lock().await;
+        let result = conn.query_row(
+            "SELECT id, run_id, datapoint_id, status, actual_output_json, score, score_reason, latency_ms, input_tokens, output_tokens, error, span_id FROM eval_results WHERE id = ?1",
+            params![id.to_string()],
+            |row| {
+                let id: String = row.get(0)?;
+                let run_id: String = row.get(1)?;
+                let datapoint_id: String = row.get(2)?;
+                let status: String = row.get(3)?;
+                let actual_output_json: String = row.get(4)?;
+                let score: Option<f64> = row.get(5)?;
+                let score_reason: Option<String> = row.get(6)?;
+                let latency_ms: i64 = row.get(7)?;
+                let input_tokens: Option<i64> = row.get(8)?;
+                let output_tokens: Option<i64> = row.get(9)?;
+                let error: Option<String> = row.get(10)?;
+                let span_id: Option<String> = row.get(11)?;
+                Ok((id, run_id, datapoint_id, status, actual_output_json, score, score_reason, latency_ms, input_tokens, output_tokens, error, span_id))
+            },
+        );
+        match result {
+            Ok((id_str, run_id_str, dp_id_str, status_str, actual_output_json, score, score_reason, latency_ms, input_tokens, output_tokens, error, span_id_str)) => {
+                let id: EvalResultId = id_str.parse().map_err(|e| StorageError::Database(format!("invalid eval result id: {}", e)))?;
+                let run_id: EvalRunId = run_id_str.parse().map_err(|e| StorageError::Database(format!("invalid run id: {}", e)))?;
+                let datapoint_id: DatapointId = dp_id_str.parse().map_err(|e| StorageError::Database(format!("invalid datapoint id: {}", e)))?;
+                let status = serde_json::from_value(serde_json::Value::String(status_str))?;
+                let actual_output = serde_json::from_str(&actual_output_json)?;
+                let span_id = span_id_str.map(|s| s.parse()).transpose().map_err(|e| StorageError::Database(format!("invalid span id: {}", e)))?;
+                Ok(Some(EvalResult { id, run_id, datapoint_id, status, actual_output, score, score_reason, latency_ms: latency_ms as u64, input_tokens: input_tokens.map(|t| t as u32), output_tokens: output_tokens.map(|t| t as u32), error, span_id }))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StorageError::Database(e.to_string())),
+        }
+    }
+
+    async fn list_eval_results(&self, run_id: EvalRunId) -> Result<Vec<EvalResult>, StorageError> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, datapoint_id, status, actual_output_json, score, score_reason, latency_ms, input_tokens, output_tokens, error, span_id FROM eval_results WHERE run_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![run_id.to_string()], |row| {
+            let id: String = row.get(0)?;
+            let run_id: String = row.get(1)?;
+            let datapoint_id: String = row.get(2)?;
+            let status: String = row.get(3)?;
+            let actual_output_json: String = row.get(4)?;
+            let score: Option<f64> = row.get(5)?;
+            let score_reason: Option<String> = row.get(6)?;
+            let latency_ms: i64 = row.get(7)?;
+            let input_tokens: Option<i64> = row.get(8)?;
+            let output_tokens: Option<i64> = row.get(9)?;
+            let error: Option<String> = row.get(10)?;
+            let span_id: Option<String> = row.get(11)?;
+            Ok((id, run_id, datapoint_id, status, actual_output_json, score, score_reason, latency_ms, input_tokens, output_tokens, error, span_id))
+        })?;
+        let mut results = Vec::new();
+        for row_result in rows {
+            let (id_str, run_id_str, dp_id_str, status_str, actual_output_json, score, score_reason, latency_ms, input_tokens, output_tokens, error, span_id_str) = row_result?;
+            let id: EvalResultId = id_str.parse().map_err(|e| StorageError::Database(format!("invalid eval result id: {}", e)))?;
+            let run_id: EvalRunId = run_id_str.parse().map_err(|e| StorageError::Database(format!("invalid run id: {}", e)))?;
+            let datapoint_id: DatapointId = dp_id_str.parse().map_err(|e| StorageError::Database(format!("invalid datapoint id: {}", e)))?;
+            let status = serde_json::from_value(serde_json::Value::String(status_str))?;
+            let actual_output = serde_json::from_str(&actual_output_json)?;
+            let span_id = span_id_str.map(|s| s.parse()).transpose().map_err(|e| StorageError::Database(format!("invalid span id: {}", e)))?;
+            results.push(EvalResult { id, run_id, datapoint_id, status, actual_output, score, score_reason, latency_ms: latency_ms as u64, input_tokens: input_tokens.map(|t| t as u32), output_tokens: output_tokens.map(|t| t as u32), error, span_id });
+        }
+        Ok(results)
+    }
+
+    async fn list_eval_results_all(&self) -> Result<Vec<EvalResult>, StorageError> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, datapoint_id, status, actual_output_json, score, score_reason, latency_ms, input_tokens, output_tokens, error, span_id FROM eval_results",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let run_id: String = row.get(1)?;
+            let datapoint_id: String = row.get(2)?;
+            let status: String = row.get(3)?;
+            let actual_output_json: String = row.get(4)?;
+            let score: Option<f64> = row.get(5)?;
+            let score_reason: Option<String> = row.get(6)?;
+            let latency_ms: i64 = row.get(7)?;
+            let input_tokens: Option<i64> = row.get(8)?;
+            let output_tokens: Option<i64> = row.get(9)?;
+            let error: Option<String> = row.get(10)?;
+            let span_id: Option<String> = row.get(11)?;
+            Ok((id, run_id, datapoint_id, status, actual_output_json, score, score_reason, latency_ms, input_tokens, output_tokens, error, span_id))
+        })?;
+        let mut results = Vec::new();
+        for row_result in rows {
+            let (id_str, run_id_str, dp_id_str, status_str, actual_output_json, score, score_reason, latency_ms, input_tokens, output_tokens, error, span_id_str) = row_result?;
+            let id: EvalResultId = id_str.parse().map_err(|e| StorageError::Database(format!("invalid eval result id: {}", e)))?;
+            let run_id: EvalRunId = run_id_str.parse().map_err(|e| StorageError::Database(format!("invalid run id: {}", e)))?;
+            let datapoint_id: DatapointId = dp_id_str.parse().map_err(|e| StorageError::Database(format!("invalid datapoint id: {}", e)))?;
+            let status = serde_json::from_value(serde_json::Value::String(status_str))?;
+            let actual_output = serde_json::from_str(&actual_output_json)?;
+            let span_id = span_id_str.map(|s| s.parse()).transpose().map_err(|e| StorageError::Database(format!("invalid span id: {}", e)))?;
+            results.push(EvalResult { id, run_id, datapoint_id, status, actual_output, score, score_reason, latency_ms: latency_ms as u64, input_tokens: input_tokens.map(|t| t as u32), output_tokens: output_tokens.map(|t| t as u32), error, span_id });
+        }
+        Ok(results)
+    }
+
+    async fn delete_eval_run_results(&self, run_id: EvalRunId) -> Result<usize, StorageError> {
+        let conn = self.conn.lock().await;
+        let deleted = conn.execute("DELETE FROM eval_results WHERE run_id = ?1", params![run_id.to_string()])?;
+        Ok(deleted)
+    }
+
+    // --- Capture Rule operations ---
+
+    async fn save_capture_rule(&self, rule: &CaptureRule) -> Result<(), StorageError> {
+        let conn = self.conn.lock().await;
+        let filters_json = serde_json::to_string(&rule.filters)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO capture_rules (id, dataset_id, name, enabled, filters_json, sample_rate, captured_count, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                rule.id.to_string(),
+                rule.dataset_id.to_string(),
+                rule.name,
+                rule.enabled as i32,
+                filters_json,
+                rule.sample_rate,
+                rule.captured_count as i64,
+                rule.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    async fn get_capture_rule(&self, id: CaptureRuleId) -> Result<Option<CaptureRule>, StorageError> {
+        let conn = self.conn.lock().await;
+        let result = conn.query_row(
+            "SELECT id, dataset_id, name, enabled, filters_json, sample_rate, captured_count, created_at FROM capture_rules WHERE id = ?1",
+            params![id.to_string()],
+            |row| {
+                let id: String = row.get(0)?;
+                let dataset_id: String = row.get(1)?;
+                let name: String = row.get(2)?;
+                let enabled: i32 = row.get(3)?;
+                let filters_json: String = row.get(4)?;
+                let sample_rate: f64 = row.get(5)?;
+                let captured_count: i64 = row.get(6)?;
+                let created_at: String = row.get(7)?;
+                Ok((id, dataset_id, name, enabled, filters_json, sample_rate, captured_count, created_at))
+            },
+        );
+        match result {
+            Ok((id_str, dataset_id_str, name, enabled, filters_json, sample_rate, captured_count, created_at_str)) => {
+                let id: CaptureRuleId = id_str.parse().map_err(|e| StorageError::Database(format!("invalid capture rule id: {}", e)))?;
+                let dataset_id: DatasetId = dataset_id_str.parse().map_err(|e| StorageError::Database(format!("invalid dataset id: {}", e)))?;
+                let filters = serde_json::from_str(&filters_json)?;
+                let created_at = DateTime::parse_from_rfc3339(&created_at_str).map_err(|e| StorageError::Database(format!("invalid created_at: {}", e)))?.with_timezone(&Utc);
+                Ok(Some(CaptureRule { id, dataset_id, name, enabled: enabled != 0, filters, sample_rate, captured_count: captured_count as u64, created_at }))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StorageError::Database(e.to_string())),
+        }
+    }
+
+    async fn list_capture_rules(&self, dataset_id: DatasetId) -> Result<Vec<CaptureRule>, StorageError> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, dataset_id, name, enabled, filters_json, sample_rate, captured_count, created_at FROM capture_rules WHERE dataset_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![dataset_id.to_string()], |row| {
+            let id: String = row.get(0)?;
+            let dataset_id: String = row.get(1)?;
+            let name: String = row.get(2)?;
+            let enabled: i32 = row.get(3)?;
+            let filters_json: String = row.get(4)?;
+            let sample_rate: f64 = row.get(5)?;
+            let captured_count: i64 = row.get(6)?;
+            let created_at: String = row.get(7)?;
+            Ok((id, dataset_id, name, enabled, filters_json, sample_rate, captured_count, created_at))
+        })?;
+        let mut rules = Vec::new();
+        for row_result in rows {
+            let (id_str, dataset_id_str, name, enabled, filters_json, sample_rate, captured_count, created_at_str) = row_result?;
+            let id: CaptureRuleId = id_str.parse().map_err(|e| StorageError::Database(format!("invalid capture rule id: {}", e)))?;
+            let dataset_id: DatasetId = dataset_id_str.parse().map_err(|e| StorageError::Database(format!("invalid dataset id: {}", e)))?;
+            let filters = serde_json::from_str(&filters_json)?;
+            let created_at = DateTime::parse_from_rfc3339(&created_at_str).map_err(|e| StorageError::Database(format!("invalid created_at: {}", e)))?.with_timezone(&Utc);
+            rules.push(CaptureRule { id, dataset_id, name, enabled: enabled != 0, filters, sample_rate, captured_count: captured_count as u64, created_at });
+        }
+        Ok(rules)
+    }
+
+    async fn list_capture_rules_all(&self) -> Result<Vec<CaptureRule>, StorageError> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, dataset_id, name, enabled, filters_json, sample_rate, captured_count, created_at FROM capture_rules",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let dataset_id: String = row.get(1)?;
+            let name: String = row.get(2)?;
+            let enabled: i32 = row.get(3)?;
+            let filters_json: String = row.get(4)?;
+            let sample_rate: f64 = row.get(5)?;
+            let captured_count: i64 = row.get(6)?;
+            let created_at: String = row.get(7)?;
+            Ok((id, dataset_id, name, enabled, filters_json, sample_rate, captured_count, created_at))
+        })?;
+        let mut rules = Vec::new();
+        for row_result in rows {
+            let (id_str, dataset_id_str, name, enabled, filters_json, sample_rate, captured_count, created_at_str) = row_result?;
+            let id: CaptureRuleId = id_str.parse().map_err(|e| StorageError::Database(format!("invalid capture rule id: {}", e)))?;
+            let dataset_id: DatasetId = dataset_id_str.parse().map_err(|e| StorageError::Database(format!("invalid dataset id: {}", e)))?;
+            let filters = serde_json::from_str(&filters_json)?;
+            let created_at = DateTime::parse_from_rfc3339(&created_at_str).map_err(|e| StorageError::Database(format!("invalid created_at: {}", e)))?.with_timezone(&Utc);
+            rules.push(CaptureRule { id, dataset_id, name, enabled: enabled != 0, filters, sample_rate, captured_count: captured_count as u64, created_at });
+        }
+        Ok(rules)
+    }
+
+    async fn delete_capture_rule(&self, id: CaptureRuleId) -> Result<bool, StorageError> {
+        let conn = self.conn.lock().await;
+        let deleted = conn.execute("DELETE FROM capture_rules WHERE id = ?1", params![id.to_string()])?;
         Ok(deleted > 0)
     }
 

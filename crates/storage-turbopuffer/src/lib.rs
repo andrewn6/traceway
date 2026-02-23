@@ -28,8 +28,9 @@ use storage::filter::{SpanFilter, TraceFilter};
 use storage::StorageBackend;
 use thiserror::Error;
 use trace::{
-    Datapoint, DatapointId, Dataset, DatasetId, FileVersion, QueueItem, QueueItemId, Span, SpanId,
-    Trace, TraceId,
+    CaptureRule, CaptureRuleId, Datapoint, DatapointId, Dataset, DatasetId, EvalResult,
+    EvalResultId, EvalRun, EvalRunId, FileVersion, QueueItem, QueueItemId, Span, SpanId, Trace,
+    TraceId,
 };
 use tracing::{debug, info, instrument};
 
@@ -702,6 +703,160 @@ impl StorageBackend for TurbopufferBackend {
         let count = self
             .delete_ids("queue_items", vec![id.to_string()])
             .await?;
+        Ok(count > 0)
+    }
+
+    // --- Eval Run operations ---
+
+    async fn save_eval_run(&self, run: &EvalRun) -> Result<(), StorageError> {
+        let row = serde_json::json!({
+            "id": run.id.to_string(),
+            "data": serde_json::to_string(run)?,
+            "dataset_id": run.dataset_id.to_string(),
+            "status": run.status.as_str(),
+            "created_at": run.created_at.to_rfc3339(),
+        });
+        self.upsert("eval_runs", vec![row]).await?;
+        Ok(())
+    }
+
+    async fn get_eval_run(&self, id: EvalRunId) -> Result<Option<EvalRun>, StorageError> {
+        match self.get_by_id("eval_runs", &id.to_string()).await? {
+            Some(row) => Ok(Self::extract_data(&row)),
+            None => Ok(None),
+        }
+    }
+
+    async fn list_eval_runs(&self, dataset_id: DatasetId) -> Result<Vec<EvalRun>, StorageError> {
+        let filter = serde_json::json!(["dataset_id", "Eq", dataset_id.to_string()]);
+        let results = self.query("eval_runs", Some(filter), 10000).await?;
+        let mut runs = Vec::new();
+        for row in results {
+            if let Some(run) = Self::extract_data::<EvalRun>(&row) {
+                runs.push(run);
+            }
+        }
+        Ok(runs)
+    }
+
+    async fn list_eval_runs_all(&self) -> Result<Vec<EvalRun>, StorageError> {
+        let results = self.query("eval_runs", None, 10000).await?;
+        let mut runs = Vec::new();
+        for row in results {
+            if let Some(run) = Self::extract_data::<EvalRun>(&row) {
+                runs.push(run);
+            }
+        }
+        Ok(runs)
+    }
+
+    async fn delete_eval_run(&self, id: EvalRunId) -> Result<bool, StorageError> {
+        // Delete associated results first
+        self.delete_eval_run_results(id).await?;
+        let count = self.delete_ids("eval_runs", vec![id.to_string()]).await?;
+        Ok(count > 0)
+    }
+
+    // --- Eval Result operations ---
+
+    async fn save_eval_result(&self, result: &EvalResult) -> Result<(), StorageError> {
+        let row = serde_json::json!({
+            "id": result.id.to_string(),
+            "data": serde_json::to_string(result)?,
+            "run_id": result.run_id.to_string(),
+            "datapoint_id": result.datapoint_id.to_string(),
+            "status": result.status.as_str(),
+        });
+        self.upsert("eval_results", vec![row]).await?;
+        Ok(())
+    }
+
+    async fn get_eval_result(&self, id: EvalResultId) -> Result<Option<EvalResult>, StorageError> {
+        match self.get_by_id("eval_results", &id.to_string()).await? {
+            Some(row) => Ok(Self::extract_data(&row)),
+            None => Ok(None),
+        }
+    }
+
+    async fn list_eval_results(&self, run_id: EvalRunId) -> Result<Vec<EvalResult>, StorageError> {
+        let filter = serde_json::json!(["run_id", "Eq", run_id.to_string()]);
+        let results = self.query("eval_results", Some(filter), 10000).await?;
+        let mut eval_results = Vec::new();
+        for row in results {
+            if let Some(r) = Self::extract_data::<EvalResult>(&row) {
+                eval_results.push(r);
+            }
+        }
+        Ok(eval_results)
+    }
+
+    async fn list_eval_results_all(&self) -> Result<Vec<EvalResult>, StorageError> {
+        let results = self.query("eval_results", None, 10000).await?;
+        let mut eval_results = Vec::new();
+        for row in results {
+            if let Some(r) = Self::extract_data::<EvalResult>(&row) {
+                eval_results.push(r);
+            }
+        }
+        Ok(eval_results)
+    }
+
+    async fn delete_eval_run_results(&self, run_id: EvalRunId) -> Result<usize, StorageError> {
+        let results = self.list_eval_results(run_id).await?;
+        let ids: Vec<String> = results.iter().map(|r| r.id.to_string()).collect();
+        let count = ids.len();
+        if !ids.is_empty() {
+            self.delete_ids("eval_results", ids).await?;
+        }
+        Ok(count)
+    }
+
+    // --- Capture Rule operations ---
+
+    async fn save_capture_rule(&self, rule: &CaptureRule) -> Result<(), StorageError> {
+        let row = serde_json::json!({
+            "id": rule.id.to_string(),
+            "data": serde_json::to_string(rule)?,
+            "dataset_id": rule.dataset_id.to_string(),
+            "enabled": rule.enabled,
+            "created_at": rule.created_at.to_rfc3339(),
+        });
+        self.upsert("capture_rules", vec![row]).await?;
+        Ok(())
+    }
+
+    async fn get_capture_rule(&self, id: CaptureRuleId) -> Result<Option<CaptureRule>, StorageError> {
+        match self.get_by_id("capture_rules", &id.to_string()).await? {
+            Some(row) => Ok(Self::extract_data(&row)),
+            None => Ok(None),
+        }
+    }
+
+    async fn list_capture_rules(&self, dataset_id: DatasetId) -> Result<Vec<CaptureRule>, StorageError> {
+        let filter = serde_json::json!(["dataset_id", "Eq", dataset_id.to_string()]);
+        let results = self.query("capture_rules", Some(filter), 10000).await?;
+        let mut rules = Vec::new();
+        for row in results {
+            if let Some(rule) = Self::extract_data::<CaptureRule>(&row) {
+                rules.push(rule);
+            }
+        }
+        Ok(rules)
+    }
+
+    async fn list_capture_rules_all(&self) -> Result<Vec<CaptureRule>, StorageError> {
+        let results = self.query("capture_rules", None, 10000).await?;
+        let mut rules = Vec::new();
+        for row in results {
+            if let Some(rule) = Self::extract_data::<CaptureRule>(&row) {
+                rules.push(rule);
+            }
+        }
+        Ok(rules)
+    }
+
+    async fn delete_capture_rule(&self, id: CaptureRuleId) -> Result<bool, StorageError> {
+        let count = self.delete_ids("capture_rules", vec![id.to_string()]).await?;
         Ok(count > 0)
     }
 
