@@ -55,8 +55,52 @@ pub use events::{EventBus, EventSubscriber, LocalEventBus};
         description = "LLM tracing and observability API"
     ),
     paths(
-        // OpenAPI spec endpoint
         openapi_spec,
+        // Traces
+        list_traces,
+        create_trace,
+        get_trace,
+        delete_trace,
+        clear_all_traces,
+        // Spans
+        list_spans,
+        get_span,
+        create_span,
+        complete_span,
+        fail_span,
+        delete_span,
+        // Files
+        list_files,
+        get_file_versions,
+        get_file_content,
+        // Datasets
+        list_datasets,
+        create_dataset,
+        get_dataset,
+        update_dataset,
+        delete_dataset_handler,
+        // Datapoints
+        list_datapoints,
+        create_datapoint,
+        delete_datapoint_handler,
+        export_span_to_dataset,
+        import_file,
+        // Queue
+        list_queue,
+        enqueue_datapoints,
+        claim_queue_item,
+        submit_queue_item,
+        // Analytics
+        post_analytics,
+        analytics_summary,
+        // Stats & Export
+        get_stats,
+        export_json,
+        // Events
+        events,
+        // Health & Observability
+        health,
+        prometheus_metrics,
     ),
     components(schemas(
         // Trace types
@@ -211,7 +255,7 @@ pub struct FailSpanRequest {
     pub error: String,
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, ToSchema, utoipa::IntoParams)]
 pub struct SpanQueryParams {
     pub kind: Option<String>,
     pub model: Option<String>,
@@ -222,6 +266,7 @@ pub struct SpanQueryParams {
     pub name_contains: Option<String>,
     pub path: Option<String>,
     #[schema(value_type = Option<String>)]
+    #[param(value_type = Option<String>)]
     pub trace_id: Option<TraceId>,
 }
 
@@ -233,16 +278,17 @@ pub struct CreateTraceRequest {
     pub tags: Vec<String>,
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, ToSchema, utoipa::IntoParams)]
 pub struct FileQueryParams {
     pub path_prefix: Option<String>,
     pub since: Option<DateTime<Utc>>,
     pub until: Option<DateTime<Utc>>,
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, ToSchema, utoipa::IntoParams)]
 pub struct ExportParams {
     #[schema(value_type = Option<String>)]
+    #[param(value_type = Option<String>)]
     pub trace_id: Option<TraceId>,
 }
 
@@ -425,6 +471,17 @@ fn store_err_status(e: (StatusCode, String)) -> StatusCode {
 
 // --- Trace handlers ---
 
+/// List all traces
+#[utoipa::path(
+    get,
+    path = "/api/traces",
+    responses(
+        (status = 200, description = "List of traces", body = TraceListResponse),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("bearer" = [])),
+    tag = "traces"
+)]
 async fn list_traces(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -437,6 +494,18 @@ async fn list_traces(
     Ok(Json(TraceListResponse { traces, count }))
 }
 
+/// Create a new trace
+#[utoipa::path(
+    post,
+    path = "/api/traces",
+    request_body = CreateTraceRequest,
+    responses(
+        (status = 201, description = "Trace created", body = Trace),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("bearer" = [])),
+    tag = "traces"
+)]
 async fn create_trace(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -454,6 +523,18 @@ async fn create_trace(
     Ok((StatusCode::CREATED, Json(trace)))
 }
 
+/// Get all spans for a trace
+#[utoipa::path(
+    get,
+    path = "/api/traces/{trace_id}",
+    params(("trace_id" = String, Path, description = "Trace ID")),
+    responses(
+        (status = 200, description = "Spans in the trace", body = SpanList),
+        (status = 404, description = "Trace not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "traces"
+)]
 async fn get_trace(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -479,6 +560,18 @@ async fn get_trace(
 
 // --- Span handlers ---
 
+/// List spans with optional filters
+#[utoipa::path(
+    get,
+    path = "/api/spans",
+    params(SpanQueryParams),
+    responses(
+        (status = 200, description = "Filtered list of spans", body = SpanList),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("bearer" = [])),
+    tag = "spans"
+)]
 async fn list_spans(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -504,6 +597,18 @@ async fn list_spans(
     Ok(Json(SpanList { spans, count }))
 }
 
+/// Get a single span by ID
+#[utoipa::path(
+    get,
+    path = "/api/spans/{span_id}",
+    params(("span_id" = String, Path, description = "Span ID")),
+    responses(
+        (status = 200, description = "Span details", body = Span),
+        (status = 404, description = "Span not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "spans"
+)]
 async fn get_span(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -518,6 +623,18 @@ async fn get_span(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
+/// Create a new span
+#[utoipa::path(
+    post,
+    path = "/api/spans",
+    request_body = CreateSpanRequest,
+    responses(
+        (status = 201, description = "Span created", body = CreatedSpan),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("bearer" = [])),
+    tag = "spans"
+)]
 async fn create_span(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -545,6 +662,20 @@ async fn create_span(
     Ok((StatusCode::CREATED, Json(CreatedSpan { id, trace_id })))
 }
 
+/// Mark a span as completed
+#[utoipa::path(
+    post,
+    path = "/api/spans/{span_id}/complete",
+    params(("span_id" = String, Path, description = "Span ID")),
+    request_body(content = CompleteSpanRequest, description = "Optional output data"),
+    responses(
+        (status = 200, description = "Span completed"),
+        (status = 404, description = "Span not found"),
+        (status = 409, description = "Span already in terminal state"),
+    ),
+    security(("bearer" = [])),
+    tag = "spans"
+)]
 async fn complete_span(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -581,6 +712,20 @@ async fn complete_span(
     }
 }
 
+/// Mark a span as failed
+#[utoipa::path(
+    post,
+    path = "/api/spans/{span_id}/fail",
+    params(("span_id" = String, Path, description = "Span ID")),
+    request_body = FailSpanRequest,
+    responses(
+        (status = 200, description = "Span marked as failed"),
+        (status = 404, description = "Span not found"),
+        (status = 409, description = "Span already in terminal state"),
+    ),
+    security(("bearer" = [])),
+    tag = "spans"
+)]
 async fn fail_span(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -615,6 +760,16 @@ async fn fail_span(
     }
 }
 
+/// Get trace and span counts
+#[utoipa::path(
+    get,
+    path = "/api/stats",
+    responses(
+        (status = 200, description = "Current stats", body = Stats),
+    ),
+    security(("bearer" = [])),
+    tag = "stats"
+)]
 async fn get_stats(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -630,6 +785,17 @@ async fn get_stats(
 
 // --- File handlers ---
 
+/// List tracked files
+#[utoipa::path(
+    get,
+    path = "/api/files",
+    params(FileQueryParams),
+    responses(
+        (status = 200, description = "List of file versions", body = FileListResponse),
+    ),
+    security(("bearer" = [])),
+    tag = "files"
+)]
 async fn list_files(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -649,6 +815,18 @@ async fn list_files(
     Ok(Json(FileListResponse { files, count }))
 }
 
+/// Get all versions of a file by path
+#[utoipa::path(
+    get,
+    path = "/api/files/{path}",
+    params(("path" = String, Path, description = "File path")),
+    responses(
+        (status = 200, description = "File versions", body = FileVersionsResponse),
+        (status = 404, description = "File not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "files"
+)]
 async fn get_file_versions(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -671,6 +849,18 @@ async fn get_file_versions(
 
 // --- File content handler ---
 
+/// Get file content by hash
+#[utoipa::path(
+    get,
+    path = "/api/files/content/{hash}",
+    params(("hash" = String, Path, description = "Content hash")),
+    responses(
+        (status = 200, description = "File content bytes"),
+        (status = 404, description = "File not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "files"
+)]
 async fn get_file_content(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -705,6 +895,17 @@ async fn get_file_content(
 
 // --- Export handler ---
 
+/// Export traces as JSON
+#[utoipa::path(
+    get,
+    path = "/api/export/json",
+    params(ExportParams),
+    responses(
+        (status = 200, description = "Exported trace data", body = ExportData),
+    ),
+    security(("bearer" = [])),
+    tag = "export"
+)]
 async fn export_json(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -740,6 +941,16 @@ async fn export_json(
 
 // --- SSE handler ---
 
+/// Server-sent events stream for real-time updates
+#[utoipa::path(
+    get,
+    path = "/api/events",
+    responses(
+        (status = 200, description = "SSE event stream"),
+    ),
+    security(("bearer" = [])),
+    tag = "events"
+)]
 async fn events(
     auth::Auth(_ctx): auth::Auth,
     State(state): State<AppState>,
@@ -757,6 +968,18 @@ async fn events(
 
 // --- Delete handlers ---
 
+/// Delete a span
+#[utoipa::path(
+    delete,
+    path = "/api/spans/{span_id}",
+    params(("span_id" = String, Path, description = "Span ID")),
+    responses(
+        (status = 200, description = "Span deleted"),
+        (status = 404, description = "Span not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "spans"
+)]
 async fn delete_span(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -780,6 +1003,18 @@ async fn delete_span(
     }
 }
 
+/// Delete a trace and all its spans
+#[utoipa::path(
+    delete,
+    path = "/api/traces/{trace_id}",
+    params(("trace_id" = String, Path, description = "Trace ID")),
+    responses(
+        (status = 200, description = "Trace deleted", body = DeletedTrace),
+        (status = 404, description = "Trace not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "traces"
+)]
 async fn delete_trace(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -804,6 +1039,16 @@ async fn delete_trace(
     }
 }
 
+/// Clear all traces and spans
+#[utoipa::path(
+    delete,
+    path = "/api/traces",
+    responses(
+        (status = 200, description = "All traces cleared", body = ClearedAll),
+    ),
+    security(("bearer" = [])),
+    tag = "traces"
+)]
 async fn clear_all_traces(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -841,6 +1086,15 @@ pub struct StorageHealth {
     pub backend: String,
 }
 
+/// Health check endpoint
+#[utoipa::path(
+    get,
+    path = "/api/health",
+    responses(
+        (status = 200, description = "Service health status", body = HealthResponse),
+    ),
+    tag = "health"
+)]
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     let uptime = state.start_time.elapsed().as_secs();
     // Health check uses nil org_id (local mode store or any available store)
@@ -896,6 +1150,15 @@ async fn live() -> StatusCode {
 
 // --- Metrics endpoint (Prometheus format) ---
 
+/// Prometheus metrics endpoint
+#[utoipa::path(
+    get,
+    path = "/api/metrics",
+    responses(
+        (status = 200, description = "Prometheus-format metrics"),
+    ),
+    tag = "health"
+)]
 async fn prometheus_metrics(State(state): State<AppState>) -> Response {
     let store = match state.store_for_org(uuid::Uuid::nil()).await {
         Ok(s) => s,
@@ -921,6 +1184,16 @@ async fn prometheus_metrics(State(state): State<AppState>) -> Response {
 
 // --- Dataset handlers ---
 
+/// List all datasets
+#[utoipa::path(
+    get,
+    path = "/api/datasets",
+    responses(
+        (status = 200, description = "List of datasets", body = DatasetListResponse),
+    ),
+    security(("bearer" = [])),
+    tag = "datasets"
+)]
 async fn list_datasets(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -939,6 +1212,17 @@ async fn list_datasets(
     Ok(Json(DatasetListResponse { datasets, count }))
 }
 
+/// Create a new dataset
+#[utoipa::path(
+    post,
+    path = "/api/datasets",
+    request_body = CreateDatasetRequest,
+    responses(
+        (status = 201, description = "Dataset created", body = Dataset),
+    ),
+    security(("bearer" = [])),
+    tag = "datasets"
+)]
 async fn create_dataset(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -956,6 +1240,18 @@ async fn create_dataset(
     Ok((StatusCode::CREATED, Json(dataset)))
 }
 
+/// Get a dataset by ID
+#[utoipa::path(
+    get,
+    path = "/api/datasets/{id}",
+    params(("id" = String, Path, description = "Dataset ID")),
+    responses(
+        (status = 200, description = "Dataset details", body = DatasetResponse),
+        (status = 404, description = "Dataset not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "datasets"
+)]
 async fn get_dataset(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -971,6 +1267,19 @@ async fn get_dataset(
     }))
 }
 
+/// Update a dataset
+#[utoipa::path(
+    put,
+    path = "/api/datasets/{id}",
+    params(("id" = String, Path, description = "Dataset ID")),
+    request_body = UpdateDatasetRequest,
+    responses(
+        (status = 200, description = "Dataset updated", body = Dataset),
+        (status = 404, description = "Dataset not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "datasets"
+)]
 async fn update_dataset(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -993,6 +1302,18 @@ async fn update_dataset(
     Ok(Json(updated))
 }
 
+/// Delete a dataset
+#[utoipa::path(
+    delete,
+    path = "/api/datasets/{id}",
+    params(("id" = String, Path, description = "Dataset ID")),
+    responses(
+        (status = 200, description = "Dataset deleted"),
+        (status = 404, description = "Dataset not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "datasets"
+)]
 async fn delete_dataset_handler(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -1019,6 +1340,18 @@ async fn delete_dataset_handler(
 
 // --- Datapoint handlers ---
 
+/// List datapoints in a dataset
+#[utoipa::path(
+    get,
+    path = "/api/datasets/{id}/datapoints",
+    params(("id" = String, Path, description = "Dataset ID")),
+    responses(
+        (status = 200, description = "List of datapoints", body = DatapointListResponse),
+        (status = 404, description = "Dataset not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "datapoints"
+)]
 async fn list_datapoints(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -1039,6 +1372,19 @@ async fn list_datapoints(
     Ok(Json(DatapointListResponse { datapoints, count }))
 }
 
+/// Create a datapoint in a dataset
+#[utoipa::path(
+    post,
+    path = "/api/datasets/{id}/datapoints",
+    params(("id" = String, Path, description = "Dataset ID")),
+    request_body = CreateDatapointRequest,
+    responses(
+        (status = 201, description = "Datapoint created", body = Datapoint),
+        (status = 404, description = "Dataset not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "datapoints"
+)]
 async fn create_datapoint(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -1060,6 +1406,21 @@ async fn create_datapoint(
     Ok((StatusCode::CREATED, Json(dp)))
 }
 
+/// Delete a datapoint
+#[utoipa::path(
+    delete,
+    path = "/api/datasets/{id}/datapoints/{dp_id}",
+    params(
+        ("id" = String, Path, description = "Dataset ID"),
+        ("dp_id" = String, Path, description = "Datapoint ID"),
+    ),
+    responses(
+        (status = 200, description = "Datapoint deleted"),
+        (status = 404, description = "Datapoint not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "datapoints"
+)]
 async fn delete_datapoint_handler(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -1090,6 +1451,19 @@ async fn delete_datapoint_handler(
 
 // --- Export span → datapoint ---
 
+/// Export a span as a datapoint into a dataset
+#[utoipa::path(
+    post,
+    path = "/api/datasets/{id}/export-span",
+    params(("id" = String, Path, description = "Dataset ID")),
+    request_body = ExportSpanRequest,
+    responses(
+        (status = 201, description = "Datapoint created from span", body = Datapoint),
+        (status = 404, description = "Dataset or span not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "datapoints"
+)]
 async fn export_span_to_dataset(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -1219,6 +1593,19 @@ fn parse_csv_import(data: &[u8]) -> Result<Vec<DatapointKind>, String> {
     Ok(kinds)
 }
 
+/// Import datapoints from a file (JSON, JSONL, or CSV)
+#[utoipa::path(
+    post,
+    path = "/api/datasets/{id}/import",
+    params(("id" = String, Path, description = "Dataset ID")),
+    responses(
+        (status = 201, description = "Datapoints imported", body = ImportResponse),
+        (status = 400, description = "Invalid file format"),
+        (status = 404, description = "Dataset not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "datapoints"
+)]
 async fn import_file(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -1282,6 +1669,18 @@ async fn import_file(
 
 // --- Queue handlers ---
 
+/// List queue items for a dataset
+#[utoipa::path(
+    get,
+    path = "/api/datasets/{id}/queue",
+    params(("id" = String, Path, description = "Dataset ID")),
+    responses(
+        (status = 200, description = "Queue items with counts", body = QueueListResponse),
+        (status = 404, description = "Dataset not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "queue"
+)]
 async fn list_queue(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -1315,6 +1714,19 @@ async fn list_queue(
     Ok(Json(QueueListResponse { items, counts }))
 }
 
+/// Enqueue datapoints for human review
+#[utoipa::path(
+    post,
+    path = "/api/datasets/{id}/queue",
+    params(("id" = String, Path, description = "Dataset ID")),
+    request_body = EnqueueRequest,
+    responses(
+        (status = 201, description = "Datapoints enqueued", body = EnqueueResponse),
+        (status = 404, description = "Dataset not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "queue"
+)]
 async fn enqueue_datapoints(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -1346,6 +1758,19 @@ async fn enqueue_datapoints(
     Ok((StatusCode::CREATED, Json(EnqueueResponse { enqueued })))
 }
 
+/// Claim a queue item for review
+#[utoipa::path(
+    post,
+    path = "/api/queue/{item_id}/claim",
+    params(("item_id" = String, Path, description = "Queue item ID")),
+    request_body = ClaimRequest,
+    responses(
+        (status = 200, description = "Item claimed", body = QueueItem),
+        (status = 409, description = "Item already claimed"),
+    ),
+    security(("bearer" = [])),
+    tag = "queue"
+)]
 async fn claim_queue_item(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -1366,6 +1791,19 @@ async fn claim_queue_item(
     Ok(Json(item))
 }
 
+/// Submit a reviewed queue item
+#[utoipa::path(
+    post,
+    path = "/api/queue/{item_id}/submit",
+    params(("item_id" = String, Path, description = "Queue item ID")),
+    request_body = SubmitRequest,
+    responses(
+        (status = 200, description = "Item submitted", body = QueueItem),
+        (status = 409, description = "Item not in claimed state"),
+    ),
+    security(("bearer" = [])),
+    tag = "queue"
+)]
 async fn submit_queue_item(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -1412,6 +1850,17 @@ async fn submit_queue_item(
 
 // --- Analytics handlers ---
 
+/// Query analytics with filters and grouping
+#[utoipa::path(
+    post,
+    path = "/api/analytics",
+    request_body = AnalyticsQuery,
+    responses(
+        (status = 200, description = "Analytics results", body = AnalyticsResponse),
+    ),
+    security(("bearer" = [])),
+    tag = "analytics"
+)]
 async fn post_analytics(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
@@ -1435,6 +1884,16 @@ async fn post_analytics(
     Ok(Json(response))
 }
 
+/// Get analytics summary (totals, costs, top models)
+#[utoipa::path(
+    get,
+    path = "/api/analytics/summary",
+    responses(
+        (status = 200, description = "Analytics summary", body = AnalyticsSummary),
+    ),
+    security(("bearer" = [])),
+    tag = "analytics"
+)]
 async fn analytics_summary(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
