@@ -1274,7 +1274,7 @@ async fn get_dataset(
     params(("id" = String, Path, description = "Dataset ID")),
     request_body = UpdateDatasetRequest,
     responses(
-        (status = 200, description = "Dataset updated", body = Dataset),
+        (status = 200, description = "Dataset updated", body = DatasetResponse),
         (status = 404, description = "Dataset not found"),
     ),
     security(("bearer" = [])),
@@ -1285,7 +1285,7 @@ async fn update_dataset(
     State(state): State<AppState>,
     Path(dataset_id): Path<DatasetId>,
     Json(req): Json<UpdateDatasetRequest>,
-) -> Result<Json<Dataset>, StatusCode> {
+) -> Result<Json<DatasetResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
@@ -1299,7 +1299,11 @@ async fn update_dataset(
     }
     updated.updated_at = chrono::Utc::now();
     w.save_dataset(updated.clone()).await;
-    Ok(Json(updated))
+    let count = w.datapoint_count_for_dataset(dataset_id);
+    Ok(Json(DatasetResponse {
+        dataset: updated,
+        datapoint_count: count,
+    }))
 }
 
 /// Delete a dataset
@@ -1370,6 +1374,36 @@ async fn list_datapoints(
         .collect();
     let count = datapoints.len();
     Ok(Json(DatapointListResponse { datapoints, count }))
+}
+
+/// Get a single datapoint
+#[utoipa::path(
+    get,
+    path = "/api/datasets/{id}/datapoints/{dp_id}",
+    params(
+        ("id" = String, Path, description = "Dataset ID"),
+        ("dp_id" = String, Path, description = "Datapoint ID"),
+    ),
+    responses(
+        (status = 200, description = "Datapoint details", body = Datapoint),
+        (status = 404, description = "Datapoint not found"),
+    ),
+    security(("bearer" = [])),
+    tag = "datapoints"
+)]
+async fn get_datapoint_handler(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Path((dataset_id, dp_id)): Path<(DatasetId, DatapointId)>,
+) -> Result<Json<Datapoint>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
+    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let r = store.read().await;
+    let dp = r.get_datapoint(dp_id).ok_or(StatusCode::NOT_FOUND)?;
+    if dp.dataset_id != dataset_id {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    Ok(Json(dp.clone()))
 }
 
 /// Create a datapoint in a dataset
@@ -2397,7 +2431,7 @@ fn build_router(
         .route("/datasets", get(list_datasets).post(create_dataset))
         .route("/datasets/:id", get(get_dataset).put(update_dataset).delete(delete_dataset_handler))
         .route("/datasets/:id/datapoints", get(list_datapoints).post(create_datapoint))
-        .route("/datasets/:id/datapoints/:dp_id", delete(delete_datapoint_handler))
+        .route("/datasets/:id/datapoints/:dp_id", get(get_datapoint_handler).delete(delete_datapoint_handler))
         .route("/datasets/:id/export-span", post(export_span_to_dataset))
         .route("/datasets/:id/import", post(import_file))
         .route("/datasets/:id/queue", get(list_queue).post(enqueue_datapoints))
