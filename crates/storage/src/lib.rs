@@ -7,8 +7,9 @@ use std::collections::HashMap;
 
 
 use trace::{
-    Datapoint, DatapointId, Dataset, DatasetId, FileVersion, QueueItem, QueueItemId,
-    QueueItemStatus, Span, SpanId, SpanKind, Trace, TraceId,
+    CaptureRule, CaptureRuleId, Datapoint, DatapointId, Dataset, DatasetId, EvalResult,
+    EvalResultId, EvalRun, EvalRunId, FileVersion, QueueItem, QueueItemId, QueueItemStatus, Span,
+    SpanId, SpanKind, Trace, TraceId,
 };
 
 pub use backend::StorageBackend;
@@ -179,6 +180,9 @@ pub struct PersistentStore<B: StorageBackend> {
     datasets: HashMap<DatasetId, Dataset>,
     datapoints: HashMap<DatapointId, Datapoint>,
     queue_items: HashMap<QueueItemId, QueueItem>,
+    eval_runs: HashMap<EvalRunId, EvalRun>,
+    eval_results: HashMap<EvalResultId, EvalResult>,
+    capture_rules: HashMap<CaptureRuleId, CaptureRule>,
     backend: B,
 }
 
@@ -220,6 +224,24 @@ impl<B: StorageBackend> PersistentStore<B> {
             queue_items.insert(qi.id, qi);
         }
 
+        let er_list = backend.load_all_eval_runs().await?;
+        let mut eval_runs = HashMap::new();
+        for er in er_list {
+            eval_runs.insert(er.id, er);
+        }
+
+        let eres_list = backend.load_all_eval_results().await?;
+        let mut eval_results = HashMap::new();
+        for eres in eres_list {
+            eval_results.insert(eres.id, eres);
+        }
+
+        let cr_list = backend.load_all_capture_rules().await?;
+        let mut capture_rules = HashMap::new();
+        for cr in cr_list {
+            capture_rules.insert(cr.id, cr);
+        }
+
         Ok(Self {
             memory,
             trace_meta,
@@ -227,6 +249,9 @@ impl<B: StorageBackend> PersistentStore<B> {
             datasets,
             datapoints,
             queue_items,
+            eval_runs,
+            eval_results,
+            capture_rules,
             backend,
         })
     }
@@ -382,6 +407,9 @@ impl<B: StorageBackend> PersistentStore<B> {
         self.datasets.clear();
         self.datapoints.clear();
         self.queue_items.clear();
+        self.eval_runs.clear();
+        self.eval_results.clear();
+        self.capture_rules.clear();
         if let Err(e) = self.backend.clear_spans().await {
             tracing::error!("failed to persist clear: {}", e);
         }
@@ -492,6 +520,35 @@ impl<B: StorageBackend> PersistentStore<B> {
                 .collect();
             for qi_id in &qi_ids {
                 self.queue_items.remove(qi_id);
+            }
+            // Remove associated eval runs and their results from memory
+            let run_ids: Vec<EvalRunId> = self
+                .eval_runs
+                .values()
+                .filter(|r| r.dataset_id == id)
+                .map(|r| r.id)
+                .collect();
+            for run_id in &run_ids {
+                self.eval_runs.remove(run_id);
+                let result_ids: Vec<EvalResultId> = self
+                    .eval_results
+                    .values()
+                    .filter(|r| r.run_id == *run_id)
+                    .map(|r| r.id)
+                    .collect();
+                for rid in result_ids {
+                    self.eval_results.remove(&rid);
+                }
+            }
+            // Remove associated capture rules from memory
+            let rule_ids: Vec<CaptureRuleId> = self
+                .capture_rules
+                .values()
+                .filter(|r| r.dataset_id == id)
+                .map(|r| r.id)
+                .collect();
+            for rule_id in &rule_ids {
+                self.capture_rules.remove(rule_id);
             }
             // Cascade delete handled by FK in SQLite, just delete the dataset
             let _ = self.backend.delete_dataset(id).await;
@@ -605,5 +662,101 @@ impl<B: StorageBackend> PersistentStore<B> {
         }
         self.queue_items.insert(id, completed.clone());
         Some(completed)
+    }
+
+    // --- Eval Run methods ---
+
+    pub async fn save_eval_run(&mut self, run: EvalRun) {
+        if let Err(e) = self.backend.save_eval_run(&run).await {
+            tracing::error!("failed to persist eval run: {}", e);
+        }
+        self.eval_runs.insert(run.id, run);
+    }
+
+    pub fn get_eval_run(&self, id: EvalRunId) -> Option<&EvalRun> {
+        self.eval_runs.get(&id)
+    }
+
+    pub fn eval_runs_for_dataset(&self, dataset_id: DatasetId) -> Vec<&EvalRun> {
+        self.eval_runs
+            .values()
+            .filter(|r| r.dataset_id == dataset_id)
+            .collect()
+    }
+
+    pub async fn delete_eval_run(&mut self, id: EvalRunId) -> bool {
+        if self.eval_runs.remove(&id).is_some() {
+            // Remove associated results from memory
+            let result_ids: Vec<EvalResultId> = self
+                .eval_results
+                .values()
+                .filter(|r| r.run_id == id)
+                .map(|r| r.id)
+                .collect();
+            for rid in result_ids {
+                self.eval_results.remove(&rid);
+            }
+            let _ = self.backend.delete_eval_run_results(id).await;
+            let _ = self.backend.delete_eval_run(id).await;
+            true
+        } else {
+            false
+        }
+    }
+
+    // --- Eval Result methods ---
+
+    pub async fn save_eval_result(&mut self, result: EvalResult) {
+        if let Err(e) = self.backend.save_eval_result(&result).await {
+            tracing::error!("failed to persist eval result: {}", e);
+        }
+        self.eval_results.insert(result.id, result);
+    }
+
+    pub fn get_eval_result(&self, id: EvalResultId) -> Option<&EvalResult> {
+        self.eval_results.get(&id)
+    }
+
+    pub fn eval_results_for_run(&self, run_id: EvalRunId) -> Vec<&EvalResult> {
+        self.eval_results
+            .values()
+            .filter(|r| r.run_id == run_id)
+            .collect()
+    }
+
+    // --- Capture Rule methods ---
+
+    pub async fn save_capture_rule(&mut self, rule: CaptureRule) {
+        if let Err(e) = self.backend.save_capture_rule(&rule).await {
+            tracing::error!("failed to persist capture rule: {}", e);
+        }
+        self.capture_rules.insert(rule.id, rule);
+    }
+
+    pub fn get_capture_rule(&self, id: CaptureRuleId) -> Option<&CaptureRule> {
+        self.capture_rules.get(&id)
+    }
+
+    pub fn capture_rules_for_dataset(&self, dataset_id: DatasetId) -> Vec<&CaptureRule> {
+        self.capture_rules
+            .values()
+            .filter(|r| r.dataset_id == dataset_id)
+            .collect()
+    }
+
+    pub fn all_enabled_capture_rules(&self) -> Vec<&CaptureRule> {
+        self.capture_rules
+            .values()
+            .filter(|r| r.enabled)
+            .collect()
+    }
+
+    pub async fn delete_capture_rule(&mut self, id: CaptureRuleId) -> bool {
+        if self.capture_rules.remove(&id).is_some() {
+            let _ = self.backend.delete_capture_rule(id).await;
+            true
+        } else {
+            false
+        }
     }
 }

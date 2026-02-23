@@ -2,6 +2,7 @@ pub mod any_backend;
 pub mod auth_keys;
 pub mod auth_routes;
 pub mod billing_routes;
+pub mod capture;
 pub mod events;
 pub mod jobs;
 pub mod metrics;
@@ -22,7 +23,7 @@ use axum::{
         sse::{Event, KeepAlive},
         Html, IntoResponse, Response, Sse,
     },
-    routing::{delete, get, post},
+    routing::{get, post},
     Json, Router,
 };
 use axum_extra::extract::Multipart;
@@ -34,13 +35,15 @@ use tokio::sync::{broadcast, watch, RwLock};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
-use storage::{analytics, FileFilter, PersistentStore, SpanFilter};
+use storage::{analytics, FileFilter, SpanFilter};
 
 pub use any_backend::AnyBackend;
 use trace::{
-    AnalyticsQuery, AnalyticsResponse, AnalyticsSummary, Datapoint, DatapointId, DatapointKind,
-    DatapointSource, Dataset, DatasetId, FileVersion, Message, QueueItem, QueueItemId,
-    QueueItemStatus, Span, SpanBuilder, SpanId, SpanKind, Trace, TraceId,
+    AnalyticsQuery, AnalyticsResponse, AnalyticsSummary, CaptureFilters, CaptureRule,
+    CaptureRuleId, Datapoint, DatapointId, DatapointKind, DatapointSource, Dataset, DatasetId,
+    EvalConfig, EvalResult, EvalRun, EvalRunId, EvalRunStatus, FileVersion,
+    Message, QueueItem, QueueItemId, QueueItemStatus, ScoreSummary, ScoringStrategy, Span,
+    SpanBuilder, SpanId, SpanKind, Trace, TraceId,
 };
 
 pub use events::{EventBus, EventSubscriber, LocalEventBus};
@@ -195,6 +198,10 @@ pub enum SystemEvent {
     DatasetDeleted { dataset_id: DatasetId },
     DatapointCreated { datapoint: Datapoint },
     QueueItemUpdated { item: QueueItem },
+    EvalRunCreated { run: EvalRun },
+    EvalRunUpdated { run: EvalRun },
+    EvalRunCompleted { run: EvalRun },
+    CaptureRuleFired { rule_id: CaptureRuleId, datapoint: Datapoint },
     Cleared,
 }
 
@@ -337,6 +344,52 @@ pub struct SubmitRequest {
     pub edited_data: Option<serde_json::Value>,
 }
 
+// --- Eval request types ---
+
+#[derive(Deserialize, ToSchema)]
+pub struct CreateEvalRunRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    pub config: EvalConfig,
+    #[serde(default = "default_scoring")]
+    pub scoring: ScoringStrategy,
+}
+
+fn default_scoring() -> ScoringStrategy {
+    ScoringStrategy::None
+}
+
+// --- Capture Rule request types ---
+
+#[derive(Deserialize, ToSchema)]
+pub struct CreateCaptureRuleRequest {
+    pub name: String,
+    pub filters: CaptureFilters,
+    #[serde(default = "default_sample_rate")]
+    pub sample_rate: f64,
+}
+
+fn default_sample_rate() -> f64 {
+    1.0
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateCaptureRuleRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub filters: Option<CaptureFilters>,
+    #[serde(default)]
+    pub sample_rate: Option<f64>,
+}
+
+// --- Comparison query params ---
+
+#[derive(Deserialize, ToSchema, utoipa::IntoParams)]
+pub struct CompareParams {
+    pub runs: String,
+}
+
 // --- Response types ---
 
 #[derive(Serialize, ToSchema)]
@@ -440,6 +493,52 @@ pub struct QueueCounts {
 #[derive(Serialize, ToSchema)]
 pub struct EnqueueResponse {
     pub enqueued: usize,
+}
+
+// --- Eval response types ---
+
+#[derive(Serialize, ToSchema)]
+pub struct EvalRunListResponse {
+    pub runs: Vec<EvalRun>,
+    pub count: usize,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct EvalRunDetailResponse {
+    #[serde(flatten)]
+    pub run: EvalRun,
+    pub result_items: Vec<EvalResult>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ComparisonDatapoint {
+    #[schema(value_type = String)]
+    pub datapoint_id: DatapointId,
+    pub input: serde_json::Value,
+    pub expected: Option<serde_json::Value>,
+    pub results: std::collections::HashMap<String, ComparisonCell>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ComparisonCell {
+    pub output: serde_json::Value,
+    pub score: Option<f64>,
+    pub latency_ms: u64,
+    pub status: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ComparisonResponse {
+    pub runs: Vec<EvalRun>,
+    pub datapoints: Vec<ComparisonDatapoint>,
+}
+
+// --- Capture Rule response types ---
+
+#[derive(Serialize, ToSchema)]
+pub struct CaptureRuleListResponse {
+    pub rules: Vec<CaptureRule>,
+    pub count: usize,
 }
 
 // --- Scope enforcement helper ---
@@ -704,8 +803,16 @@ async fn complete_span(
 
     if let Some(span) = w.complete_span(span_id, output).await {
         drop(w);
-        let _ = state.events_tx.send(SystemEvent::SpanCompleted { span });
+        let _ = state.events_tx.send(SystemEvent::SpanCompleted { span: span.clone() });
         tracing::debug!(%span_id, "span completed");
+
+        // Process auto-capture rules in the background
+        let store_clone = store.clone();
+        let events_tx = state.events_tx.clone();
+        tokio::spawn(async move {
+            capture::process_capture_rules(&store_clone, &span, &events_tx).await;
+        });
+
         StatusCode::OK
     } else {
         StatusCode::NOT_FOUND
@@ -1941,6 +2048,604 @@ async fn analytics_summary(
     Ok(Json(summary))
 }
 
+// --- Eval Run handlers ---
+
+/// List eval runs for a dataset
+async fn list_eval_runs(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Path(dataset_id): Path<DatasetId>,
+) -> Result<Json<EvalRunListResponse>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
+    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let r = store.read().await;
+    if r.get_dataset(dataset_id).is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let runs: Vec<EvalRun> = r.eval_runs_for_dataset(dataset_id).into_iter().cloned().collect();
+    let count = runs.len();
+    Ok(Json(EvalRunListResponse { runs, count }))
+}
+
+/// Create and start an eval run for a dataset
+async fn create_eval_run(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Path(dataset_id): Path<DatasetId>,
+    Json(req): Json<CreateEvalRunRequest>,
+) -> Result<(StatusCode, Json<EvalRun>), (StatusCode, Json<serde_json::Value>)> {
+    require_scope(&ctx, auth::Scope::DatasetsWrite)?;
+    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+
+    // Verify dataset exists and count datapoints
+    {
+        let r = store.read().await;
+        if r.get_dataset(dataset_id).is_none() {
+            return Err((StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "dataset not found"}))));
+        }
+    }
+
+    let mut run = EvalRun::new(dataset_id, req.name, req.config, req.scoring);
+
+    // Create a trace for this eval run
+    let eval_trace = Trace::new(Some(format!("eval: {}", run.name.as_deref().unwrap_or("unnamed"))));
+    run.trace_id = Some(eval_trace.id);
+
+    let mut w = store.write().await;
+    w.save_trace(eval_trace).await;
+    w.save_eval_run(run.clone()).await;
+    drop(w);
+
+    let _ = state.events_tx.send(SystemEvent::EvalRunCreated { run: run.clone() });
+
+    // Spawn the eval execution task
+    let run_id = run.id;
+    let events_tx = state.events_tx.clone();
+    let store_clone = store.clone();
+    tokio::spawn(async move {
+        execute_eval_run(run_id, store_clone, events_tx).await;
+    });
+
+    Ok((StatusCode::CREATED, Json(run)))
+}
+
+/// Get eval run details with results
+async fn get_eval_run_handler(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Path(run_id): Path<EvalRunId>,
+) -> Result<Json<EvalRunDetailResponse>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
+    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let r = store.read().await;
+    let run = r.get_eval_run(run_id).ok_or(StatusCode::NOT_FOUND)?.clone();
+    let results: Vec<EvalResult> = r.eval_results_for_run(run_id).into_iter().cloned().collect();
+    Ok(Json(EvalRunDetailResponse { run, result_items: results }))
+}
+
+/// Delete an eval run
+async fn delete_eval_run_handler(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Path(run_id): Path<EvalRunId>,
+) -> StatusCode {
+    if !ctx.has_scope(auth::Scope::DatasetsWrite) {
+        return StatusCode::FORBIDDEN;
+    }
+    let store = match state.store_for_org(ctx.org_id).await {
+        Ok(s) => s,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    let mut w = store.write().await;
+    if w.delete_eval_run(run_id).await {
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
+/// Cancel a running eval
+async fn cancel_eval_run(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Path(run_id): Path<EvalRunId>,
+) -> Result<Json<EvalRun>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let mut w = store.write().await;
+    let run = w.get_eval_run(run_id).ok_or(StatusCode::NOT_FOUND)?.clone();
+    if run.status.is_terminal() {
+        return Err(StatusCode::CONFLICT);
+    }
+    let mut updated = run;
+    updated.status = EvalRunStatus::Cancelled;
+    updated.completed_at = Some(chrono::Utc::now());
+    w.save_eval_run(updated.clone()).await;
+    drop(w);
+    let _ = state.events_tx.send(SystemEvent::EvalRunCompleted { run: updated.clone() });
+    Ok(Json(updated))
+}
+
+/// Compare eval runs
+async fn compare_eval_runs(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Path(dataset_id): Path<DatasetId>,
+    Query(params): Query<CompareParams>,
+) -> Result<Json<ComparisonResponse>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
+    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let r = store.read().await;
+    if r.get_dataset(dataset_id).is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let run_ids: Vec<EvalRunId> = params.runs.split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+
+    if run_ids.len() < 2 || run_ids.len() > 4 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let mut runs = Vec::new();
+    let mut all_results: std::collections::HashMap<EvalRunId, Vec<EvalResult>> = std::collections::HashMap::new();
+
+    for run_id in &run_ids {
+        let run = r.get_eval_run(*run_id).ok_or(StatusCode::NOT_FOUND)?.clone();
+        if run.dataset_id != dataset_id {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        let results: Vec<EvalResult> = r.eval_results_for_run(*run_id).into_iter().cloned().collect();
+        all_results.insert(*run_id, results);
+        runs.push(run);
+    }
+
+    // Build comparison matrix by datapoint
+    let datapoints: Vec<Datapoint> = r.datapoints_for_dataset(dataset_id).into_iter().cloned().collect();
+    let mut comparison_datapoints = Vec::new();
+
+    for dp in &datapoints {
+        let (input, expected) = match &dp.kind {
+            DatapointKind::Generic { input, expected_output, .. } => (input.clone(), expected_output.clone()),
+            DatapointKind::LlmConversation { messages, expected, .. } => {
+                (serde_json::to_value(messages).unwrap_or_default(), expected.as_ref().map(|e| serde_json::to_value(e).unwrap_or_default()))
+            }
+        };
+
+        let mut results_map = std::collections::HashMap::new();
+        for run_id in &run_ids {
+            if let Some(run_results) = all_results.get(run_id) {
+                if let Some(result) = run_results.iter().find(|r| r.datapoint_id == dp.id) {
+                    results_map.insert(run_id.to_string(), ComparisonCell {
+                        output: result.actual_output.clone(),
+                        score: result.score,
+                        latency_ms: result.latency_ms,
+                        status: result.status.as_str().to_string(),
+                    });
+                }
+            }
+        }
+
+        comparison_datapoints.push(ComparisonDatapoint {
+            datapoint_id: dp.id,
+            input,
+            expected,
+            results: results_map,
+        });
+    }
+
+    Ok(Json(ComparisonResponse {
+        runs,
+        datapoints: comparison_datapoints,
+    }))
+}
+
+// --- Capture Rule handlers ---
+
+/// List capture rules for a dataset
+async fn list_capture_rules(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Path(dataset_id): Path<DatasetId>,
+) -> Result<Json<CaptureRuleListResponse>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
+    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let r = store.read().await;
+    if r.get_dataset(dataset_id).is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let rules: Vec<CaptureRule> = r.capture_rules_for_dataset(dataset_id).into_iter().cloned().collect();
+    let count = rules.len();
+    Ok(Json(CaptureRuleListResponse { rules, count }))
+}
+
+/// Create a capture rule
+async fn create_capture_rule(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Path(dataset_id): Path<DatasetId>,
+    Json(req): Json<CreateCaptureRuleRequest>,
+) -> Result<(StatusCode, Json<CaptureRule>), StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let mut w = store.write().await;
+    if w.get_dataset(dataset_id).is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let rule = CaptureRule::new(dataset_id, req.name, req.filters, req.sample_rate);
+    w.save_capture_rule(rule.clone()).await;
+    Ok((StatusCode::CREATED, Json(rule)))
+}
+
+/// Update a capture rule
+async fn update_capture_rule(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Path(rule_id): Path<CaptureRuleId>,
+    Json(req): Json<UpdateCaptureRuleRequest>,
+) -> Result<Json<CaptureRule>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let mut w = store.write().await;
+    let rule = w.get_capture_rule(rule_id).ok_or(StatusCode::NOT_FOUND)?.clone();
+    let mut updated = rule;
+    if let Some(name) = req.name {
+        updated.name = name;
+    }
+    if let Some(filters) = req.filters {
+        updated.filters = filters;
+    }
+    if let Some(sample_rate) = req.sample_rate {
+        updated.sample_rate = sample_rate;
+    }
+    w.save_capture_rule(updated.clone()).await;
+    Ok(Json(updated))
+}
+
+/// Delete a capture rule
+async fn delete_capture_rule_handler(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Path(rule_id): Path<CaptureRuleId>,
+) -> StatusCode {
+    if !ctx.has_scope(auth::Scope::DatasetsWrite) {
+        return StatusCode::FORBIDDEN;
+    }
+    let store = match state.store_for_org(ctx.org_id).await {
+        Ok(s) => s,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    let mut w = store.write().await;
+    if w.delete_capture_rule(rule_id).await {
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
+/// Toggle a capture rule enabled/disabled
+async fn toggle_capture_rule(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Path(rule_id): Path<CaptureRuleId>,
+) -> Result<Json<CaptureRule>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let mut w = store.write().await;
+    let rule = w.get_capture_rule(rule_id).ok_or(StatusCode::NOT_FOUND)?.clone();
+    let mut updated = rule;
+    updated.enabled = !updated.enabled;
+    w.save_capture_rule(updated.clone()).await;
+    Ok(Json(updated))
+}
+
+// --- Eval execution engine ---
+
+async fn execute_eval_run(
+    run_id: EvalRunId,
+    store: SharedStore,
+    events_tx: broadcast::Sender<SystemEvent>,
+) {
+    use std::time::Instant as StdInstant;
+
+    // Get the run and datapoints
+    let (mut run, datapoints, scoring) = {
+        let r = store.read().await;
+        let run = match r.get_eval_run(run_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let datapoints: Vec<Datapoint> = r.datapoints_for_dataset(run.dataset_id).into_iter().cloned().collect();
+        let scoring = run.scoring.clone();
+        (run, datapoints, scoring)
+    };
+
+    // Mark as running
+    run.status = EvalRunStatus::Running;
+    run.results.total = datapoints.len();
+    {
+        let mut w = store.write().await;
+        w.save_eval_run(run.clone()).await;
+    }
+    let _ = events_tx.send(SystemEvent::EvalRunUpdated { run: run.clone() });
+
+    // Build the LLM client URL
+    let provider = run.config.provider.as_deref().unwrap_or("openai");
+    let base_url = run.config.provider_url.clone().unwrap_or_else(|| {
+        match provider {
+            "anthropic" => "https://api.anthropic.com/v1".to_string(),
+            "ollama" => "http://localhost:11434/v1".to_string(),
+            _ => "https://api.openai.com/v1".to_string(),
+        }
+    });
+
+    // Get API key from env
+    let api_key_env = run.config.api_key_env.as_deref().unwrap_or(match provider {
+        "anthropic" => "ANTHROPIC_API_KEY",
+        "ollama" => "",
+        _ => "OPENAI_API_KEY",
+    });
+    let api_key = if api_key_env.is_empty() {
+        String::new()
+    } else {
+        std::env::var(api_key_env).unwrap_or_default()
+    };
+
+    let client = reqwest::Client::new();
+    let mut completed = 0usize;
+    let mut failed = 0usize;
+    let mut scores: Vec<f64> = Vec::new();
+
+    for dp in &datapoints {
+        // Check if run was cancelled
+        {
+            let r = store.read().await;
+            if let Some(current) = r.get_eval_run(run_id) {
+                if current.status == EvalRunStatus::Cancelled {
+                    return;
+                }
+            }
+        }
+
+        let mut eval_result = EvalResult::new(run_id, dp.id);
+
+        // Build the messages from the datapoint
+        let messages = match &dp.kind {
+            DatapointKind::LlmConversation { messages, .. } => {
+                let mut msgs: Vec<serde_json::Value> = messages.iter().map(|m| {
+                    serde_json::json!({"role": m.role, "content": m.content})
+                }).collect();
+                if let Some(ref sys) = run.config.system_prompt {
+                    msgs.insert(0, serde_json::json!({"role": "system", "content": sys}));
+                }
+                msgs
+            }
+            DatapointKind::Generic { input, .. } => {
+                let user_content = if input.is_string() {
+                    input.as_str().unwrap_or("").to_string()
+                } else {
+                    serde_json::to_string(input).unwrap_or_default()
+                };
+                let mut msgs = Vec::new();
+                if let Some(ref sys) = run.config.system_prompt {
+                    msgs.push(serde_json::json!({"role": "system", "content": sys}));
+                }
+                msgs.push(serde_json::json!({"role": "user", "content": user_content}));
+                msgs
+            }
+        };
+
+        // Make the LLM call
+        let start = StdInstant::now();
+        let mut request_body = serde_json::json!({
+            "model": run.config.model,
+            "messages": messages,
+        });
+        if let Some(temp) = run.config.temperature {
+            request_body["temperature"] = serde_json::json!(temp);
+        }
+        if let Some(max_tok) = run.config.max_tokens {
+            request_body["max_tokens"] = serde_json::json!(max_tok);
+        }
+
+        let url = format!("{}/chat/completions", base_url);
+        let resp: Result<reqwest::Response, reqwest::Error> = client.post(&url)
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {}", api_key))
+            .json(&request_body)
+            .send()
+            .await;
+
+        eval_result.latency_ms = start.elapsed().as_millis() as u64;
+
+        match resp {
+            Ok(response) => {
+                let resp_status = response.status();
+                match response.bytes().await {
+                    Ok(body_bytes) if resp_status.is_success() => {
+                        match serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+                            Ok(body) => {
+                                let content = body.pointer("/choices/0/message/content")
+                                    .cloned()
+                                    .unwrap_or(serde_json::Value::Null);
+                                eval_result.actual_output = content;
+
+                                // Extract token usage
+                                if let Some(usage) = body.get("usage") {
+                                    eval_result.input_tokens = usage.get("prompt_tokens").and_then(|v: &serde_json::Value| v.as_u64()).map(|v| v as u32);
+                                    eval_result.output_tokens = usage.get("completion_tokens").and_then(|v: &serde_json::Value| v.as_u64()).map(|v| v as u32);
+                                }
+
+                                // Score the result
+                                let expected = match &dp.kind {
+                                    DatapointKind::LlmConversation { expected, .. } => expected.as_ref().map(|e| serde_json::Value::String(e.content.clone())),
+                                    DatapointKind::Generic { expected_output, .. } => expected_output.clone(),
+                                };
+
+                                match &scoring {
+                                    ScoringStrategy::ExactMatch => {
+                                        if let Some(ref exp) = expected {
+                                            let actual_str = eval_result.actual_output.as_str().unwrap_or("");
+                                            let expected_str = exp.as_str().unwrap_or("");
+                                            let score = if actual_str.trim() == expected_str.trim() { 1.0 } else { 0.0 };
+                                            eval_result.score = Some(score);
+                                            eval_result.status = if score >= 0.5 { trace::EvalResultStatus::Passed } else { trace::EvalResultStatus::Failed };
+                                        } else {
+                                            eval_result.status = trace::EvalResultStatus::Passed;
+                                        }
+                                    }
+                                    ScoringStrategy::Contains => {
+                                        if let Some(ref exp) = expected {
+                                            let actual_str = eval_result.actual_output.as_str().unwrap_or("").to_lowercase();
+                                            let expected_str = exp.as_str().unwrap_or("").to_lowercase();
+                                            let score = if actual_str.contains(&expected_str) { 1.0 } else { 0.0 };
+                                            eval_result.score = Some(score);
+                                            eval_result.status = if score >= 0.5 { trace::EvalResultStatus::Passed } else { trace::EvalResultStatus::Failed };
+                                        } else {
+                                            eval_result.status = trace::EvalResultStatus::Passed;
+                                        }
+                                    }
+                                    ScoringStrategy::LlmJudge => {
+                                        // For LLM judge, we make a second call to the same model
+                                        let judge_messages = vec![
+                                            serde_json::json!({"role": "system", "content": "You are an evaluation judge. Score the response on a scale of 0.0 to 1.0. Respond with ONLY a JSON object: {\"score\": <number>, \"reason\": \"<brief explanation>\"}"}),
+                                            serde_json::json!({"role": "user", "content": format!(
+                                                "Input: {}\nExpected: {}\nActual: {}\n\nScore the actual response.",
+                                                serde_json::to_string(&messages.last()).unwrap_or_default(),
+                                                expected.as_ref().map(|e| serde_json::to_string(e).unwrap_or_default()).unwrap_or_else(|| "N/A".to_string()),
+                                                serde_json::to_string(&eval_result.actual_output).unwrap_or_default(),
+                                            )}),
+                                        ];
+                                        let judge_body = serde_json::json!({
+                                            "model": run.config.model,
+                                            "messages": judge_messages,
+                                            "temperature": 0,
+                                        });
+                                        let judge_result_resp: Result<reqwest::Response, _> = client.post(&url)
+                                            .header("Content-Type", "application/json")
+                                            .header("Authorization", format!("Bearer {}", api_key))
+                                            .json(&judge_body)
+                                            .send()
+                                            .await;
+                                        if let Ok(judge_resp) = judge_result_resp {
+                                            if let Ok(judge_bytes) = judge_resp.bytes().await {
+                                                if let Ok(judge_body) = serde_json::from_slice::<serde_json::Value>(&judge_bytes) {
+                                                    let judge_content = judge_body.pointer("/choices/0/message/content")
+                                                        .and_then(|v: &serde_json::Value| v.as_str())
+                                                        .unwrap_or("");
+                                                    if let Ok(judge_parsed) = serde_json::from_str::<serde_json::Value>(judge_content) {
+                                                        eval_result.score = judge_parsed.get("score").and_then(|v: &serde_json::Value| v.as_f64());
+                                                        eval_result.score_reason = judge_parsed.get("reason").and_then(|v: &serde_json::Value| v.as_str()).map(|s| s.to_string());
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        eval_result.status = if eval_result.score.unwrap_or(0.0) >= 0.5 {
+                                            trace::EvalResultStatus::Passed
+                                        } else {
+                                            trace::EvalResultStatus::Failed
+                                        };
+                                    }
+                                    ScoringStrategy::None => {
+                                        eval_result.status = trace::EvalResultStatus::Passed;
+                                    }
+                                }
+
+                                if let Some(s) = eval_result.score {
+                                    scores.push(s);
+                                }
+                                completed += 1;
+                            }
+                            Err(e) => {
+                                eval_result.status = trace::EvalResultStatus::Error;
+                                eval_result.error = Some(format!("Failed to parse response: {}", e));
+                                failed += 1;
+                            }
+                        }
+                    }
+                    Ok(body_bytes) => {
+                        let error_text = String::from_utf8_lossy(&body_bytes);
+                        eval_result.status = trace::EvalResultStatus::Error;
+                        eval_result.error = Some(format!("HTTP {}: {}", resp_status, error_text));
+                        failed += 1;
+                    }
+                    Err(e) => {
+                        eval_result.status = trace::EvalResultStatus::Error;
+                        eval_result.error = Some(format!("Failed to read response: {}", e));
+                        failed += 1;
+                    }
+                }
+            }
+            Err(e) => {
+                eval_result.status = trace::EvalResultStatus::Error;
+                eval_result.error = Some(format!("Request failed: {}", e));
+                failed += 1;
+            }
+        }
+
+        // Save the result
+        {
+            let mut w = store.write().await;
+            w.save_eval_result(eval_result).await;
+
+            // Update run progress
+            if let Some(current_run) = w.get_eval_run(run_id).cloned() {
+                let mut updated = current_run;
+                updated.results.completed = completed;
+                updated.results.failed = failed;
+                updated.results.scores = compute_score_summary(&scores);
+                w.save_eval_run(updated.clone()).await;
+                let _ = events_tx.send(SystemEvent::EvalRunUpdated { run: updated });
+            }
+        }
+    }
+
+    // Mark as completed
+    {
+        let mut w = store.write().await;
+        if let Some(current_run) = w.get_eval_run(run_id).cloned() {
+            let mut final_run = current_run;
+            if final_run.status != EvalRunStatus::Cancelled {
+                final_run.status = if failed > 0 && completed == 0 {
+                    EvalRunStatus::Failed
+                } else {
+                    EvalRunStatus::Completed
+                };
+            }
+            final_run.completed_at = Some(chrono::Utc::now());
+            final_run.results.completed = completed;
+            final_run.results.failed = failed;
+            final_run.results.scores = compute_score_summary(&scores);
+            w.save_eval_run(final_run.clone()).await;
+            let _ = events_tx.send(SystemEvent::EvalRunCompleted { run: final_run });
+        }
+    }
+}
+
+fn compute_score_summary(scores: &[f64]) -> ScoreSummary {
+    if scores.is_empty() {
+        return ScoreSummary::default();
+    }
+    let mut sorted = scores.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let sum: f64 = sorted.iter().sum();
+    let mean = sum / sorted.len() as f64;
+    let median = if sorted.len() % 2 == 0 {
+        (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2]) / 2.0
+    } else {
+        sorted[sorted.len() / 2]
+    };
+    let pass_count = sorted.iter().filter(|&&s| s >= 0.5).count();
+    ScoreSummary {
+        mean: Some(mean),
+        median: Some(median),
+        min: sorted.first().copied(),
+        max: sorted.last().copied(),
+        pass_rate: Some(pass_count as f64 / sorted.len() as f64),
+    }
+}
+
 // --- Config handlers ---
 
 async fn get_config(
@@ -2437,6 +3142,15 @@ fn build_router(
         .route("/datasets/:id/queue", get(list_queue).post(enqueue_datapoints))
         .route("/queue/:item_id/claim", post(claim_queue_item))
         .route("/queue/:item_id/submit", post(submit_queue_item))
+        // Eval runs
+        .route("/datasets/:id/eval", get(list_eval_runs).post(create_eval_run))
+        .route("/datasets/:id/compare", get(compare_eval_runs))
+        .route("/eval/:run_id", get(get_eval_run_handler).delete(delete_eval_run_handler))
+        .route("/eval/:run_id/cancel", post(cancel_eval_run))
+        // Capture rules
+        .route("/datasets/:id/rules", get(list_capture_rules).post(create_capture_rule))
+        .route("/rules/:rule_id", axum::routing::put(update_capture_rule).delete(delete_capture_rule_handler))
+        .route("/rules/:rule_id/toggle", post(toggle_capture_rule))
         // Analytics
         .route("/analytics", post(post_analytics))
         .route("/analytics/summary", get(analytics_summary))

@@ -10,6 +10,9 @@ pub type TraceId = Uuid;
 pub type DatasetId = Uuid;
 pub type DatapointId = Uuid;
 pub type QueueItemId = Uuid;
+pub type EvalRunId = Uuid;
+pub type EvalResultId = Uuid;
+pub type CaptureRuleId = Uuid;
 pub type OrgId = Uuid;
 
 // --- SpanKind: typed span variants ---
@@ -660,4 +663,312 @@ pub struct ModelTokens {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: u64,
+}
+
+// --- Eval Pipeline types ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EvalRunStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl EvalRunStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            EvalRunStatus::Pending => "pending",
+            EvalRunStatus::Running => "running",
+            EvalRunStatus::Completed => "completed",
+            EvalRunStatus::Failed => "failed",
+            EvalRunStatus::Cancelled => "cancelled",
+        }
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            EvalRunStatus::Completed | EvalRunStatus::Failed | EvalRunStatus::Cancelled
+        )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct EvalConfig {
+    pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ScoringStrategy {
+    ExactMatch,
+    Contains,
+    LlmJudge,
+    None,
+}
+
+impl ScoringStrategy {
+    pub fn as_str(&self) -> &str {
+        match self {
+            ScoringStrategy::ExactMatch => "exact_match",
+            ScoringStrategy::Contains => "contains",
+            ScoringStrategy::LlmJudge => "llm_judge",
+            ScoringStrategy::None => "none",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct ScoreSummary {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mean: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub median: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pass_rate: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct EvalRunResults {
+    pub total: usize,
+    pub completed: usize,
+    pub failed: usize,
+    pub scores: ScoreSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct EvalRun {
+    #[schema(value_type = String)]
+    pub id: EvalRunId,
+    #[schema(value_type = String)]
+    pub dataset_id: DatasetId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub config: EvalConfig,
+    pub scoring: ScoringStrategy,
+    pub status: EvalRunStatus,
+    pub results: EvalRunResults,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub trace_id: Option<TraceId>,
+    pub created_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl EvalRun {
+    pub fn new(
+        dataset_id: DatasetId,
+        name: Option<String>,
+        config: EvalConfig,
+        scoring: ScoringStrategy,
+    ) -> Self {
+        Self {
+            id: Uuid::now_v7(),
+            dataset_id,
+            name,
+            config,
+            scoring,
+            status: EvalRunStatus::Pending,
+            results: EvalRunResults::default(),
+            trace_id: None,
+            created_at: Utc::now(),
+            completed_at: None,
+            error: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EvalResultStatus {
+    Passed,
+    Failed,
+    Error,
+    Skipped,
+}
+
+impl EvalResultStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            EvalResultStatus::Passed => "passed",
+            EvalResultStatus::Failed => "failed",
+            EvalResultStatus::Error => "error",
+            EvalResultStatus::Skipped => "skipped",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct EvalResult {
+    #[schema(value_type = String)]
+    pub id: EvalResultId,
+    #[schema(value_type = String)]
+    pub run_id: EvalRunId,
+    #[schema(value_type = String)]
+    pub datapoint_id: DatapointId,
+    pub status: EvalResultStatus,
+    pub actual_output: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score_reason: Option<String>,
+    pub latency_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub span_id: Option<SpanId>,
+}
+
+impl EvalResult {
+    pub fn new(run_id: EvalRunId, datapoint_id: DatapointId) -> Self {
+        Self {
+            id: Uuid::now_v7(),
+            run_id,
+            datapoint_id,
+            status: EvalResultStatus::Skipped,
+            actual_output: serde_json::Value::Null,
+            score: None,
+            score_reason: None,
+            latency_ms: 0,
+            input_tokens: None,
+            output_tokens: None,
+            error: None,
+            span_id: None,
+        }
+    }
+}
+
+// --- Auto-Capture Rule types ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CaptureFilters {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_tags: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_contains: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_latency_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CaptureRule {
+    #[schema(value_type = String)]
+    pub id: CaptureRuleId,
+    #[schema(value_type = String)]
+    pub dataset_id: DatasetId,
+    pub name: String,
+    pub enabled: bool,
+    pub filters: CaptureFilters,
+    pub sample_rate: f64,
+    pub captured_count: u64,
+    pub created_at: DateTime<Utc>,
+}
+
+impl CaptureRule {
+    pub fn new(
+        dataset_id: DatasetId,
+        name: impl Into<String>,
+        filters: CaptureFilters,
+        sample_rate: f64,
+    ) -> Self {
+        Self {
+            id: Uuid::now_v7(),
+            dataset_id,
+            name: name.into(),
+            enabled: true,
+            filters,
+            sample_rate,
+            captured_count: 0,
+            created_at: Utc::now(),
+        }
+    }
+
+    /// Check if a completed span matches this rule's filters.
+    pub fn matches_span(&self, span: &Span) -> bool {
+        if let Some(ref kind) = self.filters.span_kind {
+            if span.kind().kind_name() != kind {
+                return false;
+            }
+        }
+        if let Some(ref model) = self.filters.model {
+            match span.kind().model() {
+                Some(m) if m == model => {}
+                _ => return false,
+            }
+        }
+        if let Some(ref provider) = self.filters.provider {
+            match span.kind().provider() {
+                Some(p) if p == provider => {}
+                _ => return false,
+            }
+        }
+        if let Some(ref status) = self.filters.status {
+            if span.status().as_str() != status {
+                return false;
+            }
+        }
+        if let Some(ref name_contains) = self.filters.name_contains {
+            if !span.name().contains(name_contains.as_str()) {
+                return false;
+            }
+        }
+        if let Some(min_latency) = self.filters.min_latency_ms {
+            if let Some(duration) = span.duration_ms() {
+                if (duration as u64) < min_latency {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        if let Some(min_tokens) = self.filters.min_tokens {
+            if let Some(total) = span.kind().total_tokens() {
+                if total < min_tokens as u64 {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        true
+    }
 }
