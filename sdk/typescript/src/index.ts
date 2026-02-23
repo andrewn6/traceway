@@ -18,5 +18,14 @@ export type {
   FileVersion,
   FileTraces,
   HealthStatus,
+  Dataset,
+  DatasetList,
+  Datapoint,
+  DatapointKind,
+  DatapointList,
+  DatapointSource,
+  Message,
+  QueueItem,
+  QueueList,
 } from './types.js';
 export { statusKind, statusError } from './types.js';

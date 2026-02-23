@@ -151,6 +151,64 @@ export interface CreatedSpan {
   trace_id: string;
 }
 
+// ─── Dataset Types ───────────────────────────────────────────────────
+
+export interface Message {
+  role: string;
+  content: string;
+}
+
+export type DatapointKind =
+  | { LlmConversation: { messages: Message[]; expected?: string; metadata?: Record<string, unknown> } }
+  | { Generic: { input: unknown; expected_output?: unknown; actual_output?: unknown; score?: number; metadata?: Record<string, unknown> } };
+
+export type DatapointSource = 'manual' | 'span_export' | 'file_upload';
+
+export interface Datapoint {
+  id: string;
+  dataset_id: string;
+  kind: DatapointKind;
+  source: DatapointSource;
+  source_span_id?: string | null;
+  created_at: string;
+}
+
+export interface DatapointList {
+  datapoints: Datapoint[];
+  count: number;
+}
+
+export interface Dataset {
+  id: string;
+  name: string;
+  description?: string | null;
+  datapoint_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DatasetList {
+  datasets: Dataset[];
+  count: number;
+}
+
+export interface QueueItem {
+  id: string;
+  dataset_id: string;
+  datapoint_id: string;
+  status: 'pending' | 'claimed' | 'completed';
+  claimed_by?: string | null;
+  claimed_at?: string | null;
+  original_data?: unknown;
+  edited_data?: unknown;
+  created_at: string;
+}
+
+export interface QueueList {
+  items: QueueItem[];
+  count: number;
+}
+
 // ─── Events ──────────────────────────────────────────────────────────
 
 export type SpanEvent =
@@ -161,4 +219,8 @@ export type SpanEvent =
   | { type: 'trace_created'; trace: Trace }
   | { type: 'trace_deleted'; trace_id: string }
   | { type: 'file_version_created'; file: FileVersion }
+  | { type: 'dataset_created'; dataset: Dataset }
+  | { type: 'dataset_deleted'; dataset_id: string }
+  | { type: 'datapoint_created'; datapoint: Datapoint }
+  | { type: 'queue_item_updated'; item: QueueItem }
   | { type: 'cleared' };

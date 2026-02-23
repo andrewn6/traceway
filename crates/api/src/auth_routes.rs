@@ -202,12 +202,15 @@ fn generate_token() -> (String, String) {
 }
 
 fn slug_from_name(name: &str) -> String {
-    name.to_lowercase()
+    let base: String = name.to_lowercase()
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '-' })
         .collect::<String>()
         .trim_matches('-')
-        .to_string()
+        .to_string();
+    // Append short random suffix to avoid collisions
+    let suffix = &uuid::Uuid::new_v4().to_string()[..6];
+    format!("{}-{}", base, suffix)
 }
 
 fn internal_err(e: impl std::fmt::Display) -> (StatusCode, String) {

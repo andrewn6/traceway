@@ -14,6 +14,13 @@ import type {
   FileVersion,
   FileTraces,
   HealthStatus,
+  Dataset,
+  DatasetList,
+  Datapoint,
+  DatapointKind,
+  DatapointList,
+  QueueItem,
+  QueueList,
 } from './types.js';
 
 export interface TracewayOpts {
@@ -162,6 +169,72 @@ export class Traceway {
 
   async fileTraces(path: string): Promise<FileTraces> {
     return this.request<FileTraces>('GET', `/files/${encodeURIComponent(path)}/traces`);
+  }
+
+  // ─── Dataset operations ─────────────────────────────────────────────
+
+  async listDatasets(): Promise<DatasetList> {
+    return this.request<DatasetList>('GET', '/datasets');
+  }
+
+  async createDataset(name: string, description?: string): Promise<Dataset> {
+    const body: Record<string, unknown> = { name };
+    if (description !== undefined) body.description = description;
+    return this.request<Dataset>('POST', '/datasets', body);
+  }
+
+  async getDataset(datasetId: string): Promise<Dataset> {
+    return this.request<Dataset>('GET', `/datasets/${datasetId}`);
+  }
+
+  async updateDataset(datasetId: string, updates: { name?: string; description?: string }): Promise<Dataset> {
+    return this.request<Dataset>('PUT', `/datasets/${datasetId}`, updates);
+  }
+
+  async deleteDataset(datasetId: string): Promise<void> {
+    await this.request<void>('DELETE', `/datasets/${datasetId}`);
+  }
+
+  // ─── Datapoint operations ──────────────────────────────────────────
+
+  async listDatapoints(datasetId: string): Promise<DatapointList> {
+    return this.request<DatapointList>('GET', `/datasets/${datasetId}/datapoints`);
+  }
+
+  async getDatapoint(datasetId: string, datapointId: string): Promise<Datapoint> {
+    return this.request<Datapoint>('GET', `/datasets/${datasetId}/datapoints/${datapointId}`);
+  }
+
+  async createDatapoint(datasetId: string, kind: DatapointKind): Promise<Datapoint> {
+    return this.request<Datapoint>('POST', `/datasets/${datasetId}/datapoints`, { kind });
+  }
+
+  async deleteDatapoint(datasetId: string, datapointId: string): Promise<void> {
+    await this.request<void>('DELETE', `/datasets/${datasetId}/datapoints/${datapointId}`);
+  }
+
+  async exportSpanToDataset(datasetId: string, spanId: string): Promise<Datapoint> {
+    return this.request<Datapoint>('POST', `/datasets/${datasetId}/export-span`, { span_id: spanId });
+  }
+
+  // ─── Queue operations ──────────────────────────────────────────────
+
+  async listQueue(datasetId: string): Promise<QueueList> {
+    return this.request<QueueList>('GET', `/datasets/${datasetId}/queue`);
+  }
+
+  async enqueueDatapoints(datasetId: string, datapointIds: string[]): Promise<QueueItem[]> {
+    return this.request<QueueItem[]>('POST', `/datasets/${datasetId}/queue`, { datapoint_ids: datapointIds });
+  }
+
+  async claimQueueItem(itemId: string, claimedBy?: string): Promise<QueueItem> {
+    const body = claimedBy ? { claimed_by: claimedBy } : undefined;
+    return this.request<QueueItem>('POST', `/queue/${itemId}/claim`, body);
+  }
+
+  async submitQueueItem(itemId: string, editedData?: unknown): Promise<QueueItem> {
+    const body = editedData !== undefined ? { edited_data: editedData } : undefined;
+    return this.request<QueueItem>('POST', `/queue/${itemId}/submit`, body);
   }
 
   // ─── Delete operations ─────────────────────────────────────────────
