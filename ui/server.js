@@ -2,8 +2,20 @@ import { createServer } from "http";
 import { readFileSync, existsSync, statSync } from "fs";
 import { join, extname } from "path";
 
+import { readdirSync } from "fs";
+
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const DIR = join(process.cwd(), "build");
+
+// Diagnostics
+console.log(`CWD: ${process.cwd()}`);
+console.log(`Build dir: ${DIR}`);
+console.log(`Build dir exists: ${existsSync(DIR)}`);
+if (existsSync(DIR)) {
+  console.log(`Build contents: ${readdirSync(DIR).join(", ")}`);
+} else {
+  console.log("WARNING: build/ directory does not exist!");
+}
 
 const MIME = {
   ".html": "text/html",
@@ -48,6 +60,7 @@ function serve(res, filePath) {
 const server = createServer((req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   let pathname = decodeURIComponent(url.pathname);
+  console.log(`${req.method} ${pathname}`);
 
   // Try exact file
   if (serve(res, join(DIR, pathname))) return;
