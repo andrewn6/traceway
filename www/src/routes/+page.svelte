@@ -17,18 +17,18 @@
 			<a href="/" class="font-mono text-sm uppercase tracking-tight text-white/80 hover:text-white transition-colors">
 				traceway
 			</a>
-			<span class="font-mono text-[11px] text-white/30 hidden sm:inline">2025</span>
+			<span class="font-mono text-[11px] text-white/30 hidden sm:inline">2026</span>
 		</div>
 		<div class="flex items-baseline gap-6 md:gap-8">
 			<a href="#features" class="font-mono text-[11px] uppercase text-white/50 hover:text-white transition-colors hidden md:inline">Features</a>
 			<a href="#architecture" class="font-mono text-[11px] uppercase text-white/50 hover:text-white transition-colors hidden md:inline">Architecture</a>
 			<a href="https://github.com/blastgits/traceway" target="_blank" rel="noopener" class="font-mono text-[11px] uppercase text-white/50 hover:text-white transition-colors">GitHub</a>
-			<a href="https://docs.traceway.ai" class="font-mono text-[11px] uppercase text-white/50 hover:text-white transition-colors hidden sm:inline">Docs</a>
+			<a href="https://traceway.vercel.app/login" class="font-mono text-[11px] uppercase text-white/50 hover:text-white transition-colors hidden sm:inline">Log in</a>
 			<a
-				href="https://platform.traceway.ai"
+				href="https://traceway.vercel.app/signup"
 				class="font-mono text-[11px] uppercase text-white/80 border border-white/20 rounded-full px-4 py-1 hover:bg-white/10 transition-all"
 			>
-				Open app
+				Sign up
 			</a>
 		</div>
 	</div>
@@ -41,7 +41,7 @@
 	<!-- Glow -->
 	<div class="absolute top-1/3 right-0 w-[600px] h-[600px] bg-accent/[0.03] blur-[150px] rounded-full"></div>
 
-	<div class="relative mx-auto max-w-[1400px] px-6 md:px-16 lg:px-24">
+	<div class="relative max-w-[1400px] px-6 md:px-10">
 		<div class="flex flex-col lg:flex-row lg:items-center lg:justify-between lg:gap-16">
 			<!-- Left: text content -->
 			<InView>
@@ -67,10 +67,10 @@
 					<!-- CTAs — minimal -->
 					<div class="flex items-center gap-5 mt-6">
 						<a
-							href="https://platform.traceway.ai"
+							href="https://traceway.vercel.app/signup"
 							class="group flex items-center gap-2 bg-accent text-bg font-mono text-sm uppercase tracking-wide px-6 py-2.5 rounded transition-all hover:brightness-110 hover:shadow-[0_0_30px_rgba(110,231,183,0.2)]"
 						>
-							Get started
+							Sign up free
 							<svg class="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" viewBox="0 0 8 8" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0.826 7.536L0.112 6.822L5.768 1.18H2.03V0.2H7.462V5.66H6.426V1.936L0.826 7.536Z" fill="currentColor"/></svg>
 						</a>
 						<a
@@ -442,10 +442,10 @@
 			</p>
 			<div class="flex items-center gap-5 mt-8">
 				<a
-					href="https://platform.traceway.ai"
+					href="https://traceway.vercel.app/signup"
 					class="group flex items-center gap-2 bg-accent text-bg font-mono text-sm uppercase tracking-wide px-6 py-2.5 rounded transition-all hover:brightness-110 hover:shadow-[0_0_30px_rgba(110,231,183,0.2)]"
 				>
-					Get started free
+					Sign up free
 					<svg class="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" viewBox="0 0 8 8" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0.826 7.536L0.112 6.822L5.768 1.18H2.03V0.2H7.462V5.66H6.426V1.936L0.826 7.536Z" fill="currentColor"/></svg>
 				</a>
 				<a
@@ -469,7 +469,7 @@
 			<div class="flex items-center gap-6">
 				<a href="https://docs.traceway.ai" class="font-mono text-[11px] uppercase text-text-muted hover:text-text-secondary transition-colors">Docs</a>
 				<a href="https://github.com/blastgits/traceway" target="_blank" rel="noopener" class="font-mono text-[11px] uppercase text-text-muted hover:text-text-secondary transition-colors">GitHub</a>
-				<a href="https://platform.traceway.ai" class="font-mono text-[11px] uppercase text-text-muted hover:text-text-secondary transition-colors">Platform</a>
+				<a href="https://traceway.vercel.app/signup" class="font-mono text-[11px] uppercase text-text-muted hover:text-text-secondary transition-colors">Sign up</a>
 			</div>
 			<span class="font-mono text-[10px] text-text-muted/50">MIT Licensed</span>
 		</div>
