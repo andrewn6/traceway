@@ -82,6 +82,7 @@ export interface EvalConfig {
 	provider?: string | null;
 	provider_url?: string | null;
 	api_key_env?: string | null;
+	provider_connection_id?: string | null;
 	system_prompt?: string | null;
 	temperature?: number | null;
 	max_tokens?: number | null;
@@ -186,6 +187,24 @@ export interface CaptureRule {
 
 export interface CaptureRuleListResponse {
 	rules: CaptureRule[];
+	count: number;
+}
+
+// ─── Provider Connection types ───────────────────────────────────────
+
+export interface ProviderConnectionInfo {
+	id: string;
+	name: string;
+	provider: string;
+	base_url?: string | null;
+	api_key_preview?: string | null;
+	default_model?: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface ProviderConnectionListResponse {
+	connections: ProviderConnectionInfo[];
 	count: number;
 }
 
@@ -405,6 +424,20 @@ export const deleteCaptureRule = (ruleId: string) =>
 
 export const toggleCaptureRule = (ruleId: string) =>
 	post<CaptureRule>(`/rules/${ruleId}/toggle`);
+
+// ─── Provider Connection Endpoints ───────────────────────────────────
+
+export const listProviderConnections = () =>
+	get<ProviderConnectionListResponse>('/provider-connections');
+
+export const createProviderConnection = (body: { name: string; provider: string; base_url?: string; api_key?: string; default_model?: string }) =>
+	post<ProviderConnectionInfo>('/provider-connections', body);
+
+export const updateProviderConnection = (connId: string, body: { name?: string; provider?: string; base_url?: string; api_key?: string; default_model?: string }) =>
+	put<ProviderConnectionInfo>(`/provider-connections/${connId}`, body);
+
+export const deleteProviderConnection = (connId: string) =>
+	del<void>(`/provider-connections/${connId}`);
 
 // ─── Export ──────────────────────────────────────────────────────────
 

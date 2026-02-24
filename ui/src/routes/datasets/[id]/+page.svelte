@@ -22,6 +22,7 @@
 		createCaptureRule,
 		deleteCaptureRule,
 		toggleCaptureRule,
+		listProviderConnections,
 		type DatasetWithCount,
 		type Datapoint,
 		type DatapointKind,
@@ -33,7 +34,8 @@
 		type CaptureRuleListResponse,
 		type EvalConfig,
 		type ScoringStrategy,
-		type CaptureFilters
+		type CaptureFilters,
+		type ProviderConnectionInfo
 	} from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import EvalScoreBadge from '$lib/components/EvalScoreBadge.svelte';
@@ -107,7 +109,9 @@
 	let evalFormMaxTokens = $state('');
 	let evalFormScoring: ScoringStrategy = $state('none');
 	let evalFormName = $state('');
+	let evalFormConnectionId = $state('');
 	let evalCreating = $state(false);
+	let providerConnections: ProviderConnectionInfo[] = $state([]);
 	let evalCompareMode = $state(false);
 	let evalCompareSelected: Set<string> = $state(new Set());
 	let evalDeleteConfirm: string | null = $state(null);
@@ -137,7 +141,8 @@
 				api_key_env: evalFormApiKeyEnv.trim() || undefined,
 				system_prompt: evalFormSystemPrompt.trim() || undefined,
 				temperature: evalFormTemp ? parseFloat(evalFormTemp) : undefined,
-				max_tokens: evalFormMaxTokens ? parseInt(evalFormMaxTokens) : undefined
+				max_tokens: evalFormMaxTokens ? parseInt(evalFormMaxTokens) : undefined,
+				provider_connection_id: evalFormConnectionId || undefined
 			};
 			await createEvalRun(datasetId, {
 				name: evalFormName.trim() || undefined,
@@ -154,6 +159,7 @@
 			evalFormTemp = '';
 			evalFormMaxTokens = '';
 			evalFormScoring = 'none';
+			evalFormConnectionId = '';
 			// Reload runs
 			const resp = await listEvalRuns(datasetId);
 			evalRuns = resp.runs;
@@ -287,18 +293,20 @@
 	// ── Load ───────────────────────────────────────────────────────────
 	async function load() {
 		try {
-			const [ds, dp, q, er, cr] = await Promise.all([
+			const [ds, dp, q, er, cr, pc] = await Promise.all([
 				getDataset(datasetId),
 				getDatapoints(datasetId),
 				getQueue(datasetId),
 				listEvalRuns(datasetId).catch(() => ({ runs: [] as EvalRun[], count: 0 })),
-				listCaptureRules(datasetId).catch(() => ({ rules: [] as CaptureRule[], count: 0 }))
+				listCaptureRules(datasetId).catch(() => ({ rules: [] as CaptureRule[], count: 0 })),
+				listProviderConnections().catch(() => ({ connections: [] as ProviderConnectionInfo[], count: 0 }))
 			]);
 			dataset = ds;
 			datapoints = dp.datapoints;
 			queue = q;
 			evalRuns = er.runs;
 			captureRules = cr.rules;
+			providerConnections = pc.connections;
 		} catch {
 			// not found
 		}
@@ -957,6 +965,26 @@
 								<input id="eval-name" type="text" bind:value={evalFormName} placeholder="e.g. gpt-4o baseline"
 									class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
 							</div>
+							{#if providerConnections.length > 0}
+								<div>
+									<label for="eval-connection" class="block text-xs text-text-muted uppercase mb-1">Provider Connection</label>
+									<select id="eval-connection" bind:value={evalFormConnectionId}
+										onchange={() => {
+											const conn = providerConnections.find(c => c.id === evalFormConnectionId);
+											if (conn) {
+												evalFormProvider = conn.provider;
+												if (conn.default_model && !evalFormModel) evalFormModel = conn.default_model;
+											}
+										}}
+										class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text">
+										<option value="">Manual configuration</option>
+										{#each providerConnections as conn}
+											<option value={conn.id}>{conn.name} ({conn.provider}{conn.default_model ? ` / ${conn.default_model}` : ''})</option>
+										{/each}
+									</select>
+									<p class="text-xs text-text-muted mt-1">Select a saved connection or configure manually below. <a href="/settings/providers" class="text-accent hover:underline">Manage connections</a></p>
+								</div>
+							{/if}
 							<div class="grid grid-cols-2 gap-3">
 								<div>
 									<label for="eval-model" class="block text-xs text-text-muted uppercase mb-1">Model *</label>
@@ -974,16 +1002,18 @@
 									</select>
 								</div>
 							</div>
-							<div>
-								<label for="eval-url" class="block text-xs text-text-muted uppercase mb-1">Provider URL (optional)</label>
-								<input id="eval-url" type="text" bind:value={evalFormProviderUrl} placeholder="http://localhost:11434/v1"
-									class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
-							</div>
-							<div>
-								<label for="eval-key" class="block text-xs text-text-muted uppercase mb-1">API Key Env Var</label>
-								<input id="eval-key" type="text" bind:value={evalFormApiKeyEnv} placeholder="OPENAI_API_KEY"
-									class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
-							</div>
+							{#if !evalFormConnectionId}
+								<div>
+									<label for="eval-url" class="block text-xs text-text-muted uppercase mb-1">Provider URL (optional)</label>
+									<input id="eval-url" type="text" bind:value={evalFormProviderUrl} placeholder="http://localhost:11434/v1"
+										class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
+								</div>
+								<div>
+									<label for="eval-key" class="block text-xs text-text-muted uppercase mb-1">API Key Env Var</label>
+									<input id="eval-key" type="text" bind:value={evalFormApiKeyEnv} placeholder="OPENAI_API_KEY"
+										class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
+								</div>
+							{/if}
 							<div>
 								<label for="eval-sys" class="block text-xs text-text-muted uppercase mb-1">System Prompt Override (optional)</label>
 								<textarea id="eval-sys" bind:value={evalFormSystemPrompt} rows={3}
