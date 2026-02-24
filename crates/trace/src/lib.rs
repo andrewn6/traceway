@@ -13,6 +13,7 @@ pub type QueueItemId = Uuid;
 pub type EvalRunId = Uuid;
 pub type EvalResultId = Uuid;
 pub type CaptureRuleId = Uuid;
+pub type ProviderConnectionId = Uuid;
 pub type OrgId = Uuid;
 
 // --- SpanKind: typed span variants ---
@@ -705,6 +706,10 @@ pub struct EvalConfig {
     pub provider_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key_env: Option<String>,
+    /// Reference to a saved provider connection (takes precedence over api_key_env).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub provider_connection_id: Option<ProviderConnectionId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -971,4 +976,83 @@ impl CaptureRule {
         }
         true
     }
+}
+
+// --- Provider Connection types ---
+
+/// A saved provider connection with API credentials.
+/// Users configure these once in settings and reference them when creating eval runs.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ProviderConnection {
+    #[schema(value_type = String)]
+    pub id: ProviderConnectionId,
+    pub name: String,
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// The API key. Stored server-side only.
+    /// When serializing for the API response, this is masked (only prefix shown).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    /// Default model to use with this connection (optional).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// A masked version of ProviderConnection for API responses (hides the full key).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ProviderConnectionInfo {
+    #[schema(value_type = String)]
+    pub id: ProviderConnectionId,
+    pub name: String,
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// Masked key — only first 8 characters shown, e.g. "sk-proj-...xxxx"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_preview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl ProviderConnection {
+    pub fn new(name: impl Into<String>, provider: impl Into<String>) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::now_v7(),
+            name: name.into(),
+            provider: provider.into(),
+            base_url: None,
+            api_key: None,
+            default_model: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Create a masked info version for API responses.
+    pub fn to_info(&self) -> ProviderConnectionInfo {
+        ProviderConnectionInfo {
+            id: self.id,
+            name: self.name.clone(),
+            provider: self.provider.clone(),
+            base_url: self.base_url.clone(),
+            api_key_preview: self.api_key.as_ref().map(|k| mask_key(k)),
+            default_model: self.default_model.clone(),
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        }
+    }
+}
+
+fn mask_key(key: &str) -> String {
+    if key.len() <= 8 {
+        return "*".repeat(key.len());
+    }
+    let prefix = &key[..8];
+    format!("{}...{}", prefix, &key[key.len() - 4..])
 }

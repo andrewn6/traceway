@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use trace::{
     CaptureRule, CaptureRuleId, Datapoint, DatapointId, Dataset, DatasetId, EvalResult,
-    EvalResultId, EvalRun, EvalRunId, FileVersion, QueueItem, QueueItemId, Span, SpanId, Trace,
-    TraceId,
+    EvalResultId, EvalRun, EvalRunId, FileVersion, ProviderConnection, ProviderConnectionId,
+    QueueItem, QueueItemId, Span, SpanId, Trace, TraceId,
 };
 
 use crate::error::StorageError;
@@ -230,6 +230,25 @@ pub trait StorageBackend: Send + Sync {
 
     /// List all capture rules across all datasets.
     async fn list_capture_rules_all(&self) -> Result<Vec<CaptureRule>, StorageError>;
+
+    // --- Provider Connection operations ---
+
+    /// Save or update a provider connection.
+    async fn save_provider_connection(&self, conn: &ProviderConnection) -> Result<(), StorageError>;
+
+    /// Get a provider connection by ID.
+    async fn get_provider_connection(&self, id: ProviderConnectionId) -> Result<Option<ProviderConnection>, StorageError>;
+
+    /// List all provider connections.
+    async fn list_provider_connections(&self) -> Result<Vec<ProviderConnection>, StorageError>;
+
+    /// Delete a provider connection by ID. Returns true if deleted.
+    async fn delete_provider_connection(&self, id: ProviderConnectionId) -> Result<bool, StorageError>;
+
+    /// Load all provider connections. Used during store initialization.
+    async fn load_all_provider_connections(&self) -> Result<Vec<ProviderConnection>, StorageError> {
+        self.list_provider_connections().await
+    }
 
     // --- Metadata ---
 

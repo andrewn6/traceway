@@ -8,8 +8,8 @@ use std::collections::HashMap;
 
 use trace::{
     CaptureRule, CaptureRuleId, Datapoint, DatapointId, Dataset, DatasetId, EvalResult,
-    EvalResultId, EvalRun, EvalRunId, FileVersion, QueueItem, QueueItemId, QueueItemStatus, Span,
-    SpanId, SpanKind, Trace, TraceId,
+    EvalResultId, EvalRun, EvalRunId, FileVersion, ProviderConnection, ProviderConnectionId,
+    QueueItem, QueueItemId, QueueItemStatus, Span, SpanId, SpanKind, Trace, TraceId,
 };
 
 pub use backend::StorageBackend;
@@ -183,6 +183,7 @@ pub struct PersistentStore<B: StorageBackend> {
     eval_runs: HashMap<EvalRunId, EvalRun>,
     eval_results: HashMap<EvalResultId, EvalResult>,
     capture_rules: HashMap<CaptureRuleId, CaptureRule>,
+    provider_connections: HashMap<ProviderConnectionId, ProviderConnection>,
     backend: B,
 }
 
@@ -242,6 +243,12 @@ impl<B: StorageBackend> PersistentStore<B> {
             capture_rules.insert(cr.id, cr);
         }
 
+        let pc_list = backend.load_all_provider_connections().await?;
+        let mut provider_connections = HashMap::new();
+        for pc in pc_list {
+            provider_connections.insert(pc.id, pc);
+        }
+
         Ok(Self {
             memory,
             trace_meta,
@@ -252,6 +259,7 @@ impl<B: StorageBackend> PersistentStore<B> {
             eval_runs,
             eval_results,
             capture_rules,
+            provider_connections,
             backend,
         })
     }
@@ -410,6 +418,7 @@ impl<B: StorageBackend> PersistentStore<B> {
         self.eval_runs.clear();
         self.eval_results.clear();
         self.capture_rules.clear();
+        // Note: provider_connections are NOT cleared on "clear all data" — they are org settings, not trace data.
         if let Err(e) = self.backend.clear_spans().await {
             tracing::error!("failed to persist clear: {}", e);
         }
@@ -754,6 +763,32 @@ impl<B: StorageBackend> PersistentStore<B> {
     pub async fn delete_capture_rule(&mut self, id: CaptureRuleId) -> bool {
         if self.capture_rules.remove(&id).is_some() {
             let _ = self.backend.delete_capture_rule(id).await;
+            true
+        } else {
+            false
+        }
+    }
+
+    // --- Provider Connection operations ---
+
+    pub async fn save_provider_connection(&mut self, conn: ProviderConnection) {
+        if let Err(e) = self.backend.save_provider_connection(&conn).await {
+            tracing::error!("failed to persist provider connection: {}", e);
+        }
+        self.provider_connections.insert(conn.id, conn);
+    }
+
+    pub fn get_provider_connection(&self, id: ProviderConnectionId) -> Option<&ProviderConnection> {
+        self.provider_connections.get(&id)
+    }
+
+    pub fn list_provider_connections(&self) -> Vec<&ProviderConnection> {
+        self.provider_connections.values().collect()
+    }
+
+    pub async fn delete_provider_connection(&mut self, id: ProviderConnectionId) -> bool {
+        if self.provider_connections.remove(&id).is_some() {
+            let _ = self.backend.delete_provider_connection(id).await;
             true
         } else {
             false

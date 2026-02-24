@@ -42,7 +42,8 @@ use trace::{
     AnalyticsQuery, AnalyticsResponse, AnalyticsSummary, CaptureFilters, CaptureRule,
     CaptureRuleId, Datapoint, DatapointId, DatapointKind, DatapointSource, Dataset, DatasetId,
     EvalConfig, EvalResult, EvalRun, EvalRunId, EvalRunStatus, FileVersion,
-    Message, QueueItem, QueueItemId, QueueItemStatus, ScoreSummary, ScoringStrategy, Span,
+    Message, ProviderConnection, ProviderConnectionId, ProviderConnectionInfo,
+    QueueItem, QueueItemId, QueueItemStatus, ScoreSummary, ScoringStrategy, Span,
     SpanBuilder, SpanId, SpanKind, Trace, TraceId,
 };
 
@@ -538,6 +539,40 @@ pub struct ComparisonResponse {
 #[derive(Serialize, ToSchema)]
 pub struct CaptureRuleListResponse {
     pub rules: Vec<CaptureRule>,
+    pub count: usize,
+}
+
+// --- Provider Connection request/response types ---
+
+#[derive(Deserialize, ToSchema)]
+pub struct CreateProviderConnectionRequest {
+    pub name: String,
+    pub provider: String,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub default_model: Option<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateProviderConnectionRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub default_model: Option<String>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ProviderConnectionListResponse {
+    pub connections: Vec<ProviderConnectionInfo>,
     pub count: usize,
 }
 
@@ -2340,6 +2375,78 @@ async fn toggle_capture_rule(
     Ok(Json(updated))
 }
 
+// --- Provider Connection handlers ---
+
+async fn list_provider_connections(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+) -> Result<Json<ProviderConnectionListResponse>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
+    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let r = store.read().await;
+    let connections: Vec<ProviderConnectionInfo> = r.list_provider_connections().iter().map(|c| c.to_info()).collect();
+    let count = connections.len();
+    Ok(Json(ProviderConnectionListResponse { connections, count }))
+}
+
+async fn create_provider_connection(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Json(req): Json<CreateProviderConnectionRequest>,
+) -> Result<(StatusCode, Json<ProviderConnectionInfo>), StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let mut conn = ProviderConnection::new(req.name, req.provider);
+    conn.base_url = req.base_url;
+    conn.api_key = req.api_key;
+    conn.default_model = req.default_model;
+    let info = conn.to_info();
+    let mut w = store.write().await;
+    w.save_provider_connection(conn).await;
+    Ok((StatusCode::CREATED, Json(info)))
+}
+
+async fn update_provider_connection(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Path(conn_id): Path<ProviderConnectionId>,
+    Json(req): Json<UpdateProviderConnectionRequest>,
+) -> Result<Json<ProviderConnectionInfo>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let mut w = store.write().await;
+    let mut conn = w.get_provider_connection(conn_id).ok_or(StatusCode::NOT_FOUND)?.clone();
+    if let Some(name) = req.name { conn.name = name; }
+    if let Some(provider) = req.provider { conn.provider = provider; }
+    if let Some(base_url) = req.base_url { conn.base_url = Some(base_url); }
+    if let Some(api_key) = req.api_key { conn.api_key = Some(api_key); }
+    if let Some(default_model) = req.default_model { conn.default_model = Some(default_model); }
+    conn.updated_at = chrono::Utc::now();
+    let info = conn.to_info();
+    w.save_provider_connection(conn).await;
+    Ok(Json(info))
+}
+
+async fn delete_provider_connection_handler(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Path(conn_id): Path<ProviderConnectionId>,
+) -> StatusCode {
+    if !ctx.has_scope(auth::Scope::DatasetsWrite) {
+        return StatusCode::FORBIDDEN;
+    }
+    let store = match state.store_for_org(ctx.org_id).await {
+        Ok(s) => s,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    let mut w = store.write().await;
+    if w.delete_provider_connection(conn_id).await {
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
 // --- Eval execution engine ---
 
 async fn execute_eval_run(
@@ -2370,26 +2477,42 @@ async fn execute_eval_run(
     }
     let _ = events_tx.send(SystemEvent::EvalRunUpdated { run: run.clone() });
 
-    // Build the LLM client URL
-    let provider = run.config.provider.as_deref().unwrap_or("openai");
-    let base_url = run.config.provider_url.clone().unwrap_or_else(|| {
-        match provider {
-            "anthropic" => "https://api.anthropic.com/v1".to_string(),
-            "ollama" => "http://localhost:11434/v1".to_string(),
-            _ => "https://api.openai.com/v1".to_string(),
-        }
-    });
-
-    // Get API key from env
-    let api_key_env = run.config.api_key_env.as_deref().unwrap_or(match provider {
-        "anthropic" => "ANTHROPIC_API_KEY",
-        "ollama" => "",
-        _ => "OPENAI_API_KEY",
-    });
-    let api_key = if api_key_env.is_empty() {
-        String::new()
+    // Resolve provider connection if referenced
+    let provider_conn: Option<ProviderConnection> = if let Some(conn_id) = run.config.provider_connection_id {
+        let r = store.read().await;
+        r.get_provider_connection(conn_id).cloned()
     } else {
-        std::env::var(api_key_env).unwrap_or_default()
+        None
+    };
+
+    // Build the LLM client URL — provider connection takes precedence
+    let provider = provider_conn.as_ref().map(|c| c.provider.as_str())
+        .or(run.config.provider.as_deref())
+        .unwrap_or("openai");
+    let base_url = provider_conn.as_ref().and_then(|c| c.base_url.clone())
+        .or_else(|| run.config.provider_url.clone())
+        .unwrap_or_else(|| {
+            match provider {
+                "anthropic" => "https://api.anthropic.com/v1".to_string(),
+                "ollama" => "http://localhost:11434/v1".to_string(),
+                _ => "https://api.openai.com/v1".to_string(),
+            }
+        });
+
+    // Get API key — provider connection takes precedence, then env var fallback
+    let api_key = if let Some(ref conn) = provider_conn {
+        conn.api_key.clone().unwrap_or_default()
+    } else {
+        let api_key_env = run.config.api_key_env.as_deref().unwrap_or(match provider {
+            "anthropic" => "ANTHROPIC_API_KEY",
+            "ollama" => "",
+            _ => "OPENAI_API_KEY",
+        });
+        if api_key_env.is_empty() {
+            String::new()
+        } else {
+            std::env::var(api_key_env).unwrap_or_default()
+        }
     };
 
     let client = reqwest::Client::new();
@@ -3151,6 +3274,9 @@ fn build_router(
         .route("/datasets/:id/rules", get(list_capture_rules).post(create_capture_rule))
         .route("/rules/:rule_id", axum::routing::put(update_capture_rule).delete(delete_capture_rule_handler))
         .route("/rules/:rule_id/toggle", post(toggle_capture_rule))
+        // Provider connections
+        .route("/provider-connections", get(list_provider_connections).post(create_provider_connection))
+        .route("/provider-connections/:conn_id", axum::routing::put(update_provider_connection).delete(delete_provider_connection_handler))
         // Analytics
         .route("/analytics", post(post_analytics))
         .route("/analytics/summary", get(analytics_summary))

@@ -15,8 +15,8 @@ use storage::{
 use tokio::sync::Mutex;
 use trace::{
     CaptureRule, CaptureRuleId, Datapoint, DatapointId, Dataset, DatasetId, EvalResult,
-    EvalResultId, EvalRun, EvalRunId, FileVersion, QueueItem, QueueItemId, Span, SpanId, SpanKind,
-    SpanStatus, Trace, TraceId,
+    EvalResultId, EvalRun, EvalRunId, FileVersion, ProviderConnection, ProviderConnectionId,
+    QueueItem, QueueItemId, Span, SpanId, SpanKind, SpanStatus, Trace, TraceId,
 };
 
 // --- Migration system ---
@@ -151,6 +151,20 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX IF NOT EXISTS idx_capture_rules_dataset_id ON capture_rules(dataset_id);
     CREATE INDEX IF NOT EXISTS idx_capture_rules_enabled ON capture_rules(enabled);
+    "#,
+    // v4: provider connections
+    r#"
+    CREATE TABLE IF NOT EXISTS provider_connections (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        base_url TEXT,
+        api_key TEXT,
+        default_model TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        data TEXT NOT NULL
+    );
     "#,
 ];
 
@@ -1621,6 +1635,66 @@ impl StorageBackend for SqliteBackend {
     async fn delete_capture_rule(&self, id: CaptureRuleId) -> Result<bool, StorageError> {
         let conn = self.conn.lock().await;
         let deleted = conn.execute("DELETE FROM capture_rules WHERE id = ?1", params![id.to_string()])?;
+        Ok(deleted > 0)
+    }
+
+    // --- Provider Connection operations ---
+
+    async fn save_provider_connection(&self, conn_data: &ProviderConnection) -> Result<(), StorageError> {
+        let conn = self.conn.lock().await;
+        let data = serde_json::to_string(conn_data)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO provider_connections (id, name, provider, base_url, api_key, default_model, created_at, updated_at, data)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                conn_data.id.to_string(),
+                conn_data.name,
+                conn_data.provider,
+                conn_data.base_url,
+                conn_data.api_key,
+                conn_data.default_model,
+                conn_data.created_at.to_rfc3339(),
+                conn_data.updated_at.to_rfc3339(),
+                data,
+            ],
+        )?;
+        Ok(())
+    }
+
+    async fn get_provider_connection(&self, id: ProviderConnectionId) -> Result<Option<ProviderConnection>, StorageError> {
+        let conn = self.conn.lock().await;
+        match conn.query_row(
+            "SELECT data FROM provider_connections WHERE id = ?1",
+            params![id.to_string()],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(data) => {
+                let pc: ProviderConnection = serde_json::from_str(&data)?;
+                Ok(Some(pc))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StorageError::Backend(e.to_string())),
+        }
+    }
+
+    async fn list_provider_connections(&self) -> Result<Vec<ProviderConnection>, StorageError> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare("SELECT data FROM provider_connections ORDER BY created_at DESC")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut result = Vec::new();
+        for row in rows {
+            if let Ok(data) = row {
+                if let Ok(pc) = serde_json::from_str::<ProviderConnection>(&data) {
+                    result.push(pc);
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    async fn delete_provider_connection(&self, id: ProviderConnectionId) -> Result<bool, StorageError> {
+        let conn = self.conn.lock().await;
+        let deleted = conn.execute("DELETE FROM provider_connections WHERE id = ?1", params![id.to_string()])?;
         Ok(deleted > 0)
     }
 

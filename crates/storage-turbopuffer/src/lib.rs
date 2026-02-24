@@ -29,8 +29,8 @@ use storage::StorageBackend;
 use thiserror::Error;
 use trace::{
     CaptureRule, CaptureRuleId, Datapoint, DatapointId, Dataset, DatasetId, EvalResult,
-    EvalResultId, EvalRun, EvalRunId, FileVersion, QueueItem, QueueItemId, Span, SpanId, Trace,
-    TraceId,
+    EvalResultId, EvalRun, EvalRunId, FileVersion, ProviderConnection, ProviderConnectionId,
+    QueueItem, QueueItemId, Span, SpanId, Trace, TraceId,
 };
 use tracing::{debug, info, instrument};
 
@@ -857,6 +857,44 @@ impl StorageBackend for TurbopufferBackend {
 
     async fn delete_capture_rule(&self, id: CaptureRuleId) -> Result<bool, StorageError> {
         let count = self.delete_ids("capture_rules", vec![id.to_string()]).await?;
+        Ok(count > 0)
+    }
+
+    // --- Provider Connection operations ---
+
+    async fn save_provider_connection(&self, conn: &ProviderConnection) -> Result<(), StorageError> {
+        let row = serde_json::json!({
+            "id": conn.id.to_string(),
+            "data": serde_json::to_string(conn)?,
+            "name": conn.name,
+            "provider": conn.provider,
+            "created_at": conn.created_at.to_rfc3339(),
+            "updated_at": conn.updated_at.to_rfc3339(),
+        });
+        self.upsert("provider_connections", vec![row]).await?;
+        Ok(())
+    }
+
+    async fn get_provider_connection(&self, id: ProviderConnectionId) -> Result<Option<ProviderConnection>, StorageError> {
+        match self.get_by_id("provider_connections", &id.to_string()).await? {
+            Some(row) => Ok(Self::extract_data(&row)),
+            None => Ok(None),
+        }
+    }
+
+    async fn list_provider_connections(&self) -> Result<Vec<ProviderConnection>, StorageError> {
+        let results = self.query("provider_connections", None, 10000).await?;
+        let mut conns = Vec::new();
+        for row in results {
+            if let Some(conn) = Self::extract_data::<ProviderConnection>(&row) {
+                conns.push(conn);
+            }
+        }
+        Ok(conns)
+    }
+
+    async fn delete_provider_connection(&self, id: ProviderConnectionId) -> Result<bool, StorageError> {
+        let count = self.delete_ids("provider_connections", vec![id.to_string()]).await?;
         Ok(count > 0)
     }
 

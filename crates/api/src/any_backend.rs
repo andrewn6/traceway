@@ -9,8 +9,8 @@ use storage_sqlite::SqliteBackend;
 use storage_turbopuffer::TurbopufferBackend;
 use trace::{
     CaptureRule, CaptureRuleId, Datapoint, DatapointId, Dataset, DatasetId, EvalResult,
-    EvalResultId, EvalRun, EvalRunId, FileVersion, QueueItem, QueueItemId, Span, SpanId, Trace,
-    TraceId,
+    EvalResultId, EvalRun, EvalRunId, FileVersion, ProviderConnection, ProviderConnectionId,
+    QueueItem, QueueItemId, Span, SpanId, Trace, TraceId,
 };
 
 use storage::error::StorageError;
@@ -197,6 +197,24 @@ impl StorageBackend for AnyBackend {
         delegate!(self, delete_capture_rule, id)
     }
 
+    // --- Provider Connection operations ---
+
+    async fn save_provider_connection(&self, conn: &ProviderConnection) -> Result<(), StorageError> {
+        delegate!(self, save_provider_connection, conn)
+    }
+
+    async fn get_provider_connection(&self, id: ProviderConnectionId) -> Result<Option<ProviderConnection>, StorageError> {
+        delegate!(self, get_provider_connection, id)
+    }
+
+    async fn list_provider_connections(&self) -> Result<Vec<ProviderConnection>, StorageError> {
+        delegate!(self, list_provider_connections)
+    }
+
+    async fn delete_provider_connection(&self, id: ProviderConnectionId) -> Result<bool, StorageError> {
+        delegate!(self, delete_provider_connection, id)
+    }
+
     // --- File operations ---
 
     async fn save_file_version(&self, version: &FileVersion) -> Result<(), StorageError> {
@@ -283,6 +301,10 @@ impl StorageBackend for AnyBackend {
 
     async fn list_capture_rules_all(&self) -> Result<Vec<CaptureRule>, StorageError> {
         delegate!(self, list_capture_rules_all)
+    }
+
+    async fn load_all_provider_connections(&self) -> Result<Vec<ProviderConnection>, StorageError> {
+        delegate!(self, load_all_provider_connections)
     }
 
     // --- Metadata ---
