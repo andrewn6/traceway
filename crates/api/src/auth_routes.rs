@@ -485,6 +485,21 @@ async fn create_api_key_handler(
         (StatusCode::SERVICE_UNAVAILABLE, "Auth store not configured".into())
     })?;
 
+    // Enforce API key limit per plan
+    let existing_keys = auth_store
+        .list_api_keys_for_org(ctx.org_id)
+        .await
+        .map_err(internal_err)?;
+    let org = auth_store.get_org(ctx.org_id).await.map_err(internal_err)?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Organization not found".into()))?;
+    let max_keys = org.plan.max_api_keys();
+    if existing_keys.len() >= max_keys {
+        return Err((
+            StatusCode::FORBIDDEN,
+            format!("API key limit reached ({max_keys}). Upgrade your plan for more."),
+        ));
+    }
+
     // Safety net: if scopes are empty (e.g. client omitted them but sent []),
     // fall back to default SDK scopes rather than creating a useless key.
     let scopes = if req.scopes.is_empty() {
