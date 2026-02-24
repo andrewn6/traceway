@@ -184,62 +184,156 @@
 	<div class="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-bg to-transparent"></div>
 </section>
 
-<!-- SOCIAL PROOF -->
-<section class="py-12 border-y border-border/40">
-	<div class="max-w-6xl mx-auto px-6 md:px-10 text-center">
-		<p class="text-[12px] uppercase tracking-widest text-text-muted mb-6">Works with every provider</p>
-		<div class="flex items-center justify-center gap-10 md:gap-16 flex-wrap">
-			{#each ['OpenAI', 'Anthropic', 'Ollama', 'Mistral', 'Any OpenAI-compatible API'] as provider}
-				<span class="font-mono text-[13px] text-text-muted/50">{provider}</span>
-			{/each}
+<!-- BEFORE / AFTER — the "aha" moment -->
+<section id="features" class="py-28 md:py-36 relative">
+	<div class="max-w-6xl mx-auto px-6 md:px-10">
+		<InView>
+			<div class="text-center mb-20">
+				<h2 class="text-3xl md:text-[2.75rem] font-semibold tracking-tight text-text leading-tight">
+					Your AI returned a wrong answer.<br class="hidden md:inline" />
+					<span class="text-text-secondary">Now what?</span>
+				</h2>
+			</div>
+		</InView>
+
+		<!-- Side by side: Without vs With -->
+		<div class="grid md:grid-cols-2 gap-6 md:gap-0">
+			<!-- WITHOUT -->
+			<InView>
+				<div class="relative md:border-r border-border/30 md:pr-10">
+					<div class="text-[11px] uppercase tracking-widest text-red-400/70 font-mono mb-6">Without Traceway</div>
+					<div class="space-y-4">
+						{#each [
+							{ time: '14:32', line: 'POST /api/chat — 200 OK — 2.3s', dim: false },
+							{ time: '14:32', line: 'user_id=usr_8f3 session=sess_29x', dim: true },
+							{ time: '', line: '', dim: true },
+							{ time: '???', line: 'Can\'t reproduce. Works fine for me.', dim: false },
+							{ time: '???', line: 'Adding print() statements...', dim: true },
+							{ time: '???', line: 'Redeploying to staging...', dim: true },
+							{ time: '???', line: 'Waiting for it to happen again...', dim: true },
+						] as log}
+							{#if log.line}
+								<div class="flex items-start gap-3 font-mono text-[12px] {log.dim ? 'text-text-muted/40' : 'text-text-muted/70'}">
+									<span class="shrink-0 w-10 text-right text-text-muted/30">{log.time}</span>
+									<span>{log.line}</span>
+								</div>
+							{:else}
+								<div class="h-4"></div>
+							{/if}
+						{/each}
+						<div class="mt-6 pt-6 border-t border-border/20 font-mono text-[13px] text-red-400/50">
+							3 hours later... found it. Maybe.
+						</div>
+					</div>
+				</div>
+			</InView>
+
+			<!-- WITH -->
+			<InView delay={200}>
+				<div class="md:pl-10">
+					<div class="text-[11px] uppercase tracking-widest text-accent/70 font-mono mb-6">With Traceway</div>
+					<!-- Mini trace visualization -->
+					<div class="rounded-lg border border-accent/20 bg-accent/[0.02] overflow-hidden">
+						<div class="px-4 py-2.5 border-b border-accent/10 flex items-center justify-between">
+							<span class="font-mono text-[12px] text-accent/80">customer-support-bot</span>
+							<span class="font-mono text-[10px] text-text-muted">2.3s &middot; $0.043</span>
+						</div>
+						<div class="p-4 space-y-2">
+							{#each [
+								{ name: 'rewrite-query', w: '15%', color: 'bg-purple-400/30', label: '180ms' },
+								{ name: 'search-kb', w: '8%', color: 'bg-cyan-400/30', label: '92ms', bad: true },
+								{ name: 'build-context', w: '4%', color: 'bg-text-muted/20', label: '45ms' },
+								{ name: 'generate-answer', w: '65%', color: 'bg-accent/25', label: '1.8s' },
+							] as s}
+								<div class="flex items-center gap-3">
+									<span class="font-mono text-[10px] text-text-muted w-28 shrink-0 text-right">{s.name}</span>
+									<div class="flex-1 h-5 relative">
+										<div class="h-full rounded-sm {s.color} {s.bad ? 'ring-1 ring-red-400/40' : ''}" style="width: {s.w};">
+											{#if s.bad}
+												<span class="absolute -top-5 left-0 text-[9px] font-mono text-red-400/70">wrong doc returned</span>
+											{/if}
+										</div>
+									</div>
+									<span class="font-mono text-[10px] text-text-muted/50 w-12 shrink-0">{s.label}</span>
+								</div>
+							{/each}
+						</div>
+					</div>
+					<div class="mt-6 pt-6 border-t border-accent/10 font-mono text-[13px] text-accent/60">
+						5 minutes. Root cause found. 23 affected users identified.
+					</div>
+				</div>
+			</InView>
 		</div>
 	</div>
 </section>
 
-<!-- VALUE PROP — the "why" with visual punch -->
-<section class="py-24 md:py-32 relative overflow-hidden">
-	<div class="absolute inset-0 bg-gradient-to-b from-transparent via-accent/[0.015] to-transparent"></div>
-	<div class="relative max-w-6xl mx-auto px-6 md:px-10">
+<!-- HOW IT WORKS — interactive terminal-style -->
+<section id="how-it-works" class="py-28 md:py-36 relative overflow-hidden">
+	<!-- Full-width accent line -->
+	<div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-accent/20 to-transparent"></div>
+
+	<div class="max-w-6xl mx-auto px-6 md:px-10">
 		<InView>
-			<div class="text-center mb-16 md:mb-20">
+			<div class="text-center mb-20">
 				<h2 class="text-3xl md:text-[2.75rem] font-semibold tracking-tight text-text leading-tight">
-					Your AI app returned a wrong answer.<br class="hidden md:inline" />
-					<span class="text-text-secondary">Now what?</span>
+					Three commands. Full observability.
 				</h2>
-				<p class="text-text-secondary mt-5 max-w-xl mx-auto leading-relaxed">
-					Without observability, debugging AI is guesswork. With Traceway, you see every step the model took and find the root cause in minutes.
-				</p>
 			</div>
 		</InView>
 
-		<div class="grid md:grid-cols-3 gap-6">
+		<!-- Steps as connected terminals -->
+		<div class="max-w-3xl mx-auto space-y-0">
 			{#each [
 				{
-					title: 'See every step',
-					desc: 'Full trace of every LLM call, retrieval, and tool use. Inputs, outputs, latency, and cost at a glance.',
-					num: '01',
+					step: '01',
+					title: 'Install',
+					cmd: '$ cargo install --git https://github.com/blastgits/traceway traceway',
+					output: ['Compiling traceway v0.1.0', 'Installed to ~/.cargo/bin/traceway'],
+					accent: false
+				},
+				{
+					step: '02',
+					title: 'Run',
+					cmd: '$ traceway --target-url https://api.openai.com',
+					output: ['API server on 127.0.0.1:3000', 'Proxy on 127.0.0.1:3001 -> api.openai.com'],
 					accent: true
 				},
 				{
-					title: 'Find the problem',
-					desc: 'Wrong documents retrieved? Bad prompt? Model hallucination? See exactly which step in the chain broke.',
-					num: '02',
-					accent: false
+					step: '03',
+					title: 'Trace',
+					cmd: '$ python app.py  # point base_url at :3001',
+					output: ['3 traces captured (247ms avg, $0.0012 total)', 'Dashboard: http://localhost:3000'],
+					accent: true
 				},
-				{
-					title: 'Prove the fix',
-					desc: 'Verify fixes with new traces. Search across all requests to find every affected user.',
-					num: '03',
-					accent: false
-				}
-			] as item, i}
-				<InView delay={i * 80}>
-					<div class="bg-bg-secondary/60 border border-border/50 rounded-xl p-7 hover:border-border transition-all group h-full">
-						<div class="flex items-center gap-3 mb-4">
-							<span class="h-8 w-8 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center text-accent font-mono text-[11px] font-medium">{item.num}</span>
+			] as step, i}
+				<InView delay={i * 120}>
+					<div class="relative">
+						<!-- Connector line -->
+						{#if i > 0}
+							<div class="absolute -top-6 left-8 w-px h-6 bg-border/40"></div>
+						{/if}
+						<div class="flex gap-6 items-start">
+							<!-- Step indicator -->
+							<div class="shrink-0 w-16 pt-4">
+								<div class="text-accent font-mono text-[11px] font-semibold">{step.step}</div>
+								<div class="text-[13px] text-text-secondary mt-0.5">{step.title}</div>
+							</div>
+							<!-- Terminal block -->
+							<div class="flex-1 rounded-lg border border-border/60 bg-bg-secondary/80 overflow-hidden mb-6">
+								<div class="px-4 py-2 border-b border-border/30 flex items-center gap-1.5">
+									<div class="h-2 w-2 rounded-full bg-text-muted/15"></div>
+									<div class="h-2 w-2 rounded-full bg-text-muted/15"></div>
+									<div class="h-2 w-2 rounded-full bg-text-muted/15"></div>
+								</div>
+								<div class="p-4 font-mono text-[12px] leading-relaxed">
+									<div class="text-text/80">{step.cmd}</div>
+									{#each step.output as line}
+										<div class="text-{step.accent ? 'accent' : 'text-muted'}/60 mt-0.5">{step.accent ? '✓ ' : '  '}{line}</div>
+									{/each}
+								</div>
+							</div>
 						</div>
-						<h3 class="text-[16px] font-medium text-text mb-2">{item.title}</h3>
-						<p class="text-sm text-text-secondary leading-relaxed">{item.desc}</p>
 					</div>
 				</InView>
 			{/each}
@@ -247,123 +341,98 @@
 	</div>
 </section>
 
-<!-- FEATURES -->
-<section id="features" class="py-24 md:py-32 border-t border-border/40">
+<!-- FEATURES — bento grid -->
+<section class="py-28 md:py-36 relative overflow-hidden">
+	<div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border/40 to-transparent"></div>
+
 	<div class="max-w-6xl mx-auto px-6 md:px-10">
 		<InView>
-			<div class="text-center mb-16 md:mb-20">
-				<p class="text-[12px] uppercase tracking-widest text-accent/70 mb-4">Features</p>
-				<h2 class="text-3xl md:text-4xl font-semibold tracking-tight text-text">
-					Everything you need to debug LLM applications
+			<div class="text-center mb-16">
+				<h2 class="text-3xl md:text-[2.75rem] font-semibold tracking-tight text-text">
+					Built for real AI workloads
 				</h2>
-				<p class="text-text-secondary mt-4 max-w-lg mx-auto leading-relaxed">
-					From local development to production monitoring. One tool for the entire lifecycle.
-				</p>
 			</div>
 		</InView>
 
-		<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-px bg-border/50 border border-border/50 rounded-lg overflow-hidden">
-			{#each [
-				{
-					title: 'Full trace capture',
-					desc: 'Every LLM call logged with inputs, outputs, latency, tokens, and cost. Nested spans for complex chains.',
-				},
-				{
-					title: 'Real-time dashboard',
-					desc: 'Live analytics with interactive charts. Filter by model, time range, status. See trends at a glance.',
-				},
-				{
-					title: 'Local-first',
-					desc: 'Runs as a lightweight daemon on your machine. No cloud account needed. Your data stays on disk.',
-				},
-				{
-					title: 'Cloud ready',
-					desc: 'When you need scale, deploy to the cloud with Postgres + Turbopuffer. Same API, same dashboard.',
-				},
-				{
-					title: 'Any LLM provider',
-					desc: 'Transparent proxy works with OpenAI, Anthropic, Ollama, or any OpenAI-compatible API.',
-				},
-				{
-					title: 'Open source',
-					desc: 'MIT licensed. Self-host, fork, contribute. Built in Rust for speed and reliability.',
-				}
-			] as card, i}
-				<InView delay={i * 50}>
-					<div class="bg-bg p-8 hover:bg-bg-secondary transition-colors h-full">
-						<h3 class="text-[15px] font-medium text-text mb-3">{card.title}</h3>
-						<p class="text-sm text-text-secondary leading-relaxed">{card.desc}</p>
+		<!-- Bento grid — asymmetric, not boring -->
+		<div class="grid grid-cols-1 md:grid-cols-6 gap-4">
+			<!-- Big card: trace capture (spans 4 cols) -->
+			<InView class="md:col-span-4">
+				<div class="bg-bg-secondary/50 border border-border/40 rounded-2xl p-8 relative overflow-hidden group hover:border-border/70 transition-all h-full">
+					<div class="absolute top-0 right-0 w-64 h-64 bg-accent/[0.03] blur-[100px] rounded-full group-hover:bg-accent/[0.05] transition-all"></div>
+					<div class="relative">
+						<div class="text-accent font-mono text-[11px] mb-3">Full trace capture</div>
+						<h3 class="text-xl font-semibold text-text mb-2">Every call. Every span. Every token.</h3>
+						<p class="text-sm text-text-secondary max-w-md leading-relaxed">Nested spans for complex chains — RAG pipelines, agent loops, tool calls. See inputs, outputs, latency, and cost for every step.</p>
+						<!-- Mini waterfall inside -->
+						<div class="mt-6 space-y-1.5 max-w-sm">
+							{#each [
+								{ name: 'agent-loop', w: '100%', c: 'bg-accent/15' },
+								{ name: '  llm-call', w: '40%', c: 'bg-accent/20' },
+								{ name: '  tool:search', w: '25%', c: 'bg-purple-400/20', ml: '42%' },
+								{ name: '  llm-call', w: '30%', c: 'bg-accent/20', ml: '68%' },
+							] as bar}
+								<div class="flex items-center gap-2">
+									<span class="font-mono text-[9px] text-text-muted/40 w-20 shrink-0 text-right">{bar.name}</span>
+									<div class="flex-1 h-3 relative">
+										<div class="absolute top-0 h-full rounded-sm {bar.c}" style="width: {bar.w}; margin-left: {bar.ml || '0'}"></div>
+									</div>
+								</div>
+							{/each}
+						</div>
 					</div>
-				</InView>
-			{/each}
+				</div>
+			</InView>
+
+			<!-- Side cards (spans 2 cols, stacked) -->
+			<InView delay={80} class="md:col-span-2 flex flex-col gap-4">
+				<div class="bg-bg-secondary/50 border border-border/40 rounded-2xl p-6 hover:border-border/70 transition-all flex-1">
+					<div class="text-purple-400 font-mono text-[11px] mb-3">Any provider</div>
+					<h3 class="text-[15px] font-medium text-text mb-2">OpenAI, Anthropic, Ollama</h3>
+					<p class="text-[13px] text-text-secondary leading-relaxed">Transparent proxy. Zero code changes. Auto-detects provider.</p>
+				</div>
+				<div class="bg-bg-secondary/50 border border-border/40 rounded-2xl p-6 hover:border-border/70 transition-all flex-1">
+					<div class="text-cyan-400 font-mono text-[11px] mb-3">Built in Rust</div>
+					<h3 class="text-[15px] font-medium text-text mb-2">Fast. Really fast.</h3>
+					<p class="text-[13px] text-text-secondary leading-relaxed">Sub-millisecond overhead. Single binary, no containers, no dependencies.</p>
+				</div>
+			</InView>
+
+			<!-- Bottom row: 3 equal cards -->
+			<InView delay={100} class="md:col-span-2">
+				<div class="bg-bg-secondary/50 border border-border/40 rounded-2xl p-6 hover:border-border/70 transition-all h-full">
+					<div class="text-amber-400 font-mono text-[11px] mb-3">Real-time dashboard</div>
+					<h3 class="text-[15px] font-medium text-text mb-2">Live analytics</h3>
+					<p class="text-[13px] text-text-secondary leading-relaxed">Charts, filters, trends. See what's happening right now.</p>
+				</div>
+			</InView>
+			<InView delay={180} class="md:col-span-2">
+				<div class="bg-bg-secondary/50 border border-border/40 rounded-2xl p-6 hover:border-border/70 transition-all h-full">
+					<div class="text-accent font-mono text-[11px] mb-3">Local-first</div>
+					<h3 class="text-[15px] font-medium text-text mb-2">Your data stays yours</h3>
+					<p class="text-[13px] text-text-secondary leading-relaxed">SQLite on your machine. No cloud account needed. Upgrade to cloud when ready.</p>
+				</div>
+			</InView>
+			<InView delay={260} class="md:col-span-2">
+				<div class="bg-bg-secondary/50 border border-border/40 rounded-2xl p-6 hover:border-border/70 transition-all h-full">
+					<div class="text-text-muted font-mono text-[11px] mb-3">Open source</div>
+					<h3 class="text-[15px] font-medium text-text mb-2">MIT licensed</h3>
+					<p class="text-[13px] text-text-secondary leading-relaxed">Self-host, fork, contribute. No vendor lock-in, ever.</p>
+				</div>
+			</InView>
 		</div>
-	</div>
-</section>
-
-<!-- HOW IT WORKS — code + architecture -->
-<section id="how-it-works" class="py-24 md:py-32 border-t border-border/40">
-	<div class="max-w-6xl mx-auto px-6 md:px-10">
-		<InView>
-			<div class="text-center mb-16 md:mb-20">
-				<p class="text-[12px] uppercase tracking-widest text-accent/70 mb-4">How it works</p>
-				<h2 class="text-3xl md:text-4xl font-semibold tracking-tight text-text">
-					One line to start tracing
-				</h2>
-				<p class="text-text-secondary mt-4 max-w-lg mx-auto leading-relaxed">
-					Point your LLM client at the Traceway proxy. Every call is captured automatically.
-				</p>
-			</div>
-		</InView>
-
-		<InView delay={80}>
-			<div class="max-w-2xl mx-auto">
-				<div class="rounded-lg border border-border bg-bg-secondary overflow-hidden">
-					<div class="flex items-center justify-between border-b border-border/60 px-4 py-2.5">
-						<span class="text-[11px] text-text-muted font-mono">app.py</span>
-						<span class="text-[11px] text-text-muted font-mono">python</span>
-					</div>
-					{@html `<div class="p-5 font-mono text-[12px] leading-relaxed overflow-x-auto">
-<div><span class="text-text-muted">import</span> <span class="text-text">openai</span></div>
-<div class="mt-3"></div>
-<div class="text-text-muted"># Point at the Traceway proxy — that's it</div>
-<div><span class="text-text">client</span> <span class="text-text-muted">=</span> <span class="text-text">openai.OpenAI(</span></div>
-<div class="text-accent">    base_url=<span class="text-accent-dim">"http://localhost:3001/v1"</span></div>
-<div><span class="text-text">)</span></div>
-<div class="mt-3"></div>
-<div class="text-text-muted"># Every call is traced automatically</div>
-<div><span class="text-text">response</span> <span class="text-text-muted">=</span> <span class="text-text">client.chat.completions.create(</span></div>
-<div>    <span class="text-text">model=</span><span class="text-accent-dim">"gpt-4o"</span><span class="text-text-muted">,</span></div>
-<div>    <span class="text-text">messages=[{</span><span class="text-accent-dim">"role"</span><span class="text-text">: </span><span class="text-accent-dim">"user"</span><span class="text-text">, </span><span class="text-accent-dim">"content"</span><span class="text-text">: </span><span class="text-accent-dim">"Hello!"</span><span class="text-text">}]</span></div>
-<div><span class="text-text">)</span></div>
-</div>`}
-				</div>
-			</div>
-		</InView>
-
-		<!-- Architecture -->
-		<InView delay={150}>
-			<div class="mt-16 max-w-3xl mx-auto">
-				<div class="rounded-lg border border-border bg-bg-secondary overflow-hidden">
-					<div class="border-b border-border/60 px-4 py-2.5">
-						<span class="text-[11px] text-text-muted font-mono">Architecture</span>
-					</div>
-					<div class="p-6 overflow-x-auto">
-						<ArchDiagram />
-					</div>
-				</div>
-			</div>
-		</InView>
 	</div>
 </section>
 
 <!-- PRICING -->
-<section id="pricing" class="py-24 md:py-32 border-t border-border/40 relative overflow-hidden">
+<section id="pricing" class="py-28 md:py-36 relative overflow-hidden">
+	<div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-accent/20 to-transparent"></div>
 	<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1000px] h-[600px] bg-accent/[0.02] blur-[200px] rounded-full"></div>
+
 	<div class="relative max-w-6xl mx-auto px-6 md:px-10">
 		<InView>
-			<div class="text-center mb-16 md:mb-20">
-				<p class="text-[12px] uppercase tracking-widest text-accent/70 mb-4">Pricing</p>
-				<h2 class="text-3xl md:text-4xl font-semibold tracking-tight text-text">
+			<div class="text-center mb-20">
+				<h2 class="text-3xl md:text-[2.75rem] font-semibold tracking-tight text-text">
 					Start free. Scale when you're ready.
 				</h2>
 				<p class="text-text-secondary mt-4 max-w-lg mx-auto leading-relaxed">
@@ -372,198 +441,114 @@
 			</div>
 		</InView>
 
-		<div class="grid md:grid-cols-2 lg:grid-cols-4 gap-5 max-w-5xl mx-auto">
-			<!-- Free -->
-			<InView delay={0}>
-				<div class="bg-bg-secondary border border-border/60 rounded-xl p-6 flex flex-col h-full">
-					<div class="mb-6">
-						<div class="text-[12px] text-text-muted uppercase tracking-wider mb-3">Free</div>
-						<div class="flex items-baseline gap-1">
-							<span class="text-3xl font-semibold text-text">$0</span>
-							<span class="text-sm text-text-muted">/mo</span>
+		<div class="grid md:grid-cols-3 gap-5 max-w-4xl mx-auto">
+			{#each [
+				{
+					name: 'Free', price: '$0', period: '/mo', highlight: false,
+					desc: 'For getting started and local development.',
+					features: ['10K spans/month', '7-day retention', '1 team member', '1 API key', 'Community support'],
+					cta: 'Get started', ctaStyle: 'border'
+				},
+				{
+					name: 'Pro', price: '$20', period: '/mo', highlight: true,
+					desc: 'For teams shipping AI to production.',
+					features: ['1M spans/month', '30-day retention', '5 team members', '5 API keys', 'Email support'],
+					cta: 'Start free trial', ctaStyle: 'accent'
+				},
+				{
+					name: 'Team', price: '$100', period: '/mo', highlight: false,
+					desc: 'For growing teams that need full observability.',
+					features: ['10M spans/month', '90-day retention', '50 team members', 'Unlimited API keys', 'Priority support'],
+					cta: 'Get started', ctaStyle: 'border'
+				},
+			] as plan, i}
+				<InView delay={i * 80}>
+					<div class="relative {plan.highlight ? 'bg-bg-secondary border-2 border-accent/40 shadow-[0_0_80px_rgba(110,231,183,0.06)]' : 'bg-bg-secondary/50 border border-border/40'} rounded-2xl p-7 flex flex-col h-full">
+						{#if plan.highlight}
+							<div class="absolute -top-3.5 left-1/2 -translate-x-1/2">
+								<span class="bg-accent text-bg text-[10px] font-bold uppercase tracking-wider px-4 py-1.5 rounded-full">Most popular</span>
+							</div>
+						{/if}
+						<div class="mb-6">
+							<div class="text-[12px] {plan.highlight ? 'text-accent' : 'text-text-muted'} uppercase tracking-wider mb-3 font-mono">{plan.name}</div>
+							<div class="flex items-baseline gap-1">
+								<span class="text-4xl font-bold text-text">{plan.price}</span>
+								<span class="text-sm text-text-muted">{plan.period}</span>
+							</div>
+							<p class="text-[13px] text-text-secondary mt-2">{plan.desc}</p>
 						</div>
-						<p class="text-[13px] text-text-secondary mt-2">For getting started and local development.</p>
+						<ul class="space-y-2.5 text-[13px] flex-1 mb-7">
+							{#each plan.features as feature}
+								<li class="flex items-center gap-2.5 text-text-secondary">
+									<svg class="w-3.5 h-3.5 shrink-0 {plan.highlight ? 'text-accent' : 'text-text-muted/60'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+									{feature}
+								</li>
+							{/each}
+						</ul>
+						<a
+							href="https://platform.traceway.ai/signup"
+							class="block text-center text-sm rounded-lg px-4 py-3 transition-all {plan.ctaStyle === 'accent' ? 'font-semibold bg-accent text-bg hover:brightness-110' : 'text-text-secondary border border-border hover:bg-bg-tertiary hover:text-text'}"
+						>
+							{plan.cta}
+						</a>
 					</div>
-					<ul class="space-y-2.5 text-[13px] flex-1 mb-6">
-						{#each [
-							'10K spans/month',
-							'7-day retention',
-							'1 team member',
-							'1 API key',
-							'Community support'
-						] as item}
-							<li class="flex items-center gap-2.5 text-text-secondary">
-								<svg class="w-3.5 h-3.5 shrink-0 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-								{item}
-							</li>
-						{/each}
-					</ul>
-					<a
-						href="https://platform.traceway.ai/signup"
-						class="block text-center text-sm text-text-secondary border border-border rounded-lg px-4 py-2.5 hover:bg-bg-tertiary hover:text-text transition-all"
-					>
-						Get started
-					</a>
+				</InView>
+			{/each}
+		</div>
+
+		<!-- Enterprise + Self-hosted -->
+		<div class="grid md:grid-cols-2 gap-5 max-w-4xl mx-auto mt-5">
+			<InView delay={100}>
+				<div class="bg-bg-secondary/50 border border-border/40 rounded-2xl px-7 py-6 flex items-center justify-between gap-4">
+					<div>
+						<div class="text-sm font-medium text-text">Enterprise</div>
+						<p class="text-[13px] text-text-secondary mt-0.5">Unlimited everything. SSO, SAML, dedicated support.</p>
+					</div>
+					<a href="mailto:support@traceway.ai" class="shrink-0 text-sm text-text-secondary border border-border rounded-lg px-5 py-2 hover:bg-bg-tertiary hover:text-text transition-all">Contact us</a>
 				</div>
 			</InView>
-
-			<!-- Pro — highlighted -->
-			<InView delay={60}>
-				<div class="relative bg-bg-secondary border-2 border-accent/40 rounded-xl p-6 flex flex-col h-full shadow-[0_0_60px_rgba(110,231,183,0.06)]">
-					<div class="absolute -top-3 left-1/2 -translate-x-1/2">
-						<span class="bg-accent text-bg text-[10px] font-semibold uppercase tracking-wider px-3 py-1 rounded-full">Most popular</span>
+			<InView delay={150}>
+				<div class="bg-bg-secondary/50 border border-border/40 rounded-2xl px-7 py-6 flex items-center justify-between gap-4">
+					<div>
+						<div class="text-sm font-medium text-text">Self-hosted</div>
+						<p class="text-[13px] text-text-secondary mt-0.5">Free forever. Unlimited traces. No account needed.</p>
 					</div>
-					<div class="mb-6">
-						<div class="text-[12px] text-accent uppercase tracking-wider mb-3">Pro</div>
-						<div class="flex items-baseline gap-1">
-							<span class="text-3xl font-semibold text-text">$20</span>
-							<span class="text-sm text-text-muted">/mo</span>
-						</div>
-						<p class="text-[13px] text-text-secondary mt-2">For teams shipping AI to production.</p>
-					</div>
-					<ul class="space-y-2.5 text-[13px] flex-1 mb-6">
-						{#each [
-							'1M spans/month',
-							'30-day retention',
-							'5 team members',
-							'5 API keys',
-							'Email support'
-						] as item}
-							<li class="flex items-center gap-2.5 text-text-secondary">
-								<svg class="w-3.5 h-3.5 shrink-0 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-								{item}
-							</li>
-						{/each}
-					</ul>
-					<a
-						href="https://platform.traceway.ai/signup"
-						class="block text-center text-sm font-medium bg-accent text-bg rounded-lg px-4 py-2.5 hover:brightness-110 transition-all"
-					>
-						Start free trial
-					</a>
-				</div>
-			</InView>
-
-			<!-- Team -->
-			<InView delay={120}>
-				<div class="bg-bg-secondary border border-border/60 rounded-xl p-6 flex flex-col h-full">
-					<div class="mb-6">
-						<div class="text-[12px] text-text-muted uppercase tracking-wider mb-3">Team</div>
-						<div class="flex items-baseline gap-1">
-							<span class="text-3xl font-semibold text-text">$100</span>
-							<span class="text-sm text-text-muted">/mo</span>
-						</div>
-						<p class="text-[13px] text-text-secondary mt-2">For growing teams that need full observability.</p>
-					</div>
-					<ul class="space-y-2.5 text-[13px] flex-1 mb-6">
-						{#each [
-							'10M spans/month',
-							'90-day retention',
-							'50 team members',
-							'Unlimited API keys',
-							'Priority support'
-						] as item}
-							<li class="flex items-center gap-2.5 text-text-secondary">
-								<svg class="w-3.5 h-3.5 shrink-0 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-								{item}
-							</li>
-						{/each}
-					</ul>
-					<a
-						href="https://platform.traceway.ai/signup"
-						class="block text-center text-sm text-text-secondary border border-border rounded-lg px-4 py-2.5 hover:bg-bg-tertiary hover:text-text transition-all"
-					>
-						Get started
-					</a>
-				</div>
-			</InView>
-
-			<!-- Enterprise -->
-			<InView delay={180}>
-				<div class="bg-bg-secondary border border-border/60 rounded-xl p-6 flex flex-col h-full">
-					<div class="mb-6">
-						<div class="text-[12px] text-text-muted uppercase tracking-wider mb-3">Enterprise</div>
-						<div class="flex items-baseline gap-1">
-							<span class="text-2xl font-semibold text-text">Custom</span>
-						</div>
-						<p class="text-[13px] text-text-secondary mt-2">For organizations with advanced needs.</p>
-					</div>
-					<ul class="space-y-2.5 text-[13px] flex-1 mb-6">
-						{#each [
-							'Unlimited spans',
-							'365-day retention',
-							'Unlimited members',
-							'SSO & SAML',
-							'Dedicated support'
-						] as item}
-							<li class="flex items-center gap-2.5 text-text-secondary">
-								<svg class="w-3.5 h-3.5 shrink-0 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-								{item}
-							</li>
-						{/each}
-					</ul>
-					<a
-						href="mailto:support@traceway.ai"
-						class="block text-center text-sm text-text-secondary border border-border rounded-lg px-4 py-2.5 hover:bg-bg-tertiary hover:text-text transition-all"
-					>
-						Contact us
-					</a>
+					<a href="https://github.com/blastgits/traceway" target="_blank" rel="noopener" class="shrink-0 text-sm text-text-secondary border border-border rounded-lg px-5 py-2 hover:bg-bg-tertiary hover:text-text transition-all">GitHub</a>
 				</div>
 			</InView>
 		</div>
 
-		<!-- Self-hosted callout -->
-		<InView delay={200}>
-			<div class="mt-10 max-w-5xl mx-auto">
-				<div class="bg-bg-secondary/50 border border-border/40 rounded-xl px-6 py-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-					<div>
-						<div class="text-sm font-medium text-text">Self-hosted is always free</div>
-						<p class="text-[13px] text-text-secondary mt-1">Run on your own infrastructure with unlimited traces. No account required.</p>
-					</div>
-					<a
-						href="https://github.com/blastgits/traceway"
-						target="_blank"
-						rel="noopener"
-						class="shrink-0 inline-flex items-center gap-2 text-sm text-text-secondary border border-border rounded-lg px-4 py-2 hover:bg-bg-tertiary hover:text-text transition-all"
-					>
-						View on GitHub
-					</a>
-				</div>
-			</div>
-		</InView>
-
 		<p class="text-center text-[12px] text-text-muted mt-8">
-			All plans billed monthly via <a href="https://polar.sh" target="_blank" rel="noopener" class="text-accent/70 hover:text-accent transition-colors">Polar</a>. Cancel anytime.
+			Billed monthly via <a href="https://polar.sh" target="_blank" rel="noopener" class="text-accent/70 hover:text-accent transition-colors">Polar</a>. Cancel anytime.
 		</p>
 	</div>
 </section>
 
-<!-- BOTTOM CTA -->
-<section class="py-28 md:py-36 border-t border-border/40 relative overflow-hidden">
-	<div class="absolute inset-0 bg-gradient-to-t from-accent/[0.03] via-transparent to-transparent"></div>
-	<div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-accent/[0.04] blur-[200px] rounded-full"></div>
+<!-- BOTTOM CTA — big, dramatic -->
+<section class="py-32 md:py-44 relative overflow-hidden">
+	<div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-accent/20 to-transparent"></div>
+	<!-- Full background glow -->
+	<div class="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(110,231,183,0.04)_0%,transparent_60%)]"></div>
 	<div class="relative max-w-6xl mx-auto px-6 md:px-10 text-center">
 		<InView>
-			<h2 class="text-3xl md:text-[2.75rem] font-semibold tracking-tight text-text leading-tight">
-				Start tracing in under a minute
+			<h2 class="text-4xl md:text-[3.5rem] font-bold tracking-tight text-text leading-[1]">
+				Stop flying blind.
 			</h2>
-			<p class="mt-5 text-text-secondary max-w-md mx-auto leading-relaxed">
-				One binary. No config. Free forever on your own infrastructure.
+			<p class="mt-6 text-lg text-text-secondary max-w-lg mx-auto leading-relaxed">
+				One binary. No config. See your first traces in under a minute.
 			</p>
-			<div class="flex items-center justify-center gap-4 mt-10">
+			<div class="flex items-center justify-center gap-4 mt-12">
 				<a
 					href="https://platform.traceway.ai/signup"
-					class="inline-flex items-center gap-2 bg-accent text-bg font-medium text-sm px-7 py-3 rounded-lg transition-all hover:brightness-110 hover:shadow-[0_0_60px_rgba(110,231,183,0.2)]"
+					class="group relative inline-flex items-center gap-2 bg-accent text-bg font-semibold text-[15px] px-10 py-4 rounded-xl transition-all hover:shadow-[0_0_80px_rgba(110,231,183,0.25)]"
 				>
-					Get started free
+					<span class="absolute inset-0 rounded-xl bg-gradient-to-r from-white/0 via-white/10 to-white/0 opacity-0 group-hover:opacity-100 transition-opacity"></span>
+					<span class="relative">Get started free</span>
 				</a>
-				<a
-					href="https://github.com/blastgits/traceway"
-					target="_blank"
-					rel="noopener"
-					class="inline-flex items-center gap-2 text-sm text-text-secondary border border-border rounded-lg px-7 py-3 hover:bg-bg-secondary hover:text-text transition-all"
-				>
-					Star on GitHub
+			</div>
+			<div class="mt-6">
+				<a href="https://github.com/blastgits/traceway" target="_blank" rel="noopener" class="text-sm text-text-muted hover:text-text-secondary transition-colors">
+					or star us on GitHub
 				</a>
 			</div>
 		</InView>
@@ -571,16 +556,16 @@
 </section>
 
 <!-- FOOTER -->
-<footer class="border-t border-border/40 py-8">
+<footer class="border-t border-border/30 py-8">
 	<div class="max-w-6xl mx-auto px-6 md:px-10">
 		<div class="flex flex-col sm:flex-row items-center justify-between gap-4">
-			<span class="font-mono text-[11px] uppercase text-text-muted tracking-tight">traceway</span>
+			<span class="font-mono text-[11px] uppercase text-text-muted/60 tracking-tight">traceway</span>
 			<div class="flex items-center gap-6">
-				<a href="https://github.com/blastgits/traceway" target="_blank" rel="noopener" class="text-[12px] text-text-muted hover:text-text-secondary transition-colors">GitHub</a>
-				<a href="https://platform.traceway.ai/login" class="text-[12px] text-text-muted hover:text-text-secondary transition-colors">Log in</a>
-				<a href="https://platform.traceway.ai/signup" class="text-[12px] text-text-muted hover:text-text-secondary transition-colors">Sign up</a>
+				<a href="https://github.com/blastgits/traceway" target="_blank" rel="noopener" class="text-[12px] text-text-muted/50 hover:text-text-secondary transition-colors">GitHub</a>
+				<a href="https://platform.traceway.ai/login" class="text-[12px] text-text-muted/50 hover:text-text-secondary transition-colors">Log in</a>
+				<a href="https://platform.traceway.ai/signup" class="text-[12px] text-text-muted/50 hover:text-text-secondary transition-colors">Sign up</a>
 			</div>
-			<span class="text-[11px] text-text-muted/50">MIT Licensed</span>
+			<span class="text-[11px] text-text-muted/30">MIT Licensed</span>
 		</div>
 	</div>
 </footer>

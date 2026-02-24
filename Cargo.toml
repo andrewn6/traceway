@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/daemon",
+    "crates/daemon",  # package name: traceway
     "crates/trace",
     "crates/memfs",
     "crates/storage",
