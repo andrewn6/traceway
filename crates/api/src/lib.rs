@@ -775,6 +775,25 @@ async fn create_span(
     Json(req): Json<CreateSpanRequest>,
 ) -> Result<(StatusCode, Json<CreatedSpan>), (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::TracesWrite)?;
+
+    // Enforce span limit per plan (cloud mode only)
+    if !ctx.is_local_mode {
+        if let Some(auth_store) = state.auth_store.as_ref() {
+            if let Ok(Some(org)) = auth_store.get_org(ctx.org_id).await {
+                let limit = org.plan.spans_per_month();
+                let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+                let r = store.read().await;
+                let current_count = r.span_count() as u64;
+                drop(r);
+                if current_count >= limit {
+                    return Err((StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({
+                        "error": format!("Monthly span limit reached ({limit}). Upgrade your plan at /settings/billing.")
+                    }))));
+                }
+            }
+        }
+    }
+
     let mut builder = SpanBuilder::new(req.trace_id, req.name, req.kind);
     if let Some(parent_id) = req.parent_id {
         builder = builder.parent(parent_id);

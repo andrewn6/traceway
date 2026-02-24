@@ -213,6 +213,15 @@ impl Plan {
             Plan::Enterprise => 365,
         }
     }
+
+    pub fn max_api_keys(&self) -> usize {
+        match self {
+            Plan::Free => 1,
+            Plan::Pro => 5,
+            Plan::Team => usize::MAX,
+            Plan::Enterprise => usize::MAX,
+        }
+    }
 }
 
 // --- Invite ---
