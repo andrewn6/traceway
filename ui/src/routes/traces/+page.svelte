@@ -116,12 +116,13 @@
 	</div>
 
 	<!-- Table header -->
-	<div class="grid grid-cols-[1fr_80px_100px_140px_100px_100px_60px] gap-4 px-3 text-xs text-text-muted uppercase">
+	<div class="grid grid-cols-[1fr_140px_80px_80px_80px_80px_80px_60px] gap-3 px-3 text-xs text-text-muted uppercase">
 		<span>Trace</span>
-		<span class="text-center">Spans</span>
+		<span>Timestamp</span>
 		<span class="text-center">Status</span>
-		<span>Started</span>
 		<span class="text-right">Duration</span>
+		<span class="text-right">Tokens</span>
+		<span class="text-right">Cost</span>
 		<span>Model</span>
 		<span></span>
 	</div>
