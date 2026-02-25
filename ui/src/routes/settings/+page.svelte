@@ -1,15 +1,38 @@
 <script lang="ts">
-	import { getStats, getHealth, clearAll, getAuthConfig, type Stats, type HealthResponse, type AuthConfig } from '$lib/api';
+	import { getStats, getHealth, clearAll, getAuthConfig, getAuthMe, getOrg, getOrgMembers, type Stats, type HealthResponse, type AuthConfig, type AuthMe, type OrgInfo, type OrgMember } from '$lib/api';
 	import { onMount } from 'svelte';
 
 	let stats: Stats = $state({ trace_count: 0, span_count: 0 });
 	let health: HealthResponse | null = $state(null);
-	let authConfig: AuthConfig | null = $state<AuthConfig | null>(null);
+	let authConfig: AuthConfig | null = $state(null);
+	let authMe: AuthMe | null = $state(null);
+	let org: OrgInfo | null = $state(null);
+	let members: OrgMember[] = $state([]);
 	let loading = $state(true);
 
 	// Danger zone
 	let showClearConfirm = $state(false);
 	let clearing = $state(false);
+
+	const isCloudMode = $derived(authConfig?.mode === 'cloud');
+
+	// Find current user from members list
+	const currentUser = $derived.by(() => {
+		if (!authMe?.user_id || members.length === 0) return null;
+		return members.find(m => m.id === authMe!.user_id) ?? null;
+	});
+
+	// Usage calculations
+	const spanLimit = $derived(org?.plan_limits?.spans_per_month ?? 0);
+	const spanUsage = $derived(stats.span_count);
+	const usagePct = $derived(spanLimit > 0 ? Math.min(100, (spanUsage / spanLimit) * 100) : 0);
+	const usageColor = $derived(usagePct > 90 ? 'bg-danger' : usagePct > 70 ? 'bg-warning' : 'bg-accent');
+
+	function formatNumber(n: number): string {
+		if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+		if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+		return n.toLocaleString();
+	}
 
 	async function loadData() {
 		try {
@@ -21,6 +44,17 @@
 			stats = s;
 			health = h;
 			authConfig = auth;
+
+			if (auth?.mode === 'cloud') {
+				const [me, o, m] = await Promise.all([
+					getAuthMe().catch(() => null),
+					getOrg().catch(() => null),
+					getOrgMembers().catch(() => [])
+				]);
+				authMe = me;
+				org = o;
+				members = m;
+			}
 		} catch {
 			// daemon not running
 		}
@@ -52,7 +86,9 @@
 		return `${days}d ${hours % 24}h`;
 	}
 
-	const isCloudMode = $derived(authConfig !== null && authConfig.mode === 'cloud');
+	function planLabel(plan: string): string {
+		return plan.charAt(0).toUpperCase() + plan.slice(1);
+	}
 </script>
 
 <div class="max-w-3xl space-y-6">
@@ -62,26 +98,105 @@
 		<div class="text-text-muted text-sm py-8 text-center">Loading...</div>
 	{:else}
 
-		<!-- Server Status -->
+		<!-- Account (cloud mode) -->
+		{#if isCloudMode && (currentUser || org)}
+			<section class="bg-bg-secondary border border-border rounded p-4 space-y-3">
+				<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Account</h2>
+				<div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+					{#if currentUser}
+						<div>
+							<span class="text-text-muted text-xs">Email</span>
+							<div class="text-text mt-0.5 text-sm truncate">{currentUser.email}</div>
+						</div>
+						{#if currentUser.name}
+							<div>
+								<span class="text-text-muted text-xs">Name</span>
+								<div class="text-text mt-0.5 text-sm">{currentUser.name}</div>
+							</div>
+						{/if}
+						<div>
+							<span class="text-text-muted text-xs">Role</span>
+							<div class="text-text mt-0.5 text-sm capitalize">{currentUser.role}</div>
+						</div>
+					{/if}
+					{#if org}
+						<div>
+							<span class="text-text-muted text-xs">Organization</span>
+							<div class="text-text mt-0.5 text-sm">{org.name}</div>
+						</div>
+						<div>
+							<span class="text-text-muted text-xs">Plan</span>
+							<div class="mt-0.5">
+								<span class="px-1.5 py-0.5 bg-accent/10 text-accent rounded text-xs font-medium">{planLabel(org.plan)}</span>
+							</div>
+						</div>
+					{/if}
+				</div>
+			</section>
+		{/if}
+
+		<!-- Usage -->
+		<section class="bg-bg-secondary border border-border rounded p-4 space-y-4">
+			<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Usage</h2>
+
+			<!-- Spans usage bar -->
+			<div class="space-y-2">
+				<div class="flex items-center justify-between text-sm">
+					<span class="text-text-secondary">Spans</span>
+					<span class="text-text-muted text-xs font-mono">
+						{formatNumber(spanUsage)}{#if spanLimit > 0} / {formatNumber(spanLimit)}{/if}
+					</span>
+				</div>
+				{#if spanLimit > 0}
+					<div class="w-full bg-bg-tertiary rounded-full h-2.5 overflow-hidden">
+						<div
+							class="h-full rounded-full transition-all duration-500 {usageColor}"
+							style="width: {usagePct}%"
+						></div>
+					</div>
+					{#if usagePct > 90}
+						<p class="text-[11px] text-danger">Approaching span limit. <a href="/settings/billing" class="underline">Upgrade plan</a></p>
+					{/if}
+				{:else}
+					<div class="w-full bg-bg-tertiary rounded-full h-2.5 overflow-hidden">
+						<div class="h-full rounded-full bg-accent/40" style="width: {spanUsage > 0 ? '5' : '0'}%"></div>
+					</div>
+				{/if}
+			</div>
+
+			<!-- Traces & other stats -->
+			<div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pt-2 border-t border-border">
+				<div>
+					<span class="text-text-muted text-xs">Traces</span>
+					<div class="text-text font-bold mt-0.5">{stats.trace_count.toLocaleString()}</div>
+				</div>
+				<div>
+					<span class="text-text-muted text-xs">Spans</span>
+					<div class="text-text font-bold mt-0.5">{stats.span_count.toLocaleString()}</div>
+				</div>
+				{#if org?.plan_limits}
+					<div>
+						<span class="text-text-muted text-xs">Retention</span>
+						<div class="text-text font-bold mt-0.5">{org.plan_limits.retention_days}d</div>
+					</div>
+					<div>
+						<span class="text-text-muted text-xs">Team limit</span>
+						<div class="text-text font-bold mt-0.5">{org.plan_limits.max_team_members}</div>
+					</div>
+				{/if}
+			</div>
+		</section>
+
+		<!-- Server -->
 		<section class="bg-bg-secondary border border-border rounded p-4 space-y-3">
-			<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Server Status</h2>
+			<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Server</h2>
 			{#if health}
 				<div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
 					<div>
 						<span class="text-text-muted text-xs">Status</span>
 						<div class="flex items-center gap-1.5 mt-0.5">
 							<span class="w-2 h-2 rounded-full bg-success"></span>
-							<span class="text-success">Connected</span>
-						</div>
-					</div>
-					<div>
-						<span class="text-text-muted text-xs">Mode</span>
-						<div class="text-text mt-0.5">
-							{#if isCloudMode}
-								<span class="px-1.5 py-0.5 bg-accent/10 text-accent rounded text-xs">Cloud</span>
-							{:else}
-								<span class="px-1.5 py-0.5 bg-bg-tertiary text-text-secondary rounded text-xs">Local</span>
-							{/if}
+							<span class="text-success text-sm">Connected</span>
 						</div>
 					</div>
 					<div>
@@ -92,68 +207,24 @@
 						<span class="text-text-muted text-xs">Version</span>
 						<div class="text-text mt-0.5 font-mono text-xs">{health.version}</div>
 					</div>
+					{#if health.region}
+						<div>
+							<span class="text-text-muted text-xs">Region</span>
+							<div class="text-text mt-0.5 font-mono text-xs">{health.region}</div>
+						</div>
+					{/if}
 				</div>
-				{#if health.region || health.instance}
-					<div class="grid grid-cols-2 gap-4 text-sm border-t border-border pt-3 mt-3">
-						{#if health.region}
-							<div>
-								<span class="text-text-muted text-xs">Region</span>
-								<div class="text-text mt-0.5 font-mono text-xs">{health.region}</div>
-							</div>
-						{/if}
-						{#if health.instance}
-							<div>
-								<span class="text-text-muted text-xs">Instance</span>
-								<div class="text-text mt-0.5 font-mono text-xs">{health.instance}</div>
-							</div>
-						{/if}
-					</div>
-				{/if}
 			{:else}
 				<div class="flex items-center gap-1.5 text-sm">
 					<span class="w-2 h-2 rounded-full bg-danger"></span>
 					<span class="text-danger">Not connected</span>
 				</div>
-				<p class="text-text-muted text-xs">Make sure the server is running.</p>
 			{/if}
 		</section>
-
-		<!-- Storage -->
-		<section class="bg-bg-secondary border border-border rounded p-4 space-y-3">
-			<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Storage</h2>
-			<div class="grid grid-cols-2 gap-4 text-sm">
-				<div>
-					<span class="text-text-muted text-xs">Traces</span>
-					<div class="text-text text-lg font-bold mt-0.5">{stats.trace_count.toLocaleString()}</div>
-				</div>
-				<div>
-					<span class="text-text-muted text-xs">Spans</span>
-					<div class="text-text text-lg font-bold mt-0.5">{stats.span_count.toLocaleString()}</div>
-				</div>
-			</div>
-			{#if health?.storage}
-				<div class="text-text-muted text-xs border-t border-border pt-2 mt-2">
-					Backend: <span class="font-mono">{health.storage.backend}</span>
-				</div>
-			{/if}
-		</section>
-
-		<!-- Cloud Features (only show in cloud mode) -->
-		{#if isCloudMode}
-			<section class="bg-bg-secondary border border-border rounded p-4 space-y-3">
-				<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Organization</h2>
-				<p class="text-text-muted text-sm">
-					Manage your organization, team members, and API keys from the 
-					<a href="/org" class="text-accent hover:underline">Organization</a> page.
-				</p>
-			</section>
-		{/if}
 
 		<!-- Danger Zone -->
 		<section class="border border-danger/30 rounded p-4 space-y-4">
 			<h2 class="text-sm font-semibold text-danger uppercase tracking-wide">Danger Zone</h2>
-
-			<!-- Clear all data -->
 			<div class="space-y-2">
 				<p class="text-text-secondary text-sm">Clear all traces, spans, and file history.</p>
 				{#if showClearConfirm}
