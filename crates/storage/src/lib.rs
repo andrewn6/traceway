@@ -105,7 +105,7 @@ impl SpanStore {
     }
 
     pub fn filter_spans(&self, filter: &SpanFilter) -> Vec<&Span> {
-        self.spans
+        let mut results: Vec<&Span> = self.spans
             .values()
             .filter(|span| {
                 if let Some(ref kind) = filter.kind {
@@ -165,9 +165,92 @@ impl SpanStore {
                     }
                 }
 
+                if let Some(min_ms) = filter.duration_min {
+                    match span.duration_ms() {
+                        Some(d) if d >= min_ms => {}
+                        Some(_) => return false,
+                        None => return false, // running spans have no duration
+                    }
+                }
+
+                if let Some(max_ms) = filter.duration_max {
+                    match span.duration_ms() {
+                        Some(d) if d <= max_ms => {}
+                        Some(_) => return false,
+                        None => return false,
+                    }
+                }
+
+                if let Some(min_tokens) = filter.tokens_min {
+                    match span.kind().total_tokens() {
+                        Some(t) if t >= min_tokens => {}
+                        _ => return false,
+                    }
+                }
+
+                if let Some(min_cost) = filter.cost_min {
+                    match span.kind().cost() {
+                        Some(c) if c >= min_cost => {}
+                        _ => return false,
+                    }
+                }
+
                 true
             })
-            .collect()
+            .collect();
+
+        // Apply sorting
+        if let Some(ref sort_by) = filter.sort_by {
+            let desc = filter.sort_order.as_deref() != Some("asc");
+            match sort_by.as_str() {
+                "started_at" => {
+                    results.sort_by(|a, b| {
+                        let cmp = a.started_at().cmp(&b.started_at());
+                        if desc { cmp.reverse() } else { cmp }
+                    });
+                }
+                "duration" => {
+                    results.sort_by(|a, b| {
+                        let cmp = a.duration_ms().unwrap_or(0).cmp(&b.duration_ms().unwrap_or(0));
+                        if desc { cmp.reverse() } else { cmp }
+                    });
+                }
+                "tokens" => {
+                    results.sort_by(|a, b| {
+                        let cmp = a.kind().total_tokens().unwrap_or(0).cmp(&b.kind().total_tokens().unwrap_or(0));
+                        if desc { cmp.reverse() } else { cmp }
+                    });
+                }
+                "cost" => {
+                    results.sort_by(|a, b| {
+                        let ca = a.kind().cost().unwrap_or(0.0);
+                        let cb = b.kind().cost().unwrap_or(0.0);
+                        let cmp = ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal);
+                        if desc { cmp.reverse() } else { cmp }
+                    });
+                }
+                "name" => {
+                    results.sort_by(|a, b| {
+                        let cmp = a.name().cmp(b.name());
+                        if desc { cmp.reverse() } else { cmp }
+                    });
+                }
+                _ => {
+                    // Default: newest first
+                    results.sort_by(|a, b| b.started_at().cmp(&a.started_at()));
+                }
+            }
+        } else {
+            // Default sort: newest first
+            results.sort_by(|a, b| b.started_at().cmp(&a.started_at()));
+        }
+
+        // Apply limit
+        if let Some(limit) = filter.limit {
+            results.truncate(limit);
+        }
+
+        results
     }
 }
 

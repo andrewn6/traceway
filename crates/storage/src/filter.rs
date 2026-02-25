@@ -24,6 +24,18 @@ pub struct SpanFilter {
     pub path: Option<String>,
     pub trace_id: Option<TraceId>,
     pub limit: Option<usize>,
+    /// Minimum duration in milliseconds (inclusive)
+    pub duration_min: Option<i64>,
+    /// Maximum duration in milliseconds (inclusive)
+    pub duration_max: Option<i64>,
+    /// Minimum total tokens (inclusive)
+    pub tokens_min: Option<u64>,
+    /// Minimum cost in dollars (inclusive)
+    pub cost_min: Option<f64>,
+    /// Field to sort by: "started_at", "duration", "tokens", "cost", "name"
+    pub sort_by: Option<String>,
+    /// Sort direction: "asc" or "desc" (default: "desc")
+    pub sort_order: Option<String>,
 }
 
 /// Filter for querying files.
