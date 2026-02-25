@@ -278,6 +278,18 @@ pub struct SpanQueryParams {
     #[schema(value_type = Option<String>)]
     #[param(value_type = Option<String>)]
     pub trace_id: Option<TraceId>,
+    /// Minimum duration in ms (e.g. 500)
+    pub duration_min: Option<i64>,
+    /// Maximum duration in ms (e.g. 5000)
+    pub duration_max: Option<i64>,
+    /// Minimum total tokens (e.g. 1000)
+    pub tokens_min: Option<u64>,
+    /// Minimum cost in dollars (e.g. 0.01)
+    pub cost_min: Option<f64>,
+    /// Sort field: "started_at", "duration", "tokens", "cost", "name"
+    pub sort_by: Option<String>,
+    /// Sort order: "asc" or "desc" (default: "desc")
+    pub sort_order: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -578,6 +590,26 @@ pub struct ProviderConnectionListResponse {
     pub count: usize,
 }
 
+#[derive(Deserialize, ToSchema)]
+pub struct TestProviderConnectionRequest {
+    pub provider: String,
+    pub base_url: Option<String>,
+    pub api_key: Option<String>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ProviderModelInfo {
+    pub id: String,
+    pub name: Option<String>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ProviderModelsResponse {
+    pub models: Vec<ProviderModelInfo>,
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
 // --- Scope enforcement helper ---
 
 /// Check that the auth context has the required scope, returning 403 if not.
@@ -727,6 +759,12 @@ async fn list_spans(
         path: params.path,
         trace_id: params.trace_id,
         limit: None,
+        duration_min: params.duration_min,
+        duration_max: params.duration_max,
+        tokens_min: params.tokens_min,
+        cost_min: params.cost_min,
+        sort_by: params.sort_by,
+        sort_order: params.sort_order,
     };
     let spans: Vec<Span> = r.filter_spans(&filter).into_iter().cloned().collect();
     let count = spans.len();
@@ -2480,6 +2518,97 @@ async fn delete_provider_connection_handler(
     }
 }
 
+// --- Provider connection: test & list models ---
+
+/// Resolve a provider's base URL from its name if not explicitly provided.
+fn default_base_url_for_provider(provider: &str) -> &'static str {
+    match provider {
+        "anthropic" => "https://api.anthropic.com/v1",
+        "ollama" => "http://localhost:11434/v1",
+        _ => "https://api.openai.com/v1",
+    }
+}
+
+/// Fetch models from an OpenAI-compatible `/models` endpoint.
+async fn fetch_provider_models(base_url: &str, api_key: Option<&str>) -> Result<Vec<ProviderModelInfo>, String> {
+    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let client = reqwest::Client::new();
+    let mut req = client.get(&url).header("Accept", "application/json");
+    if let Some(key) = api_key {
+        if !key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", key));
+        }
+    }
+
+    let resp = req.timeout(std::time::Duration::from_secs(10)).send().await
+        .map_err(|e| format!("Connection failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {}: {}", status, body.chars().take(200).collect::<String>()));
+    }
+
+    let body: serde_json::Value = resp.json().await
+        .map_err(|e| format!("Invalid JSON response: {}", e))?;
+
+    let mut models = Vec::new();
+    if let Some(data) = body.get("data").and_then(|d| d.as_array()) {
+        for item in data {
+            if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                let name = item.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+                models.push(ProviderModelInfo { id: id.to_string(), name });
+            }
+        }
+    }
+
+    // Sort alphabetically by id
+    models.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(models)
+}
+
+/// POST /api/provider-connections/test — test a connection without saving it.
+/// Also returns available models on success.
+async fn test_provider_connection(
+    auth::Auth(ctx): auth::Auth,
+    Json(req): Json<TestProviderConnectionRequest>,
+) -> Json<ProviderModelsResponse> {
+    if !ctx.has_scope(auth::Scope::DatasetsRead) {
+        return Json(ProviderModelsResponse { models: vec![], ok: false, error: Some("Forbidden".into()) });
+    }
+
+    let base_url = req.base_url.as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| default_base_url_for_provider(&req.provider));
+
+    match fetch_provider_models(base_url, req.api_key.as_deref()).await {
+        Ok(models) => Json(ProviderModelsResponse { models, ok: true, error: None }),
+        Err(e) => Json(ProviderModelsResponse { models: vec![], ok: false, error: Some(e) }),
+    }
+}
+
+/// GET /api/provider-connections/:conn_id/models — fetch models for a saved connection.
+async fn list_provider_connection_models(
+    auth::Auth(ctx): auth::Auth,
+    State(state): State<AppState>,
+    Path(conn_id): Path<ProviderConnectionId>,
+) -> Result<Json<ProviderModelsResponse>, StatusCode> {
+    require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
+    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let r = store.read().await;
+    let conn = r.get_provider_connection(conn_id).ok_or(StatusCode::NOT_FOUND)?;
+
+    let base_url = conn.base_url.as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| default_base_url_for_provider(&conn.provider));
+
+    let result = match fetch_provider_models(base_url, conn.api_key.as_deref()).await {
+        Ok(models) => ProviderModelsResponse { models, ok: true, error: None },
+        Err(e) => ProviderModelsResponse { models: vec![], ok: false, error: Some(e) },
+    };
+    Ok(Json(result))
+}
+
 // --- Eval execution engine ---
 
 async fn execute_eval_run(
@@ -3316,7 +3445,9 @@ fn build_router(
         .route("/rules/:rule_id/toggle", post(toggle_capture_rule))
         // Provider connections
         .route("/provider-connections", get(list_provider_connections).post(create_provider_connection))
+        .route("/provider-connections/test", post(test_provider_connection))
         .route("/provider-connections/:conn_id", axum::routing::put(update_provider_connection).delete(delete_provider_connection_handler))
+        .route("/provider-connections/:conn_id/models", get(list_provider_connection_models))
         // Analytics
         .route("/analytics", post(post_analytics))
         .route("/analytics/summary", get(analytics_summary))
