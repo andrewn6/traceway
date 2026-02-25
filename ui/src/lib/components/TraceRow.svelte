@@ -44,22 +44,58 @@
 		if (durations.length === 0) return null;
 		return Math.max(...durations);
 	});
+	const totalTokens = $derived.by(() => {
+		let total = 0;
+		for (const s of spans) {
+			if (s.kind?.type === 'llm_call') {
+				total += (s.kind.input_tokens ?? 0) + (s.kind.output_tokens ?? 0);
+			}
+		}
+		return total || null;
+	});
+	const totalCost = $derived.by(() => {
+		let total = 0;
+		for (const s of spans) {
+			if (s.kind?.type === 'llm_call' && s.kind.cost != null) {
+				total += s.kind.cost;
+			}
+		}
+		return total || null;
+	});
+	const rootSpanName = $derived.by(() => {
+		const root = spans.find((s) => !s.parent_id);
+		return root?.name ?? firstSpan?.name ?? null;
+	});
 </script>
 
 <a
 	href="/traces/{traceId}"
-	class="grid grid-cols-[1fr_80px_100px_140px_100px_100px_60px] gap-4 items-center py-2 px-3 hover:bg-bg-tertiary rounded text-sm transition-colors border-b border-border"
+	class="grid grid-cols-[1fr_140px_80px_80px_80px_80px_80px_60px] gap-3 items-center py-2.5 px-3 hover:bg-bg-tertiary rounded text-sm transition-colors border-b border-border/50"
 >
-	<span class="font-mono text-accent text-xs truncate">{shortId(traceId)}</span>
-	<span class="text-text-secondary text-center">{spans.length}</span>
-	<span class="text-center"><StatusBadge {status} /></span>
+	<div class="min-w-0">
+		<div class="font-mono text-accent text-xs truncate">{shortId(traceId)}</div>
+		{#if rootSpanName}
+			<div class="text-text-muted text-[11px] truncate">{rootSpanName}</div>
+		{/if}
+	</div>
 	<span class="text-text-secondary font-mono text-xs">{started}</span>
-	<span class="text-text-secondary font-mono text-xs text-right">
-		{totalDuration !== null ? `${totalDuration}ms` : '...'}
+	<span class="text-center"><StatusBadge {status} /></span>
+	<span class="text-text-secondary font-mono text-xs text-right tabular-nums">
+		{#if totalDuration !== null}
+			{totalDuration < 1000 ? `${totalDuration}ms` : `${(totalDuration / 1000).toFixed(1)}s`}
+		{:else}
+			...
+		{/if}
+	</span>
+	<span class="text-text-secondary font-mono text-xs text-right tabular-nums">
+		{totalTokens ? totalTokens.toLocaleString() : '-'}
+	</span>
+	<span class="text-xs text-right tabular-nums font-mono {totalCost ? 'text-success' : 'text-text-muted'}">
+		{totalCost ? `$${totalCost.toFixed(4)}` : '-'}
 	</span>
 	<span class="text-text-secondary text-xs truncate">{model ?? '-'}</span>
 	<button
-		class="text-xs transition-colors {confirmDelete ? 'text-danger font-semibold' : 'text-text-muted hover:text-danger'}"
+		class="text-xs transition-colors text-right {confirmDelete ? 'text-danger font-semibold' : 'text-text-muted hover:text-danger'}"
 		onclick={handleDelete}
-	>{confirmDelete ? 'confirm?' : 'delete'}</button>
+	>{confirmDelete ? 'yes?' : 'del'}</button>
 </a>
