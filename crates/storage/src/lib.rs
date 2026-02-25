@@ -14,7 +14,10 @@ use trace::{
 
 pub use backend::StorageBackend;
 pub use error::StorageError;
-pub use filter::{DatapointFilter, FileFilter, SpanFilter, TraceFilter};
+pub use filter::{
+    CursorInner, DatapointFilter, FileFilter, Page, Pagination, SortOrder, SpanFilter,
+    TraceFilter, decode_cursor, encode_cursor,
+};
 
 // --- In-memory span store ---
 
