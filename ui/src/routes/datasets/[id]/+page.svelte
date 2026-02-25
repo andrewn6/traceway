@@ -23,6 +23,7 @@
 		deleteCaptureRule,
 		toggleCaptureRule,
 		listProviderConnections,
+		listProviderModels,
 		type DatasetWithCount,
 		type Datapoint,
 		type DatapointKind,
@@ -35,7 +36,8 @@
 		type EvalConfig,
 		type ScoringStrategy,
 		type CaptureFilters,
-		type ProviderConnectionInfo
+		type ProviderConnectionInfo,
+		type ProviderModelInfo
 	} from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import EvalScoreBadge from '$lib/components/EvalScoreBadge.svelte';
@@ -101,9 +103,6 @@
 	// ── Eval Run state ────────────────────────────────────────────────
 	let showNewEvalForm = $state(false);
 	let evalFormModel = $state('');
-	let evalFormProvider = $state('openai');
-	let evalFormProviderUrl = $state('');
-	let evalFormApiKeyEnv = $state('');
 	let evalFormSystemPrompt = $state('');
 	let evalFormTemp = $state('');
 	let evalFormMaxTokens = $state('');
@@ -112,9 +111,24 @@
 	let evalFormConnectionId = $state('');
 	let evalCreating = $state(false);
 	let providerConnections: ProviderConnectionInfo[] = $state([]);
+	let connectionModels: ProviderModelInfo[] = $state([]);
+	let loadingModels = $state(false);
 	let evalCompareMode = $state(false);
 	let evalCompareSelected: Set<string> = $state(new Set());
 	let evalDeleteConfirm: string | null = $state(null);
+
+	async function loadModelsForConnection(connId: string) {
+		if (!connId) { connectionModels = []; return; }
+		loadingModels = true;
+		try {
+			const resp = await listProviderModels(connId);
+			if (resp.ok) connectionModels = resp.models;
+			else connectionModels = [];
+		} catch {
+			connectionModels = [];
+		}
+		loadingModels = false;
+	}
 
 	const runningEvalCount = $derived(evalRuns.filter((r) => r.status === 'running').length);
 	const completedEvalRuns = $derived(evalRuns.filter((r) => r.status === 'completed'));
@@ -131,18 +145,17 @@
 	});
 
 	async function handleCreateEvalRun() {
-		if (!evalFormModel.trim()) return;
+		if (!evalFormModel.trim() || !evalFormConnectionId) return;
 		evalCreating = true;
 		try {
+			const conn = providerConnections.find(c => c.id === evalFormConnectionId);
 			const config: EvalConfig = {
 				model: evalFormModel.trim(),
-				provider: evalFormProvider || undefined,
-				provider_url: evalFormProviderUrl.trim() || undefined,
-				api_key_env: evalFormApiKeyEnv.trim() || undefined,
+				provider: conn?.provider || undefined,
 				system_prompt: evalFormSystemPrompt.trim() || undefined,
 				temperature: evalFormTemp ? parseFloat(evalFormTemp) : undefined,
 				max_tokens: evalFormMaxTokens ? parseInt(evalFormMaxTokens) : undefined,
-				provider_connection_id: evalFormConnectionId || undefined
+				provider_connection_id: evalFormConnectionId
 			};
 			await createEvalRun(datasetId, {
 				name: evalFormName.trim() || undefined,
@@ -152,15 +165,12 @@
 			showNewEvalForm = false;
 			evalFormModel = '';
 			evalFormName = '';
-			evalFormProvider = 'openai';
-			evalFormProviderUrl = '';
-			evalFormApiKeyEnv = '';
 			evalFormSystemPrompt = '';
 			evalFormTemp = '';
 			evalFormMaxTokens = '';
 			evalFormScoring = 'none';
 			evalFormConnectionId = '';
-			// Reload runs
+			connectionModels = [];
 			const resp = await listEvalRuns(datasetId);
 			evalRuns = resp.runs;
 		} catch {
@@ -956,69 +966,72 @@
 						</div>
 					{/if}
 
-					<!-- New Eval Run form -->
-					{#if showNewEvalForm}
-						<div class="bg-bg-secondary border border-border rounded p-4 space-y-3">
-							<div class="text-sm font-semibold text-text">New Eval Run</div>
-							<div>
-								<label for="eval-name" class="block text-xs text-text-muted uppercase mb-1">Name (optional)</label>
-								<input id="eval-name" type="text" bind:value={evalFormName} placeholder="e.g. gpt-4o baseline"
-									class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
-							</div>
+				<!-- New Eval Run form -->
+				{#if showNewEvalForm}
+					<div class="bg-bg-secondary border border-border rounded p-4 space-y-3">
+						<div class="text-sm font-semibold text-text">New Eval Run</div>
+
+						<div>
+							<label for="eval-name" class="block text-xs text-text-muted uppercase mb-1">Name (optional)</label>
+							<input id="eval-name" type="text" bind:value={evalFormName} placeholder="e.g. gpt-4o baseline"
+								class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
+						</div>
+
+						<!-- Provider Connection -->
+						<div>
+							<label for="eval-connection" class="block text-xs text-text-muted uppercase mb-1">Provider Connection *</label>
 							{#if providerConnections.length > 0}
-								<div>
-									<label for="eval-connection" class="block text-xs text-text-muted uppercase mb-1">Provider Connection</label>
-									<select id="eval-connection" bind:value={evalFormConnectionId}
-										onchange={() => {
-											const conn = providerConnections.find(c => c.id === evalFormConnectionId);
-											if (conn) {
-												evalFormProvider = conn.provider;
-												if (conn.default_model && !evalFormModel) evalFormModel = conn.default_model;
-											}
-										}}
-										class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text">
-										<option value="">Manual configuration</option>
-										{#each providerConnections as conn}
-											<option value={conn.id}>{conn.name} ({conn.provider}{conn.default_model ? ` / ${conn.default_model}` : ''})</option>
+								<select id="eval-connection" bind:value={evalFormConnectionId}
+									onchange={() => {
+										const conn = providerConnections.find(c => c.id === evalFormConnectionId);
+										if (conn) {
+											if (conn.default_model) evalFormModel = conn.default_model;
+											loadModelsForConnection(evalFormConnectionId);
+										} else {
+											connectionModels = [];
+										}
+									}}
+									class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text">
+									<option value="">Select a provider...</option>
+									{#each providerConnections as conn}
+										<option value={conn.id}>{conn.name}{conn.default_model ? ` — ${conn.default_model}` : ''}</option>
+									{/each}
+								</select>
+							{:else}
+								<div class="bg-bg-tertiary border border-border rounded px-3 py-3 text-sm text-text-muted">
+									No provider connections configured. <a href="/settings/providers" class="text-accent hover:underline">Add a provider</a> to run evals.
+								</div>
+							{/if}
+						</div>
+
+						<!-- Model (shown after connection selected) -->
+						{#if evalFormConnectionId}
+							<div>
+								<label for="eval-model" class="block text-xs text-text-muted uppercase mb-1">Model *</label>
+								{#if loadingModels}
+									<div class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text-muted">Loading models...</div>
+								{:else if connectionModels.length > 0}
+									<select id="eval-model" bind:value={evalFormModel}
+										class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text font-mono">
+										{#if !evalFormModel}
+											<option value="">Select a model...</option>
+										{/if}
+										{#each connectionModels as model}
+											<option value={model.id}>{model.id}</option>
 										{/each}
 									</select>
-									<p class="text-xs text-text-muted mt-1">Select a saved connection or configure manually below. <a href="/settings/providers" class="text-accent hover:underline">Manage connections</a></p>
-								</div>
-							{/if}
-							<div class="grid grid-cols-2 gap-3">
-								<div>
-									<label for="eval-model" class="block text-xs text-text-muted uppercase mb-1">Model *</label>
+								{:else}
 									<input id="eval-model" type="text" bind:value={evalFormModel} placeholder="gpt-4o"
-										class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
-								</div>
-								<div>
-									<label for="eval-provider" class="block text-xs text-text-muted uppercase mb-1">Provider</label>
-									<select id="eval-provider" bind:value={evalFormProvider}
-										class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text">
-										<option value="openai">openai</option>
-										<option value="anthropic">anthropic</option>
-										<option value="ollama">ollama</option>
-										<option value="custom">custom</option>
-									</select>
-								</div>
+										class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted font-mono" />
+								{/if}
 							</div>
-							{#if !evalFormConnectionId}
-								<div>
-									<label for="eval-url" class="block text-xs text-text-muted uppercase mb-1">Provider URL (optional)</label>
-									<input id="eval-url" type="text" bind:value={evalFormProviderUrl} placeholder="http://localhost:11434/v1"
-										class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
-								</div>
-								<div>
-									<label for="eval-key" class="block text-xs text-text-muted uppercase mb-1">API Key Env Var</label>
-									<input id="eval-key" type="text" bind:value={evalFormApiKeyEnv} placeholder="OPENAI_API_KEY"
-										class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
-								</div>
-							{/if}
+
 							<div>
 								<label for="eval-sys" class="block text-xs text-text-muted uppercase mb-1">System Prompt Override (optional)</label>
 								<textarea id="eval-sys" bind:value={evalFormSystemPrompt} rows={3}
-									class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted"></textarea>
+									class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted resize-y"></textarea>
 							</div>
+
 							<div class="grid grid-cols-3 gap-3">
 								<div>
 									<label for="eval-temp" class="block text-xs text-text-muted uppercase mb-1">Temperature</label>
@@ -1041,10 +1054,11 @@
 									</select>
 								</div>
 							</div>
+
 							<div class="flex items-center gap-2">
 								<button
 									class="px-4 py-2 text-sm bg-amber-400 text-bg font-semibold rounded hover:bg-amber-300 transition-colors disabled:opacity-50"
-									disabled={evalCreating || !evalFormModel.trim()}
+									disabled={evalCreating || !evalFormModel.trim() || !evalFormConnectionId}
 									onclick={handleCreateEvalRun}
 								>{evalCreating ? 'Running...' : 'Run Eval'}</button>
 								<button
@@ -1052,8 +1066,9 @@
 									onclick={() => (showNewEvalForm = false)}
 								>Cancel</button>
 							</div>
-						</div>
-					{/if}
+						{/if}
+					</div>
+				{/if}
 
 					<!-- Eval runs table -->
 					{#if evalRuns.length > 0}
