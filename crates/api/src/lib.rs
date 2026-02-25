@@ -227,8 +227,16 @@ pub struct AppState {
 
 impl AppState {
     /// Get the store for a given org. Returns `Err((StatusCode, String))` on failure.
+    /// Prefer `store_for_project` in new code.
     pub async fn store_for_org(&self, org_id: auth::OrgId) -> Result<SharedStore, (StatusCode, String)> {
         self.org_stores.get(org_id).await.map_err(|e| {
+            (StatusCode::INTERNAL_SERVER_ERROR, e)
+        })
+    }
+
+    /// Get the store for a given org + project. Returns `Err((StatusCode, String))` on failure.
+    pub async fn store_for_project(&self, org_id: auth::OrgId, project_id: auth::ProjectId) -> Result<SharedStore, (StatusCode, String)> {
+        self.org_stores.get_for_project(org_id, project_id).await.map_err(|e| {
             (StatusCode::INTERNAL_SERVER_ERROR, e)
         })
     }
@@ -660,7 +668,7 @@ async fn list_traces(
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<Page<Trace>>, (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::TracesRead)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let r = store.read().await;
     let traces: Vec<Trace> = r.all_traces().cloned().collect();
     let page = paginate(traces, &params).map_err(|s| (s, Json(serde_json::json!({"error": "invalid pagination"}))))?;
@@ -686,7 +694,7 @@ async fn create_trace(
 ) -> Result<(StatusCode, Json<Trace>), (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::TracesWrite)?;
     let trace = Trace::new(req.name).with_tags(req.tags);
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let mut w = store.write().await;
     w.save_trace(trace.clone()).await;
     drop(w);
@@ -714,7 +722,7 @@ async fn get_trace(
     Path(trace_id): Path<TraceId>,
 ) -> Result<Json<SpanList>, StatusCode> {
     require_scope(&ctx, auth::Scope::TracesRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let r = store.read().await;
     let span_ids = r.spans_for_trace(trace_id);
     if span_ids.is_empty() {
@@ -751,7 +759,7 @@ async fn list_spans(
     Query(params): Query<SpanQueryParams>,
 ) -> Result<Json<Page<Span>>, (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::TracesRead)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let r = store.read().await;
     let filter = SpanFilter {
         kind: params.kind,
@@ -795,9 +803,9 @@ async fn get_span(
     Path(span_id): Path<SpanId>,
 ) -> Result<Json<Span>, StatusCode> {
     require_scope(&ctx, auth::Scope::TracesRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
-    let r = store.read().await;
-    r.get(span_id)
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
+    let mut w = store.write().await;
+    w.get_or_load(span_id).await
         .cloned()
         .map(Json)
         .ok_or(StatusCode::NOT_FOUND)
@@ -827,7 +835,7 @@ async fn create_span(
         if let Some(auth_store) = state.auth_store.as_ref() {
             if let Ok(Some(org)) = auth_store.get_org(ctx.org_id).await {
                 let limit = org.plan.spans_per_month();
-                let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+                let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
                 let r = store.read().await;
                 // Count spans created since the start of the current calendar month
                 let now = Utc::now();
@@ -852,7 +860,9 @@ async fn create_span(
         }
     }
 
-    let mut builder = SpanBuilder::new(req.trace_id, req.name, req.kind);
+    // Estimate cost from model pricing if not already provided
+    let kind = req.kind.with_estimated_cost();
+    let mut builder = SpanBuilder::new(req.trace_id, req.name, kind);
     if let Some(parent_id) = req.parent_id {
         builder = builder.parent(parent_id);
     }
@@ -863,7 +873,7 @@ async fn create_span(
     let id = span.id();
     let trace_id = span.trace_id();
 
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let mut w = store.write().await;
     w.insert(span.clone()).await;
     drop(w);
@@ -898,14 +908,15 @@ async fn complete_span(
     }
     let output = body.and_then(|b| b.0.output);
 
-    let store = match state.store_for_org(ctx.org_id).await {
+    let store = match state.store_for_project(ctx.org_id, ctx.project_id).await {
         Ok(s) => s,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
     };
     let mut w = store.write().await;
 
     // Check if already terminal → 409 Conflict
-    if let Some(span) = w.get(span_id) {
+    // Use get_or_load to fall back to storage backend when running multiple instances
+    if let Some(span) = w.get_or_load(span_id).await {
         if span.status().is_terminal() {
             return StatusCode::CONFLICT;
         }
@@ -954,14 +965,15 @@ async fn fail_span(
     if !ctx.has_scope(auth::Scope::TracesWrite) {
         return StatusCode::FORBIDDEN;
     }
-    let store = match state.store_for_org(ctx.org_id).await {
+    let store = match state.store_for_project(ctx.org_id, ctx.project_id).await {
         Ok(s) => s,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
     };
     let mut w = store.write().await;
 
     // Check if already terminal → 409 Conflict
-    if let Some(span) = w.get(span_id) {
+    // Use get_or_load to fall back to storage backend when running multiple instances
+    if let Some(span) = w.get_or_load(span_id).await {
         if span.status().is_terminal() {
             return StatusCode::CONFLICT;
         }
@@ -994,7 +1006,7 @@ async fn get_stats(
     State(state): State<AppState>,
 ) -> Result<Json<Stats>, (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::TracesRead)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let r = store.read().await;
     Ok(Json(Stats {
         trace_count: r.trace_count(),
@@ -1021,7 +1033,7 @@ async fn list_files(
     Query(params): Query<FileQueryParams>,
 ) -> Result<Json<FileListResponse>, (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::TracesRead)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let r = store.read().await;
     let filter = FileFilter {
         path_prefix: params.path_prefix,
@@ -1052,7 +1064,7 @@ async fn get_file_versions(
     Path(path): Path<String>,
 ) -> Result<Json<FileVersionsResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::TracesRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let r = store.read().await;
     let versions: Vec<FileVersion> = r.get_file_versions(&path).into_iter().cloned().collect();
     if versions.is_empty() {
@@ -1086,7 +1098,7 @@ async fn get_file_content(
     Path(hash): Path<String>,
 ) -> Result<Response, StatusCode> {
     require_scope(&ctx, auth::Scope::TracesRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let r = store.read().await;
     let content = r.load_file_content(&hash).await.map_err(|_| StatusCode::NOT_FOUND)?;
     drop(r);
@@ -1131,7 +1143,7 @@ async fn export_json(
     Query(params): Query<ExportParams>,
 ) -> Result<Json<ExportData>, (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::TracesRead)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let r = store.read().await;
     let mut traces: HashMap<TraceId, Vec<Span>> = HashMap::new();
 
@@ -1207,7 +1219,7 @@ async fn delete_span(
     if !ctx.has_scope(auth::Scope::TracesWrite) {
         return StatusCode::FORBIDDEN;
     }
-    let store = match state.store_for_org(ctx.org_id).await {
+    let store = match state.store_for_project(ctx.org_id, ctx.project_id).await {
         Ok(s) => s,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
     };
@@ -1240,7 +1252,7 @@ async fn delete_trace(
     Path(trace_id): Path<TraceId>,
 ) -> Result<Json<DeletedTrace>, StatusCode> {
     require_scope(&ctx, auth::Scope::TracesWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     let spans_deleted = w.delete_trace(trace_id).await;
     drop(w);
@@ -1273,7 +1285,7 @@ async fn clear_all_traces(
     State(state): State<AppState>,
 ) -> Result<Json<ClearedAll>, (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::TracesWrite)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let mut w = store.write().await;
     w.clear().await;
     drop(w);
@@ -1317,7 +1329,7 @@ pub struct StorageHealth {
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     let uptime = state.start_time.elapsed().as_secs();
     // Health check uses nil org_id (local mode store or any available store)
-    let store = match state.store_for_org(uuid::Uuid::nil()).await {
+    let store = match state.store_for_project(uuid::Uuid::nil(), uuid::Uuid::nil()).await {
         Ok(s) => s,
         Err(_) => {
             return Json(HealthResponse {
@@ -1379,7 +1391,7 @@ async fn live() -> StatusCode {
     tag = "health"
 )]
 async fn prometheus_metrics(State(state): State<AppState>) -> Response {
-    let store = match state.store_for_org(uuid::Uuid::nil()).await {
+    let store = match state.store_for_project(uuid::Uuid::nil(), uuid::Uuid::nil()).await {
         Ok(s) => s,
         Err(_) => {
             return (
@@ -1418,7 +1430,7 @@ async fn list_datasets(
     State(state): State<AppState>,
 ) -> Result<Json<DatasetListResponse>, (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::DatasetsRead)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let r = store.read().await;
     let datasets: Vec<DatasetResponse> = r
         .all_datasets()
@@ -1449,7 +1461,7 @@ async fn create_dataset(
 ) -> Result<(StatusCode, Json<Dataset>), (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::DatasetsWrite)?;
     let dataset = Dataset::new(req.name, req.description);
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let mut w = store.write().await;
     w.save_dataset(dataset.clone()).await;
     drop(w);
@@ -1477,7 +1489,7 @@ async fn get_dataset(
     Path(dataset_id): Path<DatasetId>,
 ) -> Result<Json<DatasetResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let r = store.read().await;
     let ds = r.get_dataset(dataset_id).ok_or(StatusCode::NOT_FOUND)?;
     Ok(Json(DatasetResponse {
@@ -1506,7 +1518,7 @@ async fn update_dataset(
     Json(req): Json<UpdateDatasetRequest>,
 ) -> Result<Json<DatasetResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     let ds = w.get_dataset(dataset_id).ok_or(StatusCode::NOT_FOUND)?.clone();
     let mut updated = ds;
@@ -1545,7 +1557,7 @@ async fn delete_dataset_handler(
     if !ctx.has_scope(auth::Scope::DatasetsWrite) {
         return StatusCode::FORBIDDEN;
     }
-    let store = match state.store_for_org(ctx.org_id).await {
+    let store = match state.store_for_project(ctx.org_id, ctx.project_id).await {
         Ok(s) => s,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
     };
@@ -1582,7 +1594,7 @@ async fn list_datapoints(
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<Page<Datapoint>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let r = store.read().await;
     if r.get_dataset(dataset_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -1617,7 +1629,7 @@ async fn get_datapoint_handler(
     Path((dataset_id, dp_id)): Path<(DatasetId, DatapointId)>,
 ) -> Result<Json<Datapoint>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let r = store.read().await;
     let dp = r.get_datapoint(dp_id).ok_or(StatusCode::NOT_FOUND)?;
     if dp.dataset_id != dataset_id {
@@ -1646,7 +1658,7 @@ async fn create_datapoint(
     Json(req): Json<CreateDatapointRequest>,
 ) -> Result<(StatusCode, Json<Datapoint>), StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     if w.get_dataset(dataset_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -1683,7 +1695,7 @@ async fn delete_datapoint_handler(
     if !ctx.has_scope(auth::Scope::DatasetsWrite) {
         return StatusCode::FORBIDDEN;
     }
-    let store = match state.store_for_org(ctx.org_id).await {
+    let store = match state.store_for_project(ctx.org_id, ctx.project_id).await {
         Ok(s) => s,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
     };
@@ -1725,7 +1737,7 @@ async fn export_span_to_dataset(
     Json(req): Json<ExportSpanRequest>,
 ) -> Result<(StatusCode, Json<Datapoint>), StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     if w.get_dataset(dataset_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -1869,7 +1881,7 @@ async fn import_file(
     if !ctx.has_scope(auth::Scope::DatasetsWrite) {
         return Err((StatusCode::FORBIDDEN, "insufficient permissions: requires DatasetsWrite".to_string()));
     }
-    let store = state.store_for_org(ctx.org_id).await
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await
         .map_err(|e| (e.0, e.1))?;
     // Verify dataset exists
     {
@@ -1942,7 +1954,7 @@ async fn list_queue(
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<Page<QueueItem>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let r = store.read().await;
     if r.get_dataset(dataset_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -1976,7 +1988,7 @@ async fn enqueue_datapoints(
     Json(req): Json<EnqueueRequest>,
 ) -> Result<(StatusCode, Json<EnqueueResponse>), StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     if w.get_dataset(dataset_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -2020,7 +2032,7 @@ async fn claim_queue_item(
     Json(req): Json<ClaimRequest>,
 ) -> Result<Json<QueueItem>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     let item = w
         .claim_queue_item(item_id, req.claimed_by)
@@ -2053,7 +2065,7 @@ async fn submit_queue_item(
     Json(req): Json<SubmitRequest>,
 ) -> Result<Json<QueueItem>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
 
     // Get the queue item to find the datapoint
@@ -2109,7 +2121,7 @@ async fn post_analytics(
     Json(query): Json<AnalyticsQuery>,
 ) -> Result<Json<AnalyticsResponse>, (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::AnalyticsRead)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let r = store.read().await;
     let filter = SpanFilter {
         kind: query.filter.kind.clone(),
@@ -2141,7 +2153,7 @@ async fn analytics_summary(
     State(state): State<AppState>,
 ) -> Result<Json<AnalyticsSummary>, (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::AnalyticsRead)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let r = store.read().await;
     let spans: Vec<&trace::Span> = r.all_spans().collect();
     let trace_count = r.trace_count();
@@ -2159,7 +2171,7 @@ async fn list_eval_runs(
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<Page<EvalRun>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let r = store.read().await;
     if r.get_dataset(dataset_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -2177,7 +2189,7 @@ async fn create_eval_run(
     Json(req): Json<CreateEvalRunRequest>,
 ) -> Result<(StatusCode, Json<EvalRun>), (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::DatasetsWrite)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
 
     // Verify dataset exists and count datapoints
     {
@@ -2218,7 +2230,7 @@ async fn get_eval_run_handler(
     Path(run_id): Path<EvalRunId>,
 ) -> Result<Json<EvalRunDetailResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let r = store.read().await;
     let run = r.get_eval_run(run_id).ok_or(StatusCode::NOT_FOUND)?.clone();
     let results: Vec<EvalResult> = r.eval_results_for_run(run_id).into_iter().cloned().collect();
@@ -2234,7 +2246,7 @@ async fn delete_eval_run_handler(
     if !ctx.has_scope(auth::Scope::DatasetsWrite) {
         return StatusCode::FORBIDDEN;
     }
-    let store = match state.store_for_org(ctx.org_id).await {
+    let store = match state.store_for_project(ctx.org_id, ctx.project_id).await {
         Ok(s) => s,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
     };
@@ -2253,7 +2265,7 @@ async fn cancel_eval_run(
     Path(run_id): Path<EvalRunId>,
 ) -> Result<Json<EvalRun>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     let run = w.get_eval_run(run_id).ok_or(StatusCode::NOT_FOUND)?.clone();
     if run.status.is_terminal() {
@@ -2276,7 +2288,7 @@ async fn compare_eval_runs(
     Query(params): Query<CompareParams>,
 ) -> Result<Json<ComparisonResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let r = store.read().await;
     if r.get_dataset(dataset_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -2353,7 +2365,7 @@ async fn list_capture_rules(
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<Page<CaptureRule>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let r = store.read().await;
     if r.get_dataset(dataset_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -2371,7 +2383,7 @@ async fn create_capture_rule(
     Json(req): Json<CreateCaptureRuleRequest>,
 ) -> Result<(StatusCode, Json<CaptureRule>), StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     if w.get_dataset(dataset_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -2389,7 +2401,7 @@ async fn update_capture_rule(
     Json(req): Json<UpdateCaptureRuleRequest>,
 ) -> Result<Json<CaptureRule>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     let rule = w.get_capture_rule(rule_id).ok_or(StatusCode::NOT_FOUND)?.clone();
     let mut updated = rule;
@@ -2415,7 +2427,7 @@ async fn delete_capture_rule_handler(
     if !ctx.has_scope(auth::Scope::DatasetsWrite) {
         return StatusCode::FORBIDDEN;
     }
-    let store = match state.store_for_org(ctx.org_id).await {
+    let store = match state.store_for_project(ctx.org_id, ctx.project_id).await {
         Ok(s) => s,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
     };
@@ -2434,7 +2446,7 @@ async fn toggle_capture_rule(
     Path(rule_id): Path<CaptureRuleId>,
 ) -> Result<Json<CaptureRule>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     let rule = w.get_capture_rule(rule_id).ok_or(StatusCode::NOT_FOUND)?.clone();
     let mut updated = rule;
@@ -2450,7 +2462,7 @@ async fn list_provider_connections(
     State(state): State<AppState>,
 ) -> Result<Json<ProviderConnectionListResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let r = store.read().await;
     let connections: Vec<ProviderConnectionInfo> = r.list_provider_connections().iter().map(|c| c.to_info()).collect();
     let count = connections.len();
@@ -2463,7 +2475,7 @@ async fn create_provider_connection(
     Json(req): Json<CreateProviderConnectionRequest>,
 ) -> Result<(StatusCode, Json<ProviderConnectionInfo>), StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut conn = ProviderConnection::new(req.name, req.provider);
     conn.base_url = req.base_url;
     conn.api_key = req.api_key;
@@ -2481,7 +2493,7 @@ async fn update_provider_connection(
     Json(req): Json<UpdateProviderConnectionRequest>,
 ) -> Result<Json<ProviderConnectionInfo>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     let mut conn = w.get_provider_connection(conn_id).ok_or(StatusCode::NOT_FOUND)?.clone();
     if let Some(name) = req.name { conn.name = name; }
@@ -2503,7 +2515,7 @@ async fn delete_provider_connection_handler(
     if !ctx.has_scope(auth::Scope::DatasetsWrite) {
         return StatusCode::FORBIDDEN;
     }
-    let store = match state.store_for_org(ctx.org_id).await {
+    let store = match state.store_for_project(ctx.org_id, ctx.project_id).await {
         Ok(s) => s,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
     };
@@ -2591,7 +2603,7 @@ async fn list_provider_connection_models(
     Path(conn_id): Path<ProviderConnectionId>,
 ) -> Result<Json<ProviderModelsResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let r = store.read().await;
     let conn = r.get_provider_connection(conn_id).ok_or(StatusCode::NOT_FOUND)?;
 
@@ -3186,18 +3198,18 @@ async fn extract_auth(
                 let prefix = if token.len() >= 16 { &token[..16] } else {
                     return Err(auth::AuthError::InvalidApiKey);
                 };
-                let (org_id, key_hash, scopes) = lookup
+                let (org_id, project_id, key_hash, scopes) = lookup
                     .lookup_api_key(prefix)
                     .await
                     .ok_or(auth::AuthError::InvalidApiKey)?;
                 if !auth::verify_api_key(token, &key_hash) {
                     return Err(auth::AuthError::InvalidApiKey);
                 }
-                return Ok(auth::AuthContext::from_api_key(org_id, scopes));
+                return Ok(auth::AuthContext::from_api_key(org_id, project_id, scopes));
             }
             // JWT session token
             let session = auth::verify_session(token, &config.jwt_secret)?;
-            return Ok(auth::AuthContext::from_session(session.org_id, session.user_id, session.scopes));
+            return Ok(auth::AuthContext::from_session(session.org_id, session.project_id, session.user_id, session.scopes));
         }
 
         return Err(auth::AuthError::InvalidFormat);
@@ -3210,7 +3222,7 @@ async fn extract_auth(
             if let Some(value) = c.strip_prefix("session=") {
                 if !value.is_empty() {
                     let session = auth::verify_session(value, &config.jwt_secret)?;
-                    return Ok(auth::AuthContext::from_session(session.org_id, session.user_id, session.scopes));
+                    return Ok(auth::AuthContext::from_session(session.org_id, session.project_id, session.user_id, session.scopes));
                 }
             }
         }
@@ -3220,7 +3232,7 @@ async fn extract_auth(
     if let Some(query) = query_string {
         if let Some(token) = auth_keys::extract_token_from_query(query) {
             let session = auth::verify_session(&token, &config.jwt_secret)?;
-            return Ok(auth::AuthContext::from_session(session.org_id, session.user_id, session.scopes));
+            return Ok(auth::AuthContext::from_session(session.org_id, session.project_id, session.user_id, session.scopes));
         }
     }
 

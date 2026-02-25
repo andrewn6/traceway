@@ -358,6 +358,27 @@ impl<B: StorageBackend> PersistentStore<B> {
         self.memory.get(id)
     }
 
+    /// Get a span by ID, falling back to the storage backend if not in memory.
+    /// If found in the backend, the span is cached in memory for subsequent access.
+    pub async fn get_or_load(&mut self, id: SpanId) -> Option<&Span> {
+        if self.memory.get(id).is_some() {
+            return self.memory.get(id);
+        }
+        // Try loading from backend
+        match self.backend.get_span(id).await {
+            Ok(Some(span)) => {
+                tracing::debug!(%id, "loaded span from backend (not in memory)");
+                self.memory.insert(span);
+                self.memory.get(id)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                tracing::warn!(%id, "failed to load span from backend: {}", e);
+                None
+            }
+        }
+    }
+
     pub fn spans_for_trace(&self, trace_id: TraceId) -> &[SpanId] {
         self.memory.spans_for_trace(trace_id)
     }
@@ -386,13 +407,27 @@ impl<B: StorageBackend> PersistentStore<B> {
         self.memory.filter_spans(filter)
     }
 
-    /// Complete a span (immutable transition: Running -> Completed)
+    /// Complete a span (immutable transition: Running -> Completed).
+    /// Falls back to the storage backend if the span is not in memory
+    /// (e.g. when running multiple instances behind a load balancer).
     pub async fn complete_span(
         &mut self,
         id: SpanId,
         output: Option<serde_json::Value>,
     ) -> Option<Span> {
-        let span = self.memory.remove(id)?;
+        // Try memory first, then fall back to backend
+        let span = match self.memory.remove(id) {
+            Some(s) => s,
+            None => {
+                match self.backend.get_span(id).await {
+                    Ok(Some(s)) => {
+                        tracing::debug!(%id, "complete_span: loaded span from backend");
+                        s
+                    }
+                    _ => return None,
+                }
+            }
+        };
         if span.status().is_terminal() {
             self.memory.replace(span);
             return None;
@@ -407,13 +442,25 @@ impl<B: StorageBackend> PersistentStore<B> {
 
     /// Complete a span with an updated SpanKind (e.g. to populate token counts).
     /// Uses serde JSON round-trip to reconstruct with new kind, same pattern as SqliteBackend::deserialize_span.
+    /// Falls back to the storage backend if the span is not in memory.
     pub async fn complete_span_with_kind(
         &mut self,
         id: SpanId,
         kind: SpanKind,
         output: Option<serde_json::Value>,
     ) -> Option<Span> {
-        let span = self.memory.remove(id)?;
+        let span = match self.memory.remove(id) {
+            Some(s) => s,
+            None => {
+                match self.backend.get_span(id).await {
+                    Ok(Some(s)) => {
+                        tracing::debug!(%id, "complete_span_with_kind: loaded span from backend");
+                        s
+                    }
+                    _ => return None,
+                }
+            }
+        };
         if span.status().is_terminal() {
             self.memory.replace(span);
             return None;
@@ -438,9 +485,21 @@ impl<B: StorageBackend> PersistentStore<B> {
         Some(completed)
     }
 
-    /// Fail a span (immutable transition: Running -> Failed)
+    /// Fail a span (immutable transition: Running -> Failed).
+    /// Falls back to the storage backend if the span is not in memory.
     pub async fn fail_span(&mut self, id: SpanId, error: impl Into<String>) -> Option<Span> {
-        let span = self.memory.remove(id)?;
+        let span = match self.memory.remove(id) {
+            Some(s) => s,
+            None => {
+                match self.backend.get_span(id).await {
+                    Ok(Some(s)) => {
+                        tracing::debug!(%id, "fail_span: loaded span from backend");
+                        s
+                    }
+                    _ => return None,
+                }
+            }
+        };
         if span.status().is_terminal() {
             self.memory.replace(span);
             return None;
