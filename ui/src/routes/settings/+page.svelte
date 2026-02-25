@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getStats, getHealth, clearAll, getAuthConfig, getAuthMe, getOrg, getOrgMembers, type Stats, type HealthResponse, type AuthConfig, type AuthMe, type OrgInfo, type OrgMember } from '$lib/api';
+	import { getStats, getHealth, clearAll, getAuthConfig, getAuthMe, getOrg, getOrgMembers, queryAnalytics, type Stats, type HealthResponse, type AuthConfig, type AuthMe, type OrgInfo, type OrgMember } from '$lib/api';
 	import { onMount } from 'svelte';
 
 	let stats: Stats = $state({ trace_count: 0, span_count: 0 });
@@ -8,6 +8,7 @@
 	let authMe: AuthMe | null = $state(null);
 	let org: OrgInfo | null = $state(null);
 	let members: OrgMember[] = $state([]);
+	let monthlySpans = $state(0);
 	let loading = $state(true);
 
 	// Danger zone
@@ -22,9 +23,9 @@
 		return members.find(m => m.id === authMe!.user_id) ?? null;
 	});
 
-	// Usage calculations
+	// Usage calculations — monthly spans vs plan limit
 	const spanLimit = $derived(org?.plan_limits?.spans_per_month ?? 0);
-	const spanUsage = $derived(stats.span_count);
+	const spanUsage = $derived(isCloudMode ? monthlySpans : stats.span_count);
 	const usagePct = $derived(spanLimit > 0 ? Math.min(100, (spanUsage / spanLimit) * 100) : 0);
 	const usageColor = $derived(usagePct > 90 ? 'bg-danger' : usagePct > 70 ? 'bg-warning' : 'bg-accent');
 
@@ -32,6 +33,11 @@
 		if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
 		if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
 		return n.toLocaleString();
+	}
+
+	function getMonthStart(): string {
+		const now = new Date();
+		return new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 	}
 
 	async function loadData() {
@@ -46,14 +52,21 @@
 			authConfig = auth;
 
 			if (auth?.mode === 'cloud') {
-				const [me, o, m] = await Promise.all([
+				const [me, o, m, analytics] = await Promise.all([
 					getAuthMe().catch(() => null),
 					getOrg().catch(() => null),
-					getOrgMembers().catch(() => [])
+					getOrgMembers().catch(() => []),
+					queryAnalytics({
+						metrics: ['span_count'],
+						filter: { since: getMonthStart() }
+					}).catch(() => null)
 				]);
 				authMe = me;
 				org = o;
 				members = m;
+				if (analytics?.totals?.span_count != null) {
+					monthlySpans = analytics.totals.span_count;
+				}
 			}
 		} catch {
 			// daemon not running
@@ -137,12 +150,17 @@
 
 		<!-- Usage -->
 		<section class="bg-bg-secondary border border-border rounded p-4 space-y-4">
-			<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Usage</h2>
+			<div class="flex items-center justify-between">
+				<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Usage</h2>
+				{#if isCloudMode}
+					<span class="text-[11px] text-text-muted">This month</span>
+				{/if}
+			</div>
 
 			<!-- Spans usage bar -->
 			<div class="space-y-2">
 				<div class="flex items-center justify-between text-sm">
-					<span class="text-text-secondary">Spans</span>
+					<span class="text-text-secondary">Spans{#if isCloudMode} this month{/if}</span>
 					<span class="text-text-muted text-xs font-mono">
 						{formatNumber(spanUsage)}{#if spanLimit > 0} / {formatNumber(spanLimit)}{/if}
 					</span>
