@@ -7,20 +7,28 @@
 	let {
 		spans,
 		selectedId = null,
-		onSelect
+		onSelect,
+		searchQuery = ''
 	}: {
 		spans: Span[];
 		selectedId?: string | null;
 		onSelect?: (span: Span) => void;
+		searchQuery?: string;
 	} = $props();
 
 	// ── Constants ──────────────────────────────────────────────────────
-	const ROW_HEIGHT = 32;
+	const SPAN_ROW_HEIGHT = 36;
+	const PREVIEW_LINE_HEIGHT = 18; // ~11px text + leading
+	const PREVIEW_PADDING = 8; // py-1 top+bottom
 	const OVERSCAN = 10;
-	const INDENT_PX = 18;
+	const INDENT_PX = 20;
 
-	// ── Search / filter ───────────────────────────────────────────────
-	let searchQuery = $state('');
+	/** Estimate preview height based on text length (rough char-per-line estimate) */
+	function previewHeight(text: string): number {
+		const charsPerLine = 60; // rough estimate for the available width
+		const lines = Math.min(3, Math.max(1, Math.ceil(text.length / charsPerLine)));
+		return lines * PREVIEW_LINE_HEIGHT + PREVIEW_PADDING;
+	}
 
 	// ── View mode ─────────────────────────────────────────────────────
 	let viewMode: 'tree' | 'flat' = $state('tree');
@@ -48,12 +56,20 @@
 	}
 
 	// ── Build child index ──────────────────────────────────────────────
-	interface TreeNode {
+	type TreeNode = {
+		type: 'span';
 		span: Span;
 		depth: number;
 		hasChildren: boolean;
 		descendantCount: number;
-	}
+		height: number;
+	} | {
+		type: 'preview';
+		span: Span;
+		depth: number;
+		text: string;
+		height: number;
+	};
 
 	const childIndex = $derived.by(() => {
 		const idx = new Map<string | null, Span[]>();
@@ -91,23 +107,35 @@
 	});
 
 	// ── DFS flat tree (respects collapse + search) ─────────────────────
+
+	function pushSpanNode(result: TreeNode[], span: Span, depth: number) {
+		const hasChildren = childIndex.has(span.id);
+		const descendantCount = hasChildren ? countDescendants(span.id) : 0;
+		result.push({ type: 'span', span, depth, hasChildren, descendantCount, height: SPAN_ROW_HEIGHT });
+
+		// Add a content preview row for LLM calls with output
+		const preview = extractPreviewText(span);
+		if (preview && span.kind?.type === 'llm_call') {
+			const text = preview.slice(0, 200);
+			result.push({ type: 'preview', span, depth, text, height: previewHeight(text) });
+		}
+	}
+
 	const flatTree = $derived.by((): TreeNode[] => {
 		const query = searchQuery.toLowerCase().trim();
 
 		if (viewMode === 'flat') {
-			// Flat: sorted by start time, all depth 0
 			const sorted = [...spans].sort(
 				(a, b) => new Date(spanStartedAt(a)).getTime() - new Date(spanStartedAt(b)).getTime()
 			);
 			const filtered = query
 				? sorted.filter((s) => s.name.toLowerCase().includes(query) || kindLabel(s).toLowerCase().includes(query))
 				: sorted;
-			return filtered.map((span) => ({
-				span,
-				depth: 0,
-				hasChildren: childIndex.has(span.id),
-				descendantCount: 0
-			}));
+			const result: TreeNode[] = [];
+			for (const span of filtered) {
+				pushSpanNode(result, span, 0);
+			}
+			return result;
 		}
 
 		// Tree mode
@@ -120,13 +148,11 @@
 			);
 			for (const span of sorted) {
 				if (query && !span.name.toLowerCase().includes(query) && !kindLabel(span).toLowerCase().includes(query)) {
-					// Still walk children in case they match
 					walk(span.id, depth + 1);
 					continue;
 				}
+				pushSpanNode(result, span, depth);
 				const hasChildren = childIndex.has(span.id);
-				const descendantCount = hasChildren ? countDescendants(span.id) : 0;
-				result.push({ span, depth, hasChildren, descendantCount });
 				if (hasChildren && !collapsed.has(span.id)) {
 					walk(span.id, depth + 1);
 				}
@@ -136,19 +162,44 @@
 		return result;
 	});
 
-	// ── Virtual scroll ─────────────────────────────────────────────────
+	// ── Virtual scroll (variable height) ──────────────────────────────
 	let scrollTop = $state(0);
 	let containerHeight = $state(400);
 	let scrollContainer: HTMLDivElement | undefined = $state(undefined);
 
-	const totalHeight = $derived(flatTree.length * ROW_HEIGHT);
+	// Precompute cumulative offsets for variable-height rows
+	const rowOffsets = $derived.by(() => {
+		const offsets: number[] = new Array(flatTree.length);
+		let y = 0;
+		for (let i = 0; i < flatTree.length; i++) {
+			offsets[i] = y;
+			y += flatTree[i].height;
+		}
+		return offsets;
+	});
+
+	const totalHeight = $derived(
+		flatTree.length === 0 ? 0 : rowOffsets[flatTree.length - 1] + flatTree[flatTree.length - 1].height
+	);
 
 	const visibleRange = $derived.by(() => {
-		const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
-		const endIdx = Math.min(
-			flatTree.length,
-			Math.ceil((scrollTop + containerHeight) / ROW_HEIGHT) + OVERSCAN
-		);
+		// Binary search for first visible row
+		let lo = 0, hi = flatTree.length;
+		while (lo < hi) {
+			const mid = (lo + hi) >> 1;
+			if (rowOffsets[mid] + flatTree[mid].height <= scrollTop - OVERSCAN * SPAN_ROW_HEIGHT) lo = mid + 1;
+			else hi = mid;
+		}
+		const startIdx = Math.max(0, lo);
+
+		lo = startIdx; hi = flatTree.length;
+		while (lo < hi) {
+			const mid = (lo + hi) >> 1;
+			if (rowOffsets[mid] < scrollTop + containerHeight + OVERSCAN * SPAN_ROW_HEIGHT) lo = mid + 1;
+			else hi = mid;
+		}
+		const endIdx = Math.min(flatTree.length, lo);
+
 		return { startIdx, endIdx };
 	});
 
@@ -225,17 +276,63 @@
 		return 'bg-success';
 	}
 
+	function extractPreviewText(s: Span): string | null {
+		// LLM call: try output preview, then input preview
+		if (s.kind?.type === 'llm_call') {
+			if (s.kind.output_preview) return s.kind.output_preview;
+			if (s.kind.input_preview) return s.kind.input_preview;
+		}
+		// String output
+		if (typeof s.output === 'string' && s.output.length > 0) {
+			return s.output;
+		}
+		// Object output: try to find content
+		if (s.output && typeof s.output === 'object') {
+			const obj = s.output as Record<string, unknown>;
+			if (typeof obj.content === 'string') return obj.content;
+			if (Array.isArray(obj.choices)) {
+				const first = obj.choices[0] as Record<string, unknown> | undefined;
+				if (first?.message && typeof (first.message as Record<string, unknown>).content === 'string') {
+					return (first.message as Record<string, unknown>).content as string;
+				}
+			}
+			// Try messages array (chat format output)
+			if (Array.isArray(obj.messages)) {
+				const last = obj.messages[obj.messages.length - 1] as Record<string, unknown> | undefined;
+				if (last && typeof last.content === 'string') return last.content;
+			}
+		}
+		// Input: try to extract last user message
+		if (s.input && typeof s.input === 'object' && !Array.isArray(s.input)) {
+			const obj = s.input as Record<string, unknown>;
+			if (Array.isArray(obj.messages) && obj.messages.length > 0) {
+				const last = obj.messages[obj.messages.length - 1] as Record<string, unknown> | undefined;
+				if (last && typeof last.content === 'string') return last.content;
+			}
+		}
+		if (Array.isArray(s.input) && s.input.length > 0) {
+			const last = s.input[s.input.length - 1] as Record<string, unknown> | undefined;
+			if (last && typeof last.content === 'string') return last.content;
+		}
+		return null;
+	}
+
+	/** Whether a span should get an inline content preview block */
+	function shouldShowPreview(s: Span): boolean {
+		return s.kind?.type === 'llm_call' && extractPreviewText(s) !== null;
+	}
+
 	// Scroll selected span into view
 	$effect(() => {
 		if (selectedId && scrollContainer) {
-			const idx = flatTree.findIndex((n) => n.span.id === selectedId);
+			const idx = flatTree.findIndex((n) => n.type === 'span' && n.span.id === selectedId);
 			if (idx >= 0) {
-				const top = idx * ROW_HEIGHT;
-				const bottom = top + ROW_HEIGHT;
+				const top = rowOffsets[idx];
+				const bottom = top + flatTree[idx].height;
 				const viewTop = scrollContainer.scrollTop;
 				const viewBottom = viewTop + containerHeight;
 				if (top < viewTop || bottom > viewBottom) {
-					scrollContainer.scrollTop = top - containerHeight / 2 + ROW_HEIGHT / 2;
+					scrollContainer.scrollTop = top - containerHeight / 2 + flatTree[idx].height / 2;
 				}
 			}
 		}
@@ -244,50 +341,30 @@
 
 <div class="flex flex-col h-full min-h-0 bg-bg-secondary border-r border-border">
 	<!-- Toolbar -->
-	<div class="flex items-center gap-1.5 px-2 py-1.5 border-b border-border shrink-0">
-		<!-- View mode toggle -->
-		<div class="flex items-center bg-bg-tertiary rounded text-[10px]">
-			<button
-				class="px-2 py-1 rounded transition-colors {viewMode === 'tree' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text'}"
-				onclick={() => viewMode = 'tree'}
-			>Tree</button>
-			<button
-				class="px-2 py-1 rounded transition-colors {viewMode === 'flat' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text'}"
-				onclick={() => viewMode = 'flat'}
-			>Flat</button>
-		</div>
+	<div class="flex items-center gap-2 px-3 py-1.5 border-b border-border shrink-0">
+		<span class="text-[11px] text-text-muted">{flatTree.filter(n => n.type === 'span').length} spans</span>
+
+		<div class="flex-1"></div>
 
 		{#if viewMode === 'tree'}
 			<div class="flex items-center gap-0.5 text-[10px] text-text-muted">
 				<button class="hover:text-text transition-colors px-1" onclick={expandAll}>expand</button>
-				<span>/</span>
+				<span class="text-border">/</span>
 				<button class="hover:text-text transition-colors px-1" onclick={collapseAll}>collapse</button>
 			</div>
 		{/if}
 
-		<div class="flex-1"></div>
-
-		<!-- Search -->
-		<div class="relative">
-			<input
-				type="text"
-				bind:value={searchQuery}
-				placeholder="Filter..."
-				class="w-28 bg-bg-tertiary border border-border rounded px-2 py-0.5 text-[11px] text-text placeholder:text-text-muted focus:w-40 focus:border-accent/50 transition-all outline-none"
-			/>
-			{#if searchQuery}
-				<button
-					class="absolute right-1 top-1/2 -translate-y-1/2 text-text-muted hover:text-text text-xs"
-					onclick={() => searchQuery = ''}
-				>x</button>
-			{/if}
+		<!-- View mode toggle -->
+		<div class="flex items-center bg-bg-tertiary rounded text-[10px]">
+			<button
+				class="px-2 py-0.5 rounded transition-colors {viewMode === 'tree' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text'}"
+				onclick={() => viewMode = 'tree'}
+			>Tree</button>
+			<button
+				class="px-2 py-0.5 rounded transition-colors {viewMode === 'flat' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text'}"
+				onclick={() => viewMode = 'flat'}
+			>Flat</button>
 		</div>
-	</div>
-
-	<!-- Span count -->
-	<div class="flex items-center justify-between px-3 py-1 border-b border-border text-[10px] text-text-muted shrink-0 uppercase tracking-wider">
-		<span>{flatTree.length} span{flatTree.length !== 1 ? 's' : ''}</span>
-		<span>duration</span>
 	</div>
 
 	<!-- Virtual scroll area -->
@@ -298,85 +375,105 @@
 		onscroll={onScroll}
 	>
 		<div class="relative" style="height: {totalHeight}px">
-			{#each visibleNodes as node, i (node.span.id)}
+			{#each visibleNodes as node, i (`${node.type}-${node.span.id}-${i}`)}
 				{@const idx = visibleRange.startIdx + i}
+				{@const topPx = rowOffsets[idx]}
 				{@const s = node.span}
-				{@const status = spanStatus(s)}
-				{@const duration = spanDurationMs(s)}
-				{@const model = modelBadge(s)}
-				{@const tokens = tokenCount(s)}
-				{@const cost = costBadge(s)}
-				{@const bytes = bytesBadge(s)}
-				<button
-					class="absolute left-0 right-0 flex items-center text-xs transition-colors group
-						{selectedId === s.id ? 'bg-accent/10 border-l-2 border-l-accent' : 'hover:bg-bg-tertiary border-l-2 border-l-transparent'}"
-					style="top: {idx * ROW_HEIGHT}px; height: {ROW_HEIGHT}px"
-					onclick={() => onSelect?.(s)}
-				>
-					<!-- Span info -->
-					<div class="flex items-center gap-1 flex-1 px-2 overflow-hidden min-w-0">
-						<!-- Indent + collapse -->
-						{#if viewMode === 'tree'}
-							<div class="flex items-center shrink-0" style="width: {node.depth * INDENT_PX + 18}px">
-								<div style="width: {node.depth * INDENT_PX}px"></div>
-								{#if node.hasChildren}
-									<!-- svelte-ignore a11y_click_events_have_key_events -->
-									<span
-										role="switch"
-										aria-checked={!collapsed.has(s.id)}
-										tabindex={-1}
-										class="w-[18px] h-[18px] flex items-center justify-center text-text-muted hover:text-text transition-colors cursor-pointer"
-										onclick={(e: MouseEvent) => { e.stopPropagation(); toggleCollapse(s.id); }}
-									>
-										{#if collapsed.has(s.id)}
-											<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M4 2l6 4-6 4V2z"/></svg>
-										{:else}
-											<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M2 4l4 6 4-6H2z"/></svg>
-										{/if}
-									</span>
-								{:else}
-									<div class="w-[18px]"></div>
-								{/if}
+
+				{#if node.type === 'preview'}
+					<!-- Content preview block -->
+					<div
+						class="absolute left-0 right-0 cursor-pointer
+							{selectedId === s.id ? 'bg-accent/5 border-l-2 border-l-accent' : 'border-l-2 border-l-transparent hover:bg-bg-tertiary/50'}"
+						style="top: {topPx}px; height: {node.height}px"
+						role="button"
+						tabindex={-1}
+						onclick={() => onSelect?.(s)}
+						onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') onSelect?.(s); }}
+					>
+						<div class="overflow-hidden pr-3" style="padding-left: {(node.depth + (viewMode === 'tree' ? 1 : 0)) * INDENT_PX + 46}px; padding-top: 2px">
+							<p class="text-[11px] text-text-muted/80 leading-[18px] line-clamp-3">{node.text}</p>
+						</div>
+					</div>
+				{:else}
+					<!-- Span row -->
+					{@const status = spanStatus(s)}
+					{@const duration = spanDurationMs(s)}
+					{@const model = modelBadge(s)}
+					{@const tokens = tokenCount(s)}
+					{@const cost = costBadge(s)}
+					{@const bytes = bytesBadge(s)}
+					<button
+						class="absolute left-0 right-0 flex items-center text-xs transition-colors group
+							{selectedId === s.id ? 'bg-accent/10 border-l-2 border-l-accent' : 'hover:bg-bg-tertiary border-l-2 border-l-transparent'}"
+						style="top: {topPx}px; height: {node.height}px"
+						onclick={() => onSelect?.(s)}
+					>
+						<!-- Span info -->
+						<div class="flex items-center gap-1.5 flex-1 px-2 overflow-hidden min-w-0">
+							<!-- Indent + collapse -->
+							{#if viewMode === 'tree'}
+								<div class="flex items-center shrink-0" style="width: {node.depth * INDENT_PX + 20}px">
+									<div style="width: {node.depth * INDENT_PX}px"></div>
+									{#if node.hasChildren}
+										<!-- svelte-ignore a11y_click_events_have_key_events -->
+										<span
+											role="switch"
+											aria-checked={!collapsed.has(s.id)}
+											tabindex={-1}
+											class="w-5 h-5 flex items-center justify-center text-text-muted hover:text-text transition-colors cursor-pointer"
+											onclick={(e: MouseEvent) => { e.stopPropagation(); toggleCollapse(s.id); }}
+										>
+											{#if collapsed.has(s.id)}
+												<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M4 2l6 4-6 4V2z"/></svg>
+											{:else}
+												<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M2 4l4 6 4-6H2z"/></svg>
+											{/if}
+										</span>
+									{:else}
+										<div class="w-5"></div>
+									{/if}
+								</div>
+							{/if}
+
+							<!-- Status dot -->
+							<span class="w-2 h-2 rounded-full shrink-0 {statusDotClass(s)}"></span>
+
+							<!-- Icon -->
+							<div class="shrink-0">
+								<SpanKindIcon span={s} />
 							</div>
-						{/if}
 
-						<!-- Status dot -->
-						<span class="w-2 h-2 rounded-full shrink-0 {statusDotClass(s)}"></span>
+							<!-- Name -->
+							<span class="text-text truncate text-xs font-medium">{s.name}</span>
 
-						<!-- Icon -->
-						<div class="shrink-0">
-							<SpanKindIcon span={s} />
+							<!-- Inline badges -->
+							{#if model}
+								<span class="shrink-0 text-purple-400 text-[10px] bg-purple-400/10 rounded px-1 py-px">{model}</span>
+							{/if}
+							{#if tokens}
+								<span class="shrink-0 text-text-muted text-[10px]">{tokens}tok</span>
+							{/if}
+							{#if cost}
+								<span class="shrink-0 text-success text-[10px]">{cost}</span>
+							{/if}
+							{#if bytes}
+								<span class="shrink-0 text-text-muted text-[10px]">{bytes}</span>
+							{/if}
+
+							<!-- Collapsed count -->
+							{#if node.hasChildren && collapsed.has(s.id)}
+								<span class="shrink-0 text-text-muted text-[10px] bg-bg-tertiary rounded px-1.5 py-px">+{node.descendantCount}</span>
+							{/if}
 						</div>
 
-						<!-- Name -->
-						<span class="text-text truncate text-[11px] font-medium">{s.name}</span>
-
-						<!-- Inline badges -->
-						{#if model}
-							<span class="shrink-0 text-purple-400 text-[9px] opacity-70">{model}</span>
-						{/if}
-						{#if tokens}
-							<span class="shrink-0 text-text-muted text-[9px]">{tokens}tok</span>
-						{/if}
-						{#if cost}
-							<span class="shrink-0 text-text-muted text-[9px]">{cost}</span>
-						{/if}
-						{#if bytes}
-							<span class="shrink-0 text-text-muted text-[9px]">{bytes}</span>
-						{/if}
-
-						<!-- Collapsed count -->
-						{#if node.hasChildren && collapsed.has(s.id)}
-							<span class="shrink-0 text-text-muted text-[9px] bg-bg-tertiary rounded px-1">+{node.descendantCount}</span>
-						{/if}
-					</div>
-
-					<!-- Duration / offset (right side) -->
-					<div class="shrink-0 flex flex-col items-end pr-3 text-right min-w-14">
-						<span class="text-[11px] text-text-secondary font-mono">{formatDuration(duration)}</span>
-						<span class="text-[9px] text-text-muted font-mono">{relativeOffset(s)}</span>
-					</div>
-				</button>
+						<!-- Duration / offset (right side) -->
+						<div class="shrink-0 flex flex-col items-end pr-3 text-right min-w-16">
+							<span class="text-xs text-text-secondary font-mono">{formatDuration(duration)}</span>
+							<span class="text-[10px] text-text-muted font-mono">{relativeOffset(s)}</span>
+						</div>
+					</button>
+				{/if}
 			{/each}
 		</div>
 	</div>
