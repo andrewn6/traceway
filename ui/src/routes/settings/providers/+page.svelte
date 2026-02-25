@@ -6,10 +6,15 @@
 		deleteProviderConnection,
 		testProviderConnection,
 		listProviderModels,
+		getAuthConfig,
 		type ProviderConnectionInfo,
-		type ProviderModelInfo
+		type ProviderModelInfo,
+		type AuthConfig
 	} from '$lib/api';
 	import { onMount } from 'svelte';
+
+	let authConfig: AuthConfig = $state({ mode: 'local', features: [] });
+	const isLocalMode = $derived(authConfig.mode === 'local');
 
 	// ─── Provider catalog ───────────────────────────────────────────────
 
@@ -265,7 +270,15 @@
 		}
 	}
 
-	onMount(loadConnections);
+	// Filter out Ollama in cloud mode (it's localhost-only)
+	const visibleProviders = $derived(
+		isLocalMode ? PROVIDERS : PROVIDERS.filter(p => p.id !== 'ollama')
+	);
+
+	onMount(() => {
+		loadConnections();
+		getAuthConfig().then(c => { authConfig = c; }).catch(() => {});
+	});
 </script>
 
 <div class="max-w-3xl space-y-6">
@@ -504,7 +517,7 @@
 		<div>
 			<h2 class="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Add a Provider</h2>
 			<div class="grid grid-cols-2 gap-3">
-				{#each PROVIDERS as prov}
+				{#each visibleProviders as prov}
 					<button
 						onclick={() => startAdd(prov)}
 						class="bg-bg-secondary border border-border rounded-lg p-4 text-left hover:border-opacity-60 transition-all group"

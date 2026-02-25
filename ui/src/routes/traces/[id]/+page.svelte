@@ -12,6 +12,96 @@
 	let selectedSpan: Span | null = $state(null);
 	let loading = $state(true);
 
+	// Search
+	let searchQuery = $state('');
+	let searchFocused = $state(false);
+	let searchInputEl: HTMLInputElement | undefined = $state(undefined);
+
+	// Build suggestion list from current spans
+	const searchSuggestions = $derived.by((): Array<{ label: string; category: string }> => {
+		if (!searchQuery.trim()) return [];
+		const q = searchQuery.toLowerCase().trim();
+		const seen = new Set<string>();
+		const results: Array<{ label: string; category: string }> = [];
+
+		// Span names
+		for (const s of spans) {
+			const key = `name:${s.name}`;
+			if (!seen.has(key) && s.name.toLowerCase().includes(q)) {
+				seen.add(key);
+				results.push({ label: s.name, category: 'span' });
+			}
+		}
+		// Models
+		for (const s of spans) {
+			if (s.kind?.type === 'llm_call' && s.kind.model) {
+				const key = `model:${s.kind.model}`;
+				if (!seen.has(key) && s.kind.model.toLowerCase().includes(q)) {
+					seen.add(key);
+					results.push({ label: s.kind.model, category: 'model' });
+				}
+			}
+		}
+		// Providers
+		for (const s of spans) {
+			if (s.kind?.type === 'llm_call' && s.kind.provider) {
+				const key = `provider:${s.kind.provider}`;
+				if (!seen.has(key) && s.kind.provider.toLowerCase().includes(q)) {
+					seen.add(key);
+					results.push({ label: s.kind.provider, category: 'provider' });
+				}
+			}
+		}
+		// Kind types
+		const kindLabels: Record<string, string> = { llm_call: 'LLM Call', fs_read: 'File Read', fs_write: 'File Write', custom: 'Custom' };
+		const seenKinds = new Set<string>();
+		for (const s of spans) {
+			const kt = s.kind?.type ?? 'custom';
+			if (!seenKinds.has(kt)) {
+				seenKinds.add(kt);
+				const label = kindLabels[kt] ?? kt;
+				if (label.toLowerCase().includes(q) || kt.toLowerCase().includes(q)) {
+					const key = `kind:${kt}`;
+					if (!seen.has(key)) {
+						seen.add(key);
+						results.push({ label, category: 'kind' });
+					}
+				}
+			}
+		}
+		// Custom kind values
+		for (const s of spans) {
+			if (s.kind?.type === 'custom' && s.kind.kind) {
+				const key = `customkind:${s.kind.kind}`;
+				if (!seen.has(key) && s.kind.kind.toLowerCase().includes(q)) {
+					seen.add(key);
+					results.push({ label: s.kind.kind, category: 'kind' });
+				}
+			}
+		}
+
+		return results.slice(0, 8);
+	});
+
+	function applySuggestion(label: string) {
+		searchQuery = label;
+		searchFocused = false;
+		searchInputEl?.blur();
+	}
+
+	// Keyboard shortcut: / to focus search
+	function onKeydown(e: KeyboardEvent) {
+		if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+			e.preventDefault();
+			searchInputEl?.focus();
+		}
+		if (e.key === 'Escape' && searchFocused) {
+			searchQuery = '';
+			searchFocused = false;
+			searchInputEl?.blur();
+		}
+	}
+
 	// Add span form
 	let showAddSpan = $state(false);
 	let newSpanName = $state('');
@@ -69,6 +159,8 @@
 	}
 
 	onMount(() => {
+		document.addEventListener('keydown', onKeydown);
+
 		const unsubPage = page.subscribe(p => {
 			const newId = p.params.id ?? '';
 			if (newId && newId !== traceId) {
@@ -96,6 +188,7 @@
 		});
 
 		return () => {
+			document.removeEventListener('keydown', onKeydown);
 			unsubPage();
 			unsubEvents();
 		};
@@ -194,6 +287,26 @@
 		return Math.max(...durations);
 	});
 
+	const totalTokens = $derived.by(() => {
+		let total = 0;
+		for (const s of spans) {
+			if (s.kind?.type === 'llm_call') {
+				total += (s.kind.input_tokens ?? 0) + (s.kind.output_tokens ?? 0);
+			}
+		}
+		return total || null;
+	});
+
+	const totalCost = $derived.by(() => {
+		let total = 0;
+		for (const s of spans) {
+			if (s.kind?.type === 'llm_call' && s.kind.cost != null) {
+				total += s.kind.cost;
+			}
+		}
+		return total || null;
+	});
+
 	const parentOptions = $derived(spans.map((s) => ({ id: s.id, name: s.name })));
 </script>
 
@@ -211,10 +324,32 @@
 				 'bg-danger/20 text-danger border-danger/30'}">
 				{traceStatus}
 			</span>
-			<span class="text-text-secondary text-xs">{spans.length} spans</span>
-			{#if totalDuration !== null}
-				<span class="text-text-secondary text-xs font-mono">{totalDuration}ms</span>
-			{/if}
+
+			<!-- Summary stats -->
+			<div class="flex items-center gap-1.5 text-xs text-text-secondary font-mono">
+				{#if totalDuration !== null}
+					<span class="inline-flex items-center gap-1">
+						<svg class="w-3.5 h-3.5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
+						{totalDuration < 1000 ? `${totalDuration}ms` : `${(totalDuration / 1000).toFixed(2)}s`}
+					</span>
+				{/if}
+				{#if totalTokens}
+					<span class="text-border mx-0.5">|</span>
+					<span class="inline-flex items-center gap-1">
+						<svg class="w-3.5 h-3.5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" /></svg>
+						{totalTokens.toLocaleString()}
+					</span>
+				{/if}
+				{#if totalCost}
+					<span class="text-border mx-0.5">|</span>
+					<span class="inline-flex items-center gap-1 text-success">
+						<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
+						${totalCost.toFixed(4)}
+					</span>
+				{/if}
+				<span class="text-border mx-0.5">|</span>
+				<span class="text-text-muted">{spans.length} spans</span>
+			</div>
 
 			<div class="flex-1"></div>
 			<button
@@ -311,10 +446,55 @@
 			class="flex-1 min-h-0 flex"
 			class:select-none={isDragging}
 		>
-			<!-- Left panel: span tree -->
+			<!-- Left panel: search + span tree -->
 			<div class="min-h-0 overflow-hidden flex flex-col" style="width: {splitPercent}%">
+				<!-- Search bar -->
+				<div class="relative shrink-0 border-b border-border bg-bg-secondary">
+					<div class="flex items-center px-3 py-1.5 gap-2">
+						<svg class="w-3.5 h-3.5 text-text-muted shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+							<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+						</svg>
+						<input
+							bind:this={searchInputEl}
+							bind:value={searchQuery}
+							onfocus={() => searchFocused = true}
+							onblur={() => setTimeout(() => searchFocused = false, 150)}
+							type="text"
+							placeholder="Search spans...  /"
+							class="flex-1 bg-transparent text-xs text-text placeholder:text-text-muted/50 focus:outline-none"
+						/>
+						{#if searchQuery}
+							<button
+								class="text-text-muted hover:text-text text-xs shrink-0"
+								onclick={() => { searchQuery = ''; searchInputEl?.focus(); }}
+								aria-label="Clear search"
+							>
+								<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+									<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+								</svg>
+							</button>
+						{/if}
+					</div>
+
+					<!-- Autocomplete suggestions -->
+					{#if searchFocused && searchQuery.trim() && searchSuggestions.length > 0}
+						<div class="absolute left-0 right-0 top-full z-20 bg-bg-secondary border border-border border-t-0 rounded-b-lg shadow-lg overflow-hidden">
+							{#each searchSuggestions as suggestion}
+								<button
+									class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-bg-tertiary transition-colors"
+									onmousedown={() => applySuggestion(suggestion.label)}
+								>
+									<span class="text-[10px] uppercase tracking-wider text-text-muted/60 w-12 shrink-0">{suggestion.category}</span>
+									<span class="text-xs text-text truncate">{suggestion.label}</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
+
 				<TraceTimeline
 					{spans}
+					{searchQuery}
 					selectedId={selectedSpan?.id ?? null}
 					onSelect={selectSpan}
 				/>
