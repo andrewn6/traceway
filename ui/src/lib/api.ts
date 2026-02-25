@@ -208,6 +208,17 @@ export interface ProviderConnectionListResponse {
 	count: number;
 }
 
+export interface ProviderModelInfo {
+	id: string;
+	name?: string | null;
+}
+
+export interface ProviderModelsResponse {
+	models: ProviderModelInfo[];
+	ok: boolean;
+	error?: string | null;
+}
+
 // ─── Events ──────────────────────────────────────────────────────────
 
 export type SpanEvent =
@@ -438,6 +449,12 @@ export const updateProviderConnection = (connId: string, body: { name?: string; 
 
 export const deleteProviderConnection = (connId: string) =>
 	del<void>(`/provider-connections/${connId}`);
+
+export const testProviderConnection = (body: { provider: string; base_url?: string; api_key?: string }) =>
+	post<ProviderModelsResponse>('/provider-connections/test', body);
+
+export const listProviderModels = (connId: string) =>
+	get<ProviderModelsResponse>(`/provider-connections/${connId}/models`);
 
 // ─── Export ──────────────────────────────────────────────────────────
 

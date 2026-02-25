@@ -20,14 +20,14 @@
 			id: 'pro',
 			name: 'Pro',
 			price: '$20',
-			period: '/mo',
+			period: '/user/mo',
 			features: ['1M spans/month', '30-day retention', '5 team members', '5 API keys', 'Email support'],
 		},
 		{
 			id: 'team',
 			name: 'Team',
 			price: '$100',
-			period: '/mo',
+			period: '/user/mo',
 			features: ['10M spans/month', '90-day retention', '50 team members', 'Unlimited API keys', 'Priority support'],
 		},
 	];

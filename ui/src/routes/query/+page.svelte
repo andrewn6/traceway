@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import {
 		getSpans,
 		spanStatus,
@@ -37,6 +38,30 @@
 	const HISTORY_KEY = 'traceway:query-history';
 	const MAX_HISTORY = 50;
 
+	// ─── Sorting ────────────────────────────────────────────────────────
+
+	type SortField = 'name' | 'kind' | 'model' | 'status' | 'duration' | 'tokens' | 'cost' | 'started_at';
+	let sortField: SortField = $state('started_at');
+	let sortAsc = $state(false);
+
+	function toggleSort(field: SortField) {
+		if (sortField === field) {
+			sortAsc = !sortAsc;
+		} else {
+			sortField = field;
+			sortAsc = false; // default desc for new column
+		}
+		// Update filter and re-run
+		filter.sort_by = field;
+		filter.sort_order = sortAsc ? 'asc' : 'desc';
+		syncDslFromFilter();
+	}
+
+	function sortIcon(field: SortField): string {
+		if (sortField !== field) return '';
+		return sortAsc ? '\u2191' : '\u2193';
+	}
+
 	// ─── Relative time presets for the Since dropdown ────────────────────
 
 	const sincePresets = [
@@ -49,6 +74,25 @@
 		{ label: 'Last 7d', value: '7d' }
 	];
 
+	// ─── URL state ──────────────────────────────────────────────────────
+
+	function writeUrlState() {
+		const url = new URL(window.location.href);
+		const dsl = dslInput.trim();
+		if (dsl) {
+			url.searchParams.set('q', dsl);
+		} else {
+			url.searchParams.delete('q');
+		}
+		// Use replaceState to avoid polluting history
+		window.history.replaceState({}, '', url.toString());
+	}
+
+	function readUrlState(): string | null {
+		const params = new URLSearchParams(window.location.search);
+		return params.get('q');
+	}
+
 	// ─── Lifecycle ──────────────────────────────────────────────────────
 
 	onMount(() => {
@@ -58,6 +102,13 @@
 		} catch {
 			// ignore
 		}
+
+		// Restore from URL
+		const q = readUrlState();
+		if (q) {
+			dslInput = q;
+			applyDsl();
+		}
 	});
 
 	// ─── Query execution ────────────────────────────────────────────────
@@ -65,6 +116,7 @@
 	async function runQuery() {
 		loading = true;
 		hasQueried = true;
+		writeUrlState();
 		const start = performance.now();
 		try {
 			// Resolve relative times before sending to API
@@ -95,6 +147,11 @@
 
 	function applyDsl() {
 		filter = parseDsl(dslInput);
+		// Restore sort state from filter
+		if (filter.sort_by) {
+			sortField = filter.sort_by as SortField;
+			sortAsc = filter.sort_order === 'asc';
+		}
 		runQuery();
 	}
 
@@ -164,6 +221,26 @@
 		return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 	}
 
+	function formatTokens(span: Span): string {
+		const k = span.kind;
+		if (!k || k.type !== 'llm_call') return '-';
+		const inp = k.input_tokens ?? 0;
+		const out = k.output_tokens ?? 0;
+		const total = inp + out;
+		if (total === 0) return '-';
+		return `${total.toLocaleString()}`;
+	}
+
+	function formatCost(span: Span): string {
+		const k = span.kind;
+		if (!k || k.type !== 'llm_call') return '-';
+		const cost = k.cost;
+		if (cost === undefined || cost === null || cost === 0) return '-';
+		if (cost < 0.001) return `$${cost.toFixed(6)}`;
+		if (cost < 0.01) return `$${cost.toFixed(4)}`;
+		return `$${cost.toFixed(3)}`;
+	}
+
 	function timeAgo(ts: number): string {
 		const diff = Date.now() - ts;
 		if (diff < 60_000) return 'just now';
@@ -186,6 +263,11 @@
 		a.click();
 		URL.revokeObjectURL(url);
 	}
+
+	function copyShareUrl() {
+		writeUrlState();
+		navigator.clipboard.writeText(window.location.href);
+	}
 </script>
 
 <svelte:head>
@@ -195,7 +277,19 @@
 <div class="space-y-4">
 	<!-- Header -->
 	<div class="flex items-center justify-between">
-		<h1 class="text-lg font-semibold text-text">Span Query Explorer</h1>
+		<h1 class="text-lg font-semibold text-text">Span Query</h1>
+		{#if hasQueried && dslInput.trim()}
+			<button
+				onclick={copyShareUrl}
+				class="text-xs text-text-muted hover:text-accent transition-colors flex items-center gap-1"
+				title="Copy shareable URL"
+			>
+				<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.54a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.343 8.28" />
+				</svg>
+				Share
+			</button>
+		{/if}
 	</div>
 
 	<!-- DSL Search Bar -->
@@ -204,7 +298,7 @@
 			type="text"
 			bind:value={dslInput}
 			onkeydown={handleKeydown}
-			placeholder="kind:llm_call model:gpt-4 since:1h — or just type a span name"
+			placeholder="kind:llm_call model:gpt-4 since:1h duration:>500ms tokens:>100 cost:>0.01"
 			class="flex-1 bg-bg-secondary border border-border rounded px-3 py-2 text-sm font-mono text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
 		/>
 		<button
@@ -219,12 +313,12 @@
 	<!-- Structured Filters -->
 	<div class="flex flex-wrap gap-3 text-sm">
 		<div class="flex items-center gap-1.5">
-			<label for="f-kind" class="text-text-muted">Kind</label>
+			<label for="f-kind" class="text-text-muted text-xs">Kind</label>
 			<select
 				id="f-kind"
 				value={filter.kind ?? ''}
 				onchange={(e) => onFilterChange('kind', e.currentTarget.value)}
-				class="bg-bg-secondary border border-border rounded px-2 py-1 text-text text-sm"
+				class="bg-bg-secondary border border-border rounded px-2 py-1 text-text text-xs"
 			>
 				<option value="">All</option>
 				<option value="llm_call">LLM Call</option>
@@ -235,36 +329,24 @@
 		</div>
 
 		<div class="flex items-center gap-1.5">
-			<label for="f-model" class="text-text-muted">Model</label>
+			<label for="f-model" class="text-text-muted text-xs">Model</label>
 			<input
 				id="f-model"
 				type="text"
 				value={filter.model ?? ''}
 				onchange={(e) => onFilterChange('model', e.currentTarget.value)}
 				placeholder="gpt-4"
-				class="w-28 bg-bg-secondary border border-border rounded px-2 py-1 text-text text-sm placeholder:text-text-muted"
+				class="w-24 bg-bg-secondary border border-border rounded px-2 py-1 text-text text-xs placeholder:text-text-muted"
 			/>
 		</div>
 
 		<div class="flex items-center gap-1.5">
-			<label for="f-provider" class="text-text-muted">Provider</label>
-			<input
-				id="f-provider"
-				type="text"
-				value={filter.provider ?? ''}
-				onchange={(e) => onFilterChange('provider', e.currentTarget.value)}
-				placeholder="openai"
-				class="w-24 bg-bg-secondary border border-border rounded px-2 py-1 text-text text-sm placeholder:text-text-muted"
-			/>
-		</div>
-
-		<div class="flex items-center gap-1.5">
-			<label for="f-status" class="text-text-muted">Status</label>
+			<label for="f-status" class="text-text-muted text-xs">Status</label>
 			<select
 				id="f-status"
 				value={filter.status ?? ''}
 				onchange={(e) => onFilterChange('status', e.currentTarget.value)}
-				class="bg-bg-secondary border border-border rounded px-2 py-1 text-text text-sm"
+				class="bg-bg-secondary border border-border rounded px-2 py-1 text-text text-xs"
 			>
 				<option value="">All</option>
 				<option value="running">Running</option>
@@ -274,36 +356,24 @@
 		</div>
 
 		<div class="flex items-center gap-1.5">
-			<label for="f-name" class="text-text-muted">Name</label>
+			<label for="f-name" class="text-text-muted text-xs">Name</label>
 			<input
 				id="f-name"
 				type="text"
 				value={filter.name_contains ?? ''}
 				onchange={(e) => onFilterChange('name_contains', e.currentTarget.value)}
 				placeholder="span name"
-				class="w-28 bg-bg-secondary border border-border rounded px-2 py-1 text-text text-sm placeholder:text-text-muted"
+				class="w-24 bg-bg-secondary border border-border rounded px-2 py-1 text-text text-xs placeholder:text-text-muted"
 			/>
 		</div>
 
 		<div class="flex items-center gap-1.5">
-			<label for="f-path" class="text-text-muted">Path</label>
-			<input
-				id="f-path"
-				type="text"
-				value={filter.path ?? ''}
-				onchange={(e) => onFilterChange('path', e.currentTarget.value)}
-				placeholder="/src/..."
-				class="w-28 bg-bg-secondary border border-border rounded px-2 py-1 text-text text-sm placeholder:text-text-muted"
-			/>
-		</div>
-
-		<div class="flex items-center gap-1.5">
-			<label for="f-since" class="text-text-muted">Since</label>
+			<label for="f-since" class="text-text-muted text-xs">Since</label>
 			<select
 				id="f-since"
 				value={filter.since ?? ''}
 				onchange={(e) => onFilterChange('since', e.currentTarget.value)}
-				class="bg-bg-secondary border border-border rounded px-2 py-1 text-text text-sm"
+				class="bg-bg-secondary border border-border rounded px-2 py-1 text-text text-xs"
 			>
 				{#each sincePresets as preset}
 					<option value={preset.value}>{preset.label}</option>
@@ -312,14 +382,26 @@
 		</div>
 
 		<div class="flex items-center gap-1.5">
-			<label for="f-trace" class="text-text-muted">Trace</label>
+			<label for="f-provider" class="text-text-muted text-xs">Provider</label>
+			<input
+				id="f-provider"
+				type="text"
+				value={filter.provider ?? ''}
+				onchange={(e) => onFilterChange('provider', e.currentTarget.value)}
+				placeholder="openai"
+				class="w-20 bg-bg-secondary border border-border rounded px-2 py-1 text-text text-xs placeholder:text-text-muted"
+			/>
+		</div>
+
+		<div class="flex items-center gap-1.5">
+			<label for="f-trace" class="text-text-muted text-xs">Trace</label>
 			<input
 				id="f-trace"
 				type="text"
 				value={filter.trace_id ?? ''}
 				onchange={(e) => onFilterChange('trace_id', e.currentTarget.value)}
 				placeholder="trace id"
-				class="w-28 bg-bg-secondary border border-border rounded px-2 py-1 text-text text-sm placeholder:text-text-muted font-mono"
+				class="w-24 bg-bg-secondary border border-border rounded px-2 py-1 text-text text-xs placeholder:text-text-muted font-mono"
 			/>
 		</div>
 	</div>
@@ -328,9 +410,9 @@
 	{#if hasQueried}
 		<div class="border border-border rounded overflow-hidden">
 			<!-- Results header -->
-			<div class="px-3 py-2 bg-bg-secondary border-b border-border flex items-center gap-2 text-xs text-text-muted">
-				<span>{resultCount} span{resultCount !== 1 ? 's' : ''} found</span>
-				<span>&middot;</span>
+			<div class="px-3 py-2 bg-bg-secondary border-b border-border flex items-center gap-3 text-xs text-text-muted">
+				<span class="font-medium">{resultCount.toLocaleString()} span{resultCount !== 1 ? 's' : ''}</span>
+				<span class="text-border">|</span>
 				<span>{queryTimeMs}ms</span>
 				{#if results.length > 0}
 					<div class="flex-1"></div>
@@ -345,40 +427,60 @@
 				<div class="overflow-x-auto">
 					<table class="w-full text-sm">
 						<thead>
-							<tr class="text-left text-xs text-text-muted border-b border-border">
-								<th class="px-3 py-2 font-medium">Name</th>
-								<th class="px-3 py-2 font-medium">Kind</th>
-								<th class="px-3 py-2 font-medium">Model</th>
-								<th class="px-3 py-2 font-medium">Status</th>
+							<tr class="text-left text-[11px] text-text-muted border-b border-border bg-bg-secondary/50 uppercase tracking-wider">
+								<th class="px-3 py-2 font-medium cursor-pointer hover:text-text select-none" onclick={() => toggleSort('name')}>
+									Name <span class="text-accent">{sortIcon('name')}</span>
+								</th>
+								<th class="px-3 py-2 font-medium cursor-pointer hover:text-text select-none" onclick={() => toggleSort('kind')}>
+									Kind <span class="text-accent">{sortIcon('kind')}</span>
+								</th>
+								<th class="px-3 py-2 font-medium cursor-pointer hover:text-text select-none" onclick={() => toggleSort('model')}>
+									Model <span class="text-accent">{sortIcon('model')}</span>
+								</th>
+								<th class="px-3 py-2 font-medium cursor-pointer hover:text-text select-none" onclick={() => toggleSort('status')}>
+									Status <span class="text-accent">{sortIcon('status')}</span>
+								</th>
 								<th class="px-3 py-2 font-medium">Trace</th>
-								<th class="px-3 py-2 font-medium text-right">Duration</th>
-								<th class="px-3 py-2 font-medium text-right">Time</th>
+								<th class="px-3 py-2 font-medium text-right cursor-pointer hover:text-text select-none" onclick={() => toggleSort('tokens')}>
+									<span class="text-accent">{sortIcon('tokens')}</span> Tokens
+								</th>
+								<th class="px-3 py-2 font-medium text-right cursor-pointer hover:text-text select-none" onclick={() => toggleSort('cost')}>
+									<span class="text-accent">{sortIcon('cost')}</span> Cost
+								</th>
+								<th class="px-3 py-2 font-medium text-right cursor-pointer hover:text-text select-none" onclick={() => toggleSort('duration')}>
+									<span class="text-accent">{sortIcon('duration')}</span> Duration
+								</th>
+								<th class="px-3 py-2 font-medium text-right cursor-pointer hover:text-text select-none" onclick={() => toggleSort('started_at')}>
+									<span class="text-accent">{sortIcon('started_at')}</span> Time
+								</th>
 							</tr>
 						</thead>
 						<tbody>
 							{#each results as span}
 								<tr
-									class="border-b border-border/50 hover:bg-bg-secondary/50 cursor-pointer transition-colors"
+									class="border-b border-border/30 hover:bg-bg-secondary/50 cursor-pointer transition-colors"
 									onclick={() => goto(`/traces/${span.trace_id}`)}
 								>
-									<td class="px-3 py-2 font-mono text-text truncate max-w-xs">{span.name}</td>
-									<td class="px-3 py-2">
+									<td class="px-3 py-1.5 font-mono text-xs text-text truncate max-w-[200px]">{span.name}</td>
+									<td class="px-3 py-1.5">
 										{#if span.kind}
 											<span class="inline-flex items-center gap-1">
 												<SpanKindIcon {span} />
-												<span class="text-xs text-text-muted">{spanKindLabel(span)}</span>
+												<span class="text-[11px] text-text-muted">{spanKindLabel(span)}</span>
 											</span>
 										{:else}
 											<span class="text-text-muted">-</span>
 										{/if}
 									</td>
-									<td class="px-3 py-2 text-text-secondary font-mono text-xs">{span.kind?.type === 'llm_call' ? span.kind.model : '-'}</td>
-									<td class="px-3 py-2">
+									<td class="px-3 py-1.5 text-text-secondary font-mono text-xs">{span.kind?.type === 'llm_call' ? span.kind.model : '-'}</td>
+									<td class="px-3 py-1.5">
 										<StatusBadge status={spanStatus(span)} />
 									</td>
-									<td class="px-3 py-2 font-mono text-xs text-accent">{shortId(span.trace_id)}</td>
-									<td class="px-3 py-2 text-right text-text-secondary font-mono text-xs">{formatDuration(spanDurationMs(span))}</td>
-									<td class="px-3 py-2 text-right text-text-muted text-xs">{formatTime(spanStartedAt(span))}</td>
+									<td class="px-3 py-1.5 font-mono text-xs text-accent">{shortId(span.trace_id)}</td>
+									<td class="px-3 py-1.5 text-right text-text-secondary font-mono text-xs tabular-nums">{formatTokens(span)}</td>
+									<td class="px-3 py-1.5 text-right text-text-secondary font-mono text-xs tabular-nums">{formatCost(span)}</td>
+									<td class="px-3 py-1.5 text-right text-text-secondary font-mono text-xs tabular-nums">{formatDuration(spanDurationMs(span))}</td>
+									<td class="px-3 py-1.5 text-right text-text-muted text-xs tabular-nums">{formatTime(spanStartedAt(span))}</td>
 								</tr>
 							{/each}
 						</tbody>
@@ -390,32 +492,42 @@
 				</div>
 			{/if}
 		</div>
+	{:else}
+		<!-- Empty state with DSL help -->
+		<div class="border border-border/50 rounded p-6 text-center space-y-3">
+			<p class="text-text-muted text-sm">Search your spans using the query bar above.</p>
+			<div class="text-xs text-text-muted space-y-1 font-mono">
+				<p>kind:llm_call model:gpt-4 since:1h</p>
+				<p>status:failed duration:>500ms</p>
+				<p>tokens:>1000 cost:>0.01</p>
+			</div>
+		</div>
 	{/if}
 
 	<!-- Query History -->
 	{#if history.length > 0}
 		<details bind:open={historyOpen}>
-			<summary class="cursor-pointer text-sm text-text-muted hover:text-text transition-colors select-none">
-				Query History ({history.length})
+			<summary class="cursor-pointer text-xs text-text-muted hover:text-text transition-colors select-none">
+				History ({history.length})
 			</summary>
 			<div class="mt-2 border border-border rounded overflow-hidden">
 				{#each history as entry}
 					<button
-						class="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-bg-secondary/50 border-b border-border/50 last:border-b-0 transition-colors text-left"
+						class="w-full flex items-center justify-between px-3 py-1.5 text-xs hover:bg-bg-secondary/50 border-b border-border/30 last:border-b-0 transition-colors text-left"
 						onclick={() => loadHistory(entry)}
 					>
 						<span class="font-mono text-text truncate">{entry.dsl}</span>
-						<span class="text-xs text-text-muted shrink-0 ml-3">
+						<span class="text-text-muted shrink-0 ml-3">
 							{entry.resultCount} result{entry.resultCount !== 1 ? 's' : ''} &middot; {timeAgo(entry.timestamp)}
 						</span>
 					</button>
 				{/each}
-				<div class="px-3 py-2 bg-bg-secondary border-t border-border">
+				<div class="px-3 py-1.5 bg-bg-secondary border-t border-border">
 					<button
 						class="text-xs text-danger hover:text-danger/80 transition-colors"
 						onclick={clearHistory}
 					>
-						clear history
+						clear
 					</button>
 				</div>
 			</div>

@@ -341,6 +341,18 @@ export interface components {
             trace_id?: string | null;
             /** Format: date-time */
             until?: string | null;
+            /** Minimum duration in ms */
+            duration_min?: string | null;
+            /** Maximum duration in ms */
+            duration_max?: string | null;
+            /** Minimum total tokens */
+            tokens_min?: string | null;
+            /** Minimum cost in dollars */
+            cost_min?: string | null;
+            /** Sort field: started_at, duration, tokens, cost, name */
+            sort_by?: string | null;
+            /** Sort order: asc or desc */
+            sort_order?: string | null;
         };
         SpanStatus: "running" | "completed" | {
             failed: {
