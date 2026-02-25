@@ -35,7 +35,7 @@ use tokio::sync::{broadcast, watch, RwLock};
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
-use storage::{analytics, FileFilter, SpanFilter};
+use storage::{analytics, encode_cursor, decode_cursor, CursorInner, FileFilter, Page, SpanFilter};
 
 pub use any_backend::AnyBackend;
 use trace::{
@@ -146,9 +146,9 @@ pub use events::{EventBus, EventSubscriber, LocalEventBus};
         EnqueueRequest,
         ClaimRequest,
         SubmitRequest,
+        PaginationParams,
         // Response types
         CreatedSpan,
-        TraceListResponse,
         SpanList,
         Stats,
         DeletedTrace,
@@ -158,10 +158,7 @@ pub use events::{EventBus, EventSubscriber, LocalEventBus};
         FileVersionsResponse,
         DatasetResponse,
         DatasetListResponse,
-        DatapointListResponse,
         ImportResponse,
-        QueueListResponse,
-        QueueCounts,
         EnqueueResponse,
         HealthResponse,
         StorageHealth,
@@ -266,6 +263,47 @@ pub struct FailSpanRequest {
 }
 
 #[derive(Deserialize, ToSchema, utoipa::IntoParams)]
+pub struct PaginationParams {
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
+}
+
+const DEFAULT_PAGE_SIZE: usize = 50;
+const MAX_PAGE_SIZE: usize = 1000;
+
+fn paginate<T>(items: Vec<T>, params: &PaginationParams) -> Result<Page<T>, StatusCode> {
+    let limit = params.limit.unwrap_or(DEFAULT_PAGE_SIZE).min(MAX_PAGE_SIZE);
+    let offset = match params.cursor {
+        Some(ref c) => {
+            let inner = decode_cursor(c).map_err(|_| StatusCode::BAD_REQUEST)?;
+            inner.last_value.parse::<usize>().map_err(|_| StatusCode::BAD_REQUEST)?
+        }
+        None => 0,
+    };
+
+    let total = items.len();
+    let has_more = offset + limit < total;
+    let page_items: Vec<T> = items.into_iter().skip(offset).take(limit).collect();
+
+    let next_cursor = if has_more {
+        Some(encode_cursor(&CursorInner {
+            sort_field: "offset".into(),
+            last_value: (offset + limit).to_string(),
+            last_id: String::new(),
+        }))
+    } else {
+        None
+    };
+
+    Ok(Page {
+        items: page_items,
+        total: Some(total),
+        next_cursor,
+        has_more,
+    })
+}
+
+#[derive(Deserialize, ToSchema, utoipa::IntoParams)]
 pub struct SpanQueryParams {
     pub kind: Option<String>,
     pub model: Option<String>,
@@ -290,6 +328,10 @@ pub struct SpanQueryParams {
     pub sort_by: Option<String>,
     /// Sort order: "asc" or "desc" (default: "desc")
     pub sort_order: Option<String>,
+    /// Max items per page (default 50, max 1000)
+    pub limit: Option<usize>,
+    /// Opaque cursor from a previous response
+    pub cursor: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -416,12 +458,6 @@ pub struct CreatedSpan {
 }
 
 #[derive(Serialize, ToSchema)]
-pub struct TraceListResponse {
-    pub traces: Vec<Trace>,
-    pub count: usize,
-}
-
-#[derive(Serialize, ToSchema)]
 pub struct SpanList {
     pub spans: Vec<Span>,
     pub count: usize,
@@ -480,29 +516,10 @@ pub struct DatasetListResponse {
 }
 
 #[derive(Serialize, ToSchema)]
-pub struct DatapointListResponse {
-    pub datapoints: Vec<Datapoint>,
-    pub count: usize,
-}
-
-#[derive(Serialize, ToSchema)]
 pub struct ImportResponse {
     pub imported: usize,
     #[schema(value_type = String)]
     pub dataset_id: DatasetId,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct QueueListResponse {
-    pub items: Vec<QueueItem>,
-    pub counts: QueueCounts,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct QueueCounts {
-    pub pending: usize,
-    pub claimed: usize,
-    pub completed: usize,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -511,12 +528,6 @@ pub struct EnqueueResponse {
 }
 
 // --- Eval response types ---
-
-#[derive(Serialize, ToSchema)]
-pub struct EvalRunListResponse {
-    pub runs: Vec<EvalRun>,
-    pub count: usize,
-}
 
 #[derive(Serialize, ToSchema)]
 pub struct EvalRunDetailResponse {
@@ -546,14 +557,6 @@ pub struct ComparisonCell {
 pub struct ComparisonResponse {
     pub runs: Vec<EvalRun>,
     pub datapoints: Vec<ComparisonDatapoint>,
-}
-
-// --- Capture Rule response types ---
-
-#[derive(Serialize, ToSchema)]
-pub struct CaptureRuleListResponse {
-    pub rules: Vec<CaptureRule>,
-    pub count: usize,
 }
 
 // --- Provider Connection request/response types ---
@@ -639,12 +642,13 @@ fn store_err_status(e: (StatusCode, String)) -> StatusCode {
 
 // --- Trace handlers ---
 
-/// List all traces
+/// List all traces (paginated)
 #[utoipa::path(
     get,
     path = "/api/traces",
+    params(PaginationParams),
     responses(
-        (status = 200, description = "List of traces", body = TraceListResponse),
+        (status = 200, description = "Paginated list of traces"),
         (status = 403, description = "Insufficient permissions"),
     ),
     security(("bearer" = [])),
@@ -653,13 +657,14 @@ fn store_err_status(e: (StatusCode, String)) -> StatusCode {
 async fn list_traces(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
-) -> Result<Json<TraceListResponse>, (StatusCode, Json<serde_json::Value>)> {
+    Query(params): Query<PaginationParams>,
+) -> Result<Json<Page<Trace>>, (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::TracesRead)?;
     let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
     let r = store.read().await;
     let traces: Vec<Trace> = r.all_traces().cloned().collect();
-    let count = traces.len();
-    Ok(Json(TraceListResponse { traces, count }))
+    let page = paginate(traces, &params).map_err(|s| (s, Json(serde_json::json!({"error": "invalid pagination"}))))?;
+    Ok(Json(page))
 }
 
 /// Create a new trace
@@ -728,13 +733,13 @@ async fn get_trace(
 
 // --- Span handlers ---
 
-/// List spans with optional filters
+/// List spans with optional filters (paginated)
 #[utoipa::path(
     get,
     path = "/api/spans",
     params(SpanQueryParams),
     responses(
-        (status = 200, description = "Filtered list of spans", body = SpanList),
+        (status = 200, description = "Paginated filtered list of spans"),
         (status = 403, description = "Insufficient permissions"),
     ),
     security(("bearer" = [])),
@@ -744,7 +749,7 @@ async fn list_spans(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Query(params): Query<SpanQueryParams>,
-) -> Result<Json<SpanList>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<Page<Span>>, (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::TracesRead)?;
     let store = state.store_for_org(ctx.org_id).await.map_err(store_err_json)?;
     let r = store.read().await;
@@ -767,8 +772,9 @@ async fn list_spans(
         sort_order: params.sort_order,
     };
     let spans: Vec<Span> = r.filter_spans(&filter).into_iter().cloned().collect();
-    let count = spans.len();
-    Ok(Json(SpanList { spans, count }))
+    let page_params = PaginationParams { limit: params.limit, cursor: params.cursor };
+    let page = paginate(spans, &page_params).map_err(|s| (s, Json(serde_json::json!({"error": "invalid pagination"}))))?;
+    Ok(Json(page))
 }
 
 /// Get a single span by ID
@@ -1557,13 +1563,13 @@ async fn delete_dataset_handler(
 
 // --- Datapoint handlers ---
 
-/// List datapoints in a dataset
+/// List datapoints in a dataset (paginated)
 #[utoipa::path(
     get,
     path = "/api/datasets/{id}/datapoints",
-    params(("id" = String, Path, description = "Dataset ID")),
+    params(("id" = String, Path, description = "Dataset ID"), PaginationParams),
     responses(
-        (status = 200, description = "List of datapoints", body = DatapointListResponse),
+        (status = 200, description = "Paginated list of datapoints"),
         (status = 404, description = "Dataset not found"),
     ),
     security(("bearer" = [])),
@@ -1573,7 +1579,8 @@ async fn list_datapoints(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(dataset_id): Path<DatasetId>,
-) -> Result<Json<DatapointListResponse>, StatusCode> {
+    Query(params): Query<PaginationParams>,
+) -> Result<Json<Page<Datapoint>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
     let r = store.read().await;
@@ -1585,8 +1592,8 @@ async fn list_datapoints(
         .into_iter()
         .cloned()
         .collect();
-    let count = datapoints.len();
-    Ok(Json(DatapointListResponse { datapoints, count }))
+    let page = paginate(datapoints, &params)?;
+    Ok(Json(page))
 }
 
 /// Get a single datapoint
@@ -1916,13 +1923,13 @@ async fn import_file(
 
 // --- Queue handlers ---
 
-/// List queue items for a dataset
+/// List queue items for a dataset (paginated)
 #[utoipa::path(
     get,
     path = "/api/datasets/{id}/queue",
-    params(("id" = String, Path, description = "Dataset ID")),
+    params(("id" = String, Path, description = "Dataset ID"), PaginationParams),
     responses(
-        (status = 200, description = "Queue items with counts", body = QueueListResponse),
+        (status = 200, description = "Paginated queue items"),
         (status = 404, description = "Dataset not found"),
     ),
     security(("bearer" = [])),
@@ -1932,7 +1939,8 @@ async fn list_queue(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(dataset_id): Path<DatasetId>,
-) -> Result<Json<QueueListResponse>, StatusCode> {
+    Query(params): Query<PaginationParams>,
+) -> Result<Json<Page<QueueItem>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
     let r = store.read().await;
@@ -1944,21 +1952,8 @@ async fn list_queue(
         .into_iter()
         .cloned()
         .collect();
-    let counts = QueueCounts {
-        pending: items
-            .iter()
-            .filter(|i| i.status == QueueItemStatus::Pending)
-            .count(),
-        claimed: items
-            .iter()
-            .filter(|i| i.status == QueueItemStatus::Claimed)
-            .count(),
-        completed: items
-            .iter()
-            .filter(|i| i.status == QueueItemStatus::Completed)
-            .count(),
-    };
-    Ok(Json(QueueListResponse { items, counts }))
+    let page = paginate(items, &params)?;
+    Ok(Json(page))
 }
 
 /// Enqueue datapoints for human review
@@ -2156,12 +2151,13 @@ async fn analytics_summary(
 
 // --- Eval Run handlers ---
 
-/// List eval runs for a dataset
+/// List eval runs for a dataset (paginated)
 async fn list_eval_runs(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(dataset_id): Path<DatasetId>,
-) -> Result<Json<EvalRunListResponse>, StatusCode> {
+    Query(params): Query<PaginationParams>,
+) -> Result<Json<Page<EvalRun>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
     let r = store.read().await;
@@ -2169,8 +2165,8 @@ async fn list_eval_runs(
         return Err(StatusCode::NOT_FOUND);
     }
     let runs: Vec<EvalRun> = r.eval_runs_for_dataset(dataset_id).into_iter().cloned().collect();
-    let count = runs.len();
-    Ok(Json(EvalRunListResponse { runs, count }))
+    let page = paginate(runs, &params)?;
+    Ok(Json(page))
 }
 
 /// Create and start an eval run for a dataset
@@ -2349,12 +2345,13 @@ async fn compare_eval_runs(
 
 // --- Capture Rule handlers ---
 
-/// List capture rules for a dataset
+/// List capture rules for a dataset (paginated)
 async fn list_capture_rules(
     auth::Auth(ctx): auth::Auth,
     State(state): State<AppState>,
     Path(dataset_id): Path<DatasetId>,
-) -> Result<Json<CaptureRuleListResponse>, StatusCode> {
+    Query(params): Query<PaginationParams>,
+) -> Result<Json<Page<CaptureRule>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_org(ctx.org_id).await.map_err(store_err_status)?;
     let r = store.read().await;
@@ -2362,8 +2359,8 @@ async fn list_capture_rules(
         return Err(StatusCode::NOT_FOUND);
     }
     let rules: Vec<CaptureRule> = r.capture_rules_for_dataset(dataset_id).into_iter().cloned().collect();
-    let count = rules.len();
-    Ok(Json(CaptureRuleListResponse { rules, count }))
+    let page = paginate(rules, &params)?;
+    Ok(Json(page))
 }
 
 /// Create a capture rule
