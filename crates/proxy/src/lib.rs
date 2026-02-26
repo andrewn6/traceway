@@ -217,7 +217,7 @@ async fn proxy_handler(State(state): State<ProxyState>, req: Request<Body>) -> R
                             .map(|j| j.to_string()),
                     };
 
-                    // Build updated SpanKind with actual token counts
+                    // Build updated SpanKind with actual token counts + estimated cost
                     let updated_kind = SpanKind::LlmCall {
                         model: model.clone(),
                         provider: provider.clone(),
@@ -226,7 +226,7 @@ async fn proxy_handler(State(state): State<ProxyState>, req: Request<Body>) -> R
                         cost: None,
                         input_preview: input_preview.clone(),
                         output_preview,
-                    };
+                    }.with_estimated_cost();
 
                     {
                         let mut store = state.store.write().await;
