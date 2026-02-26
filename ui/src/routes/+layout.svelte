@@ -187,55 +187,11 @@
 	<div class="min-h-screen flex">
 		<!-- Left sidebar -->
 		<aside class="w-48 shrink-0 border-r border-border bg-bg-secondary flex flex-col">
-			<!-- Logo + Project Switcher -->
+			<!-- Logo -->
 			<div class="px-4 py-4 border-b border-border">
 				<a href="/" class="text-text font-bold text-base tracking-tight hover:text-accent transition-colors">
 					Traceway
 				</a>
-
-				{#if isCloudMode && projects.length > 0}
-					<!-- Project switcher -->
-					<div class="relative mt-2.5">
-						<button
-							onclick={() => projectDropdownOpen = !projectDropdownOpen}
-							class="w-full flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-md border border-border bg-bg text-left text-xs hover:border-text-muted/40 transition-colors cursor-pointer"
-						>
-							<div class="flex items-center gap-1.5 min-w-0">
-								<span class="w-2 h-2 rounded-sm bg-accent shrink-0"></span>
-								<span class="truncate text-text">{currentProject?.name ?? 'Select project'}</span>
-							</div>
-							<svg class="w-3 h-3 shrink-0 text-text-muted transition-transform {projectDropdownOpen ? 'rotate-180' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-								<path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-							</svg>
-						</button>
-
-						{#if projectDropdownOpen}
-							<!-- Backdrop -->
-							<!-- svelte-ignore a11y_no_static_element_interactions -->
-							<div
-								class="fixed inset-0 z-40"
-								onclick={() => projectDropdownOpen = false}
-								onkeydown={(e) => e.key === 'Escape' && (projectDropdownOpen = false)}
-							></div>
-
-							<!-- Dropdown -->
-							<div class="absolute left-0 right-0 top-full mt-1 z-50 bg-bg-secondary border border-border rounded-md shadow-lg py-1 max-h-60 overflow-y-auto">
-								{#each projects as project}
-									<button
-										onclick={() => handleSwitchProject(project.id)}
-										class="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-left transition-colors cursor-pointer
-											{project.id === currentProject?.id
-												? 'text-text bg-bg-tertiary'
-												: 'text-text-secondary hover:text-text hover:bg-bg-tertiary/50'}"
-									>
-										<span class="w-2 h-2 rounded-sm shrink-0 {project.id === currentProject?.id ? 'bg-accent' : 'bg-text-muted/30'}"></span>
-										<span class="truncate">{project.name}</span>
-									</button>
-								{/each}
-							</div>
-						{/if}
-					</div>
-				{/if}
 			</div>
 
 			<!-- Nav items -->
@@ -309,7 +265,47 @@
 			</nav>
 
 			<!-- Status footer -->
-			<div class="px-3 py-3 border-t border-border space-y-1.5">
+			<div class="px-3 py-3 border-t border-border space-y-2">
+				{#if isCloudMode && projects.length > 1}
+					<!-- Project switcher -->
+					<div class="relative">
+						<button
+							onclick={() => projectDropdownOpen = !projectDropdownOpen}
+							class="w-full flex items-center justify-between gap-1.5 px-2 py-1.5 rounded border border-border bg-bg text-left text-xs hover:border-text-muted/40 transition-colors cursor-pointer"
+						>
+							<div class="flex items-center gap-1.5 min-w-0">
+								<span class="w-2 h-2 rounded-sm bg-accent shrink-0"></span>
+								<span class="truncate text-text">{currentProject?.name ?? 'Select project'}</span>
+							</div>
+							<svg class="w-3 h-3 shrink-0 text-text-muted transition-transform {projectDropdownOpen ? 'rotate-180' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+								<path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+							</svg>
+						</button>
+
+						{#if projectDropdownOpen}
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<div
+								class="fixed inset-0 z-40"
+								onclick={() => projectDropdownOpen = false}
+								onkeydown={(e) => e.key === 'Escape' && (projectDropdownOpen = false)}
+							></div>
+							<div class="absolute left-0 right-0 bottom-full mb-1 z-50 bg-bg-secondary border border-border rounded-md shadow-lg py-1 max-h-60 overflow-y-auto">
+								{#each projects as project}
+									<button
+										onclick={() => handleSwitchProject(project.id)}
+										class="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-left transition-colors cursor-pointer
+											{project.id === currentProject?.id
+												? 'text-text bg-bg-tertiary'
+												: 'text-text-secondary hover:text-text hover:bg-bg-tertiary/50'}"
+									>
+										<span class="w-2 h-2 rounded-sm shrink-0 {project.id === currentProject?.id ? 'bg-accent' : 'bg-text-muted/30'}"></span>
+										<span class="truncate">{project.name}</span>
+									</button>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
 				{#if isCloudMode && authMe}
 					<button
 						onclick={handleLogout}
@@ -318,10 +314,6 @@
 						{authMe.org_id.slice(0, 8)} &middot; Sign out
 					</button>
 				{/if}
-				<div class="flex items-center gap-1.5 text-xs text-text-muted">
-					<span class="w-1.5 h-1.5 rounded-full {connected ? 'bg-success' : 'bg-text-muted'}"></span>
-					{connected ? 'connected' : 'connecting'}
-				</div>
 				<div class="text-xs text-text-muted font-mono">
 					{stats.trace_count} traces &middot; {stats.span_count} spans
 				</div>
