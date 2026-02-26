@@ -145,6 +145,8 @@ struct UpsertRequest {
     upsert_rows: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     distance_metric: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    schema: Option<serde_json::Value>,
 }
 
 /// Query request for Turbopuffer v2 API
@@ -251,6 +253,34 @@ impl TurbopufferBackend {
         let req = UpsertRequest {
             upsert_rows: rows,
             distance_metric: None,
+            schema: None,
+        };
+
+        let _: serde_json::Value = self.post(&path, &req).await?;
+        Ok(())
+    }
+
+    /// Upsert documents with an explicit schema (e.g. to mark attributes as non-filterable)
+    #[instrument(skip(self, rows, schema), fields(count = rows.len()))]
+    async fn upsert_with_schema(
+        &self,
+        collection: &str,
+        rows: Vec<serde_json::Value>,
+        schema: serde_json::Value,
+    ) -> Result<(), TurbopufferError> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+
+        let ns = self.namespace(collection);
+        let path = format!("/v2/namespaces/{}", ns);
+
+        debug!(namespace = %ns, count = rows.len(), "Upserting documents with schema");
+
+        let req = UpsertRequest {
+            upsert_rows: rows,
+            distance_metric: None,
+            schema: Some(schema),
         };
 
         let _: serde_json::Value = self.post(&path, &req).await?;
@@ -437,7 +467,12 @@ impl StorageBackend for TurbopufferBackend {
             "ended_at": span.ended_at().map(|t| t.to_rfc3339()),
         });
 
-        self.upsert("spans", vec![row]).await?;
+        // Mark `data` as non-filterable since it can be large (LLM outputs)
+        // and we only read it back, never filter on it. This also gives a 50% storage discount.
+        let schema = serde_json::json!({
+            "data": {"type": "string", "filterable": false}
+        });
+        self.upsert_with_schema("spans", vec![row], schema).await?;
         Ok(())
     }
 
@@ -587,7 +622,8 @@ impl StorageBackend for TurbopufferBackend {
             "created_at": dp.created_at.to_rfc3339(),
         });
 
-        self.upsert("datapoints", vec![row]).await?;
+        let schema = serde_json::json!({"data": {"type": "string", "filterable": false}});
+        self.upsert_with_schema("datapoints", vec![row], schema).await?;
         Ok(())
     }
 
@@ -658,7 +694,8 @@ impl StorageBackend for TurbopufferBackend {
             "created_at": item.created_at.to_rfc3339(),
         });
 
-        self.upsert("queue_items", vec![row]).await?;
+        let schema = serde_json::json!({"data": {"type": "string", "filterable": false}});
+        self.upsert_with_schema("queue_items", vec![row], schema).await?;
         Ok(())
     }
 
@@ -767,7 +804,8 @@ impl StorageBackend for TurbopufferBackend {
             "datapoint_id": result.datapoint_id.to_string(),
             "status": result.status.as_str(),
         });
-        self.upsert("eval_results", vec![row]).await?;
+        let schema = serde_json::json!({"data": {"type": "string", "filterable": false}});
+        self.upsert_with_schema("eval_results", vec![row], schema).await?;
         Ok(())
     }
 
@@ -937,7 +975,8 @@ impl StorageBackend for TurbopufferBackend {
             "size": content.len(),
         });
 
-        self.upsert("file_contents", vec![row]).await?;
+        let schema = serde_json::json!({"content_base64": {"type": "string", "filterable": false}});
+        self.upsert_with_schema("file_contents", vec![row], schema).await?;
         Ok(())
     }
 
@@ -982,7 +1021,8 @@ impl StorageBackend for TurbopufferBackend {
             })
             .collect::<Result<Vec<_>, serde_json::Error>>();
 
-        self.upsert("spans", rows?).await?;
+        let schema = serde_json::json!({"data": {"type": "string", "filterable": false}});
+        self.upsert_with_schema("spans", rows?, schema).await?;
         Ok(())
     }
 
@@ -1004,7 +1044,8 @@ impl StorageBackend for TurbopufferBackend {
             })
             .collect::<Result<Vec<_>, serde_json::Error>>();
 
-        self.upsert("datapoints", rows?).await?;
+        let schema = serde_json::json!({"data": {"type": "string", "filterable": false}});
+        self.upsert_with_schema("datapoints", rows?, schema).await?;
         Ok(())
     }
 }
