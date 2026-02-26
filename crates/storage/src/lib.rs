@@ -383,6 +383,73 @@ impl<B: StorageBackend> PersistentStore<B> {
         self.memory.spans_for_trace(trace_id)
     }
 
+    /// Get spans for a trace, falling back to the storage backend if none in memory.
+    /// If found in the backend, spans are cached in memory for subsequent access.
+    pub async fn spans_for_trace_or_load(&mut self, trace_id: TraceId) -> &[SpanId] {
+        if !self.memory.spans_for_trace(trace_id).is_empty() {
+            return self.memory.spans_for_trace(trace_id);
+        }
+        // Try loading from backend
+        let filter = SpanFilter {
+            trace_id: Some(trace_id),
+            ..Default::default()
+        };
+        match self.backend.list_spans(&filter).await {
+            Ok(spans) if !spans.is_empty() => {
+                tracing::debug!(%trace_id, count = spans.len(), "loaded trace spans from backend");
+                for span in spans {
+                    self.memory.insert(span);
+                }
+                self.memory.spans_for_trace(trace_id)
+            }
+            Ok(_) => &[],
+            Err(e) => {
+                tracing::warn!(%trace_id, "failed to load trace spans from backend: {}", e);
+                &[]
+            }
+        }
+    }
+
+    /// Sync spans and traces from the storage backend into memory.
+    /// Merges new data without removing existing in-memory state.
+    /// Used to keep multi-instance deployments consistent.
+    pub async fn sync_from_backend(&mut self) {
+        match self.backend.load_all_spans().await {
+            Ok(spans) => {
+                let mut loaded = 0;
+                for span in spans {
+                    if self.memory.get(span.id()).is_none() {
+                        self.memory.insert(span);
+                        loaded += 1;
+                    }
+                }
+                if loaded > 0 {
+                    tracing::debug!(loaded, "synced spans from backend");
+                }
+            }
+            Err(e) => {
+                tracing::warn!("failed to sync spans from backend: {}", e);
+            }
+        }
+        match self.backend.load_all_traces().await {
+            Ok(traces) => {
+                let mut loaded = 0;
+                for trace in traces {
+                    if !self.trace_meta.contains_key(&trace.id) {
+                        self.trace_meta.insert(trace.id, trace);
+                        loaded += 1;
+                    }
+                }
+                if loaded > 0 {
+                    tracing::debug!(loaded, "synced traces from backend");
+                }
+            }
+            Err(e) => {
+                tracing::warn!("failed to sync traces from backend: {}", e);
+            }
+        }
+    }
+
     pub fn span_trace_ids(&self) -> impl Iterator<Item = &TraceId> {
         self.memory.trace_ids()
     }
