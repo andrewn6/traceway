@@ -1515,11 +1515,11 @@ async fn get_dataset(
 ) -> Result<Json<DatasetResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
-    let r = store.read().await;
-    let ds = r.get_dataset(dataset_id).ok_or(StatusCode::NOT_FOUND)?;
+    let mut w = store.write().await;
+    let ds = w.get_dataset_or_load(dataset_id).await.ok_or(StatusCode::NOT_FOUND)?.clone();
     Ok(Json(DatasetResponse {
-        datapoint_count: r.datapoint_count_for_dataset(ds.id),
-        dataset: ds.clone(),
+        datapoint_count: w.datapoint_count_for_dataset(ds.id),
+        dataset: ds,
     }))
 }
 
@@ -1545,7 +1545,7 @@ async fn update_dataset(
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
-    let ds = w.get_dataset(dataset_id).ok_or(StatusCode::NOT_FOUND)?.clone();
+    let ds = w.get_dataset_or_load(dataset_id).await.ok_or(StatusCode::NOT_FOUND)?.clone();
     let mut updated = ds;
     if let Some(name) = req.name {
         updated.name = name;
@@ -1620,11 +1620,11 @@ async fn list_datapoints(
 ) -> Result<Json<Page<Datapoint>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
-    let r = store.read().await;
-    if r.get_dataset(dataset_id).is_none() {
+    let mut w = store.write().await;
+    if w.get_dataset_or_load(dataset_id).await.is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
-    let datapoints: Vec<Datapoint> = r
+    let datapoints: Vec<Datapoint> = w
         .datapoints_for_dataset(dataset_id)
         .into_iter()
         .cloned()
@@ -1685,7 +1685,7 @@ async fn create_datapoint(
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
-    if w.get_dataset(dataset_id).is_none() {
+    if w.get_dataset_or_load(dataset_id).await.is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
     let dp = Datapoint::new(dataset_id, req.kind, DatapointSource::Manual);
@@ -1764,7 +1764,7 @@ async fn export_span_to_dataset(
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
-    if w.get_dataset(dataset_id).is_none() {
+    if w.get_dataset_or_load(dataset_id).await.is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
     let span = w.get(req.span_id).ok_or(StatusCode::NOT_FOUND)?.clone();
@@ -1908,10 +1908,10 @@ async fn import_file(
     }
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await
         .map_err(|e| (e.0, e.1))?;
-    // Verify dataset exists
+    // Verify dataset exists (with backend fallback for multi-instance)
     {
-        let r = store.read().await;
-        if r.get_dataset(dataset_id).is_none() {
+        let mut w = store.write().await;
+        if w.get_dataset_or_load(dataset_id).await.is_none() {
             return Err((StatusCode::NOT_FOUND, "dataset not found".to_string()));
         }
     }
@@ -1980,11 +1980,11 @@ async fn list_queue(
 ) -> Result<Json<Page<QueueItem>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
-    let r = store.read().await;
-    if r.get_dataset(dataset_id).is_none() {
+    let mut w = store.write().await;
+    if w.get_dataset_or_load(dataset_id).await.is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
-    let items: Vec<QueueItem> = r
+    let items: Vec<QueueItem> = w
         .queue_items_for_dataset(dataset_id)
         .into_iter()
         .cloned()
@@ -2015,7 +2015,7 @@ async fn enqueue_datapoints(
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
-    if w.get_dataset(dataset_id).is_none() {
+    if w.get_dataset_or_load(dataset_id).await.is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
 
@@ -2202,11 +2202,11 @@ async fn list_eval_runs(
 ) -> Result<Json<Page<EvalRun>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
-    let r = store.read().await;
-    if r.get_dataset(dataset_id).is_none() {
+    let mut w = store.write().await;
+    if w.get_dataset_or_load(dataset_id).await.is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
-    let runs: Vec<EvalRun> = r.eval_runs_for_dataset(dataset_id).into_iter().cloned().collect();
+    let runs: Vec<EvalRun> = w.eval_runs_for_dataset(dataset_id).into_iter().cloned().collect();
     let page = paginate(runs, &params)?;
     Ok(Json(page))
 }
@@ -2221,10 +2221,10 @@ async fn create_eval_run(
     require_scope(&ctx, auth::Scope::DatasetsWrite)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
 
-    // Verify dataset exists and count datapoints
+    // Verify dataset exists and count datapoints (with backend fallback for multi-instance)
     {
-        let r = store.read().await;
-        if r.get_dataset(dataset_id).is_none() {
+        let mut w = store.write().await;
+        if w.get_dataset_or_load(dataset_id).await.is_none() {
             return Err((StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "dataset not found"}))));
         }
     }
@@ -2319,8 +2319,8 @@ async fn compare_eval_runs(
 ) -> Result<Json<ComparisonResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
-    let r = store.read().await;
-    if r.get_dataset(dataset_id).is_none() {
+    let mut w = store.write().await;
+    if w.get_dataset_or_load(dataset_id).await.is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
 
@@ -2336,17 +2336,17 @@ async fn compare_eval_runs(
     let mut all_results: std::collections::HashMap<EvalRunId, Vec<EvalResult>> = std::collections::HashMap::new();
 
     for run_id in &run_ids {
-        let run = r.get_eval_run(*run_id).ok_or(StatusCode::NOT_FOUND)?.clone();
+        let run = w.get_eval_run(*run_id).ok_or(StatusCode::NOT_FOUND)?.clone();
         if run.dataset_id != dataset_id {
             return Err(StatusCode::BAD_REQUEST);
         }
-        let results: Vec<EvalResult> = r.eval_results_for_run(*run_id).into_iter().cloned().collect();
+        let results: Vec<EvalResult> = w.eval_results_for_run(*run_id).into_iter().cloned().collect();
         all_results.insert(*run_id, results);
         runs.push(run);
     }
 
     // Build comparison matrix by datapoint
-    let datapoints: Vec<Datapoint> = r.datapoints_for_dataset(dataset_id).into_iter().cloned().collect();
+    let datapoints: Vec<Datapoint> = w.datapoints_for_dataset(dataset_id).into_iter().cloned().collect();
     let mut comparison_datapoints = Vec::new();
 
     for dp in &datapoints {
@@ -2396,11 +2396,11 @@ async fn list_capture_rules(
 ) -> Result<Json<Page<CaptureRule>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
-    let r = store.read().await;
-    if r.get_dataset(dataset_id).is_none() {
+    let mut w = store.write().await;
+    if w.get_dataset_or_load(dataset_id).await.is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
-    let rules: Vec<CaptureRule> = r.capture_rules_for_dataset(dataset_id).into_iter().cloned().collect();
+    let rules: Vec<CaptureRule> = w.capture_rules_for_dataset(dataset_id).into_iter().cloned().collect();
     let page = paginate(rules, &params)?;
     Ok(Json(page))
 }
@@ -2415,7 +2415,7 @@ async fn create_capture_rule(
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
-    if w.get_dataset(dataset_id).is_none() {
+    if w.get_dataset_or_load(dataset_id).await.is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
     let rule = CaptureRule::new(dataset_id, req.name, req.filters, req.sample_rate);
@@ -2657,14 +2657,16 @@ async fn execute_eval_run(
 ) {
     use std::time::Instant as StdInstant;
 
-    // Get the run and datapoints
+    // Get the run and datapoints (sync from backend for multi-instance consistency)
     let (mut run, datapoints, scoring) = {
-        let r = store.read().await;
-        let run = match r.get_eval_run(run_id) {
+        let mut w = store.write().await;
+        let run = match w.get_eval_run(run_id) {
             Some(r) => r.clone(),
             None => return,
         };
-        let datapoints: Vec<Datapoint> = r.datapoints_for_dataset(run.dataset_id).into_iter().cloned().collect();
+        // Ensure datapoints created on other instances are available
+        w.sync_datapoints_for_dataset(run.dataset_id).await;
+        let datapoints: Vec<Datapoint> = w.datapoints_for_dataset(run.dataset_id).into_iter().cloned().collect();
         let scoring = run.scoring.clone();
         (run, datapoints, scoring)
     };

@@ -731,6 +731,22 @@ impl<B: StorageBackend> PersistentStore<B> {
         self.datasets.get(&id)
     }
 
+    /// Get a dataset, falling back to the storage backend if not in memory.
+    /// Loads and caches the dataset in memory on fallback hit.
+    pub async fn get_dataset_or_load(&mut self, id: DatasetId) -> Option<&Dataset> {
+        if self.datasets.contains_key(&id) {
+            return self.datasets.get(&id);
+        }
+        match self.backend.get_dataset(id).await {
+            Ok(Some(ds)) => {
+                tracing::debug!(%id, "get_dataset_or_load: loaded from backend");
+                self.datasets.insert(id, ds);
+                self.datasets.get(&id)
+            }
+            _ => None,
+        }
+    }
+
     pub fn all_datasets(&self) -> impl Iterator<Item = &Dataset> {
         self.datasets.values()
     }
@@ -816,6 +832,24 @@ impl<B: StorageBackend> PersistentStore<B> {
             .values()
             .filter(|dp| dp.dataset_id == dataset_id)
             .collect()
+    }
+
+    /// Load datapoints for a dataset from the storage backend and merge into memory.
+    /// Used for multi-instance consistency — ensures datapoints created on other
+    /// instances are available locally.
+    pub async fn sync_datapoints_for_dataset(&mut self, dataset_id: DatasetId) {
+        match self.backend.list_datapoints(dataset_id).await {
+            Ok(dps) => {
+                let count = dps.len();
+                for dp in dps {
+                    self.datapoints.entry(dp.id).or_insert(dp);
+                }
+                tracing::debug!(%dataset_id, count, "synced datapoints from backend");
+            }
+            Err(e) => {
+                tracing::error!(%dataset_id, "failed to sync datapoints from backend: {}", e);
+            }
+        }
     }
 
     pub fn datapoint_count_for_dataset(&self, dataset_id: DatasetId) -> usize {
