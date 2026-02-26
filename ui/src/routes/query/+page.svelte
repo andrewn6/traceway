@@ -503,8 +503,8 @@
 				if (iso) resolved.until = iso;
 			}
 			const res = await getSpans(resolved);
-			results = res.spans;
-			resultCount = res.count;
+			results = res.items;
+			resultCount = res.total ?? results.length;
 			queryTimeMs = Math.round(performance.now() - start);
 			pushHistory(dslInput, resultCount);
 		} catch {

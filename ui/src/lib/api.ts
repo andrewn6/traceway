@@ -60,6 +60,14 @@ export type CreateDatasetRequest = components['schemas']['CreateDatasetRequest']
 export type UpdateDatasetRequest = components['schemas']['UpdateDatasetRequest'];
 export type CreateDatapointRequest = components['schemas']['CreateDatapointRequest'];
 
+// Paginated response type (matches backend Page<T>)
+export interface Page<T> {
+	items: T[];
+	total: number | null;
+	next_cursor: string | null;
+	has_more: boolean;
+}
+
 // Legacy type aliases for backward compatibility
 export type TraceList = TraceListResponse;
 export type DatasetWithCount = DatasetResponse;
@@ -321,11 +329,11 @@ async function postRaw(path: string, body?: unknown): Promise<Response> {
 
 // ─── Trace / Span Endpoints ─────────────────────────────────────────
 
-export const getTraces = () => get<TraceList>('/traces');
+export const getTraces = () => get<Page<Trace>>('/traces');
 export const createTrace = (name?: string, tags?: string[]) =>
 	post<Trace>('/traces', { name, tags: tags ?? [] });
 export const getTrace = (id: string) => get<SpanList>(`/traces/${id}`);
-export const getSpans = (filter?: SpanFilter) => get<SpanList>(`/spans${qs((filter ?? {}) as Record<string, string | undefined>)}`);
+export const getSpans = (filter?: SpanFilter) => get<Page<Span>>(`/spans${qs((filter ?? {}) as Record<string, string | undefined>)}`);
 export const getSpan = (id: string) => get<Span>(`/spans/${id}`);
 export const getStats = () => get<Stats>('/stats');
 
