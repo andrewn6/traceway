@@ -24,7 +24,7 @@
 		const result = await signup(email, password, name || undefined, orgName || undefined);
 
 		if (result.ok) {
-			goto('/');
+			window.location.href = '/';
 		} else {
 			error = result.error ?? 'Signup failed';
 		}

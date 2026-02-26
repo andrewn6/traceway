@@ -36,7 +36,7 @@
 		const result = await acceptInvite(token, password, name || undefined);
 
 		if (result.ok) {
-			goto('/');
+			window.location.href = '/';
 		} else {
 			error = result.error ?? 'Failed to accept invite';
 		}

@@ -561,6 +561,7 @@ export interface AuthConfig {
 
 export interface AuthMe {
 	org_id: string;
+	project_id: string;
 	user_id: string | null;
 	scopes: Scope[];
 	is_local_mode: boolean;
@@ -604,6 +605,17 @@ export interface OrgMember {
 	role: string;
 }
 
+// ─── Project Types ───────────────────────────────────────────────────
+
+export interface Project {
+	id: string;
+	org_id: string;
+	name: string;
+	slug: string;
+	created_at: string;
+	updated_at: string;
+}
+
 // ─── Auth Response Types ─────────────────────────────────────────────
 
 export interface AuthResponse {
@@ -630,6 +642,13 @@ export const createApiKey = (name: string, scopes?: Scope[]) =>
 	post<ApiKeyCreated>('/org/api-keys', scopes ? { name, scopes } : { name });
 export const deleteApiKey = (id: string) => del<unknown>(`/org/api-keys/${id}`);
 export const getOrgMembers = () => get<OrgMember[]>('/org/members');
+
+// ─── Project Endpoints ──────────────────────────────────────────────
+
+export const getProjects = () => get<Project[]>('/projects');
+export const createProject = (name: string) => post<Project>('/projects', { name });
+export const deleteProject = (id: string) => del<unknown>(`/projects/${id}`);
+export const switchProject = (projectId: string) => post<Project>('/projects/switch', { project_id: projectId });
 
 export async function signup(
 	email: string,

@@ -2,7 +2,7 @@
 	import '../app.css';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { getStats, getAuthConfig, getAuthMe, logout, subscribeEvents, type Stats, type AuthConfig, type AuthMe } from '$lib/api';
+	import { getStats, getAuthConfig, getAuthMe, getProjects, switchProject, logout, subscribeEvents, type Stats, type AuthConfig, type AuthMe, type Project } from '$lib/api';
 	import { onMount } from 'svelte';
 
 	let { children } = $props();
@@ -13,6 +13,13 @@
 	let authMe: AuthMe | null = $state(null);
 	let authChecked = $state(false);
 	let apiUnreachable = $state(false);
+
+	// Project state
+	let projects: Project[] = $state([]);
+	let projectDropdownOpen = $state(false);
+	let currentProject = $derived(
+		projects.find(p => p.id === authMe?.project_id) || projects[0] || null
+	);
 
 	// Auth pages don't need sidebar or auth check
 	const authPages = ['/login', '/signup', '/accept-invite', '/forgot-password', '/reset-password'];
@@ -29,6 +36,12 @@
 				if (c.mode === 'cloud' && !isAuthPage) {
 					try {
 						authMe = await getAuthMe();
+						// Load projects for the org
+						try {
+							projects = await getProjects();
+						} catch {
+							// Projects not available yet (e.g. migration not run)
+						}
 					} catch {
 						// Not authenticated - redirect to login
 						goto('/login');
@@ -79,6 +92,19 @@
 		await logout();
 		authMe = null;
 		goto('/login');
+	}
+
+	async function handleSwitchProject(projectId: string) {
+		try {
+			await switchProject(projectId);
+			// Refresh auth state (new JWT has new project_id)
+			authMe = await getAuthMe();
+			projectDropdownOpen = false;
+			// Reload data by navigating to the same page
+			location.reload();
+		} catch (e) {
+			console.error('Failed to switch project', e);
+		}
 	}
 
 	interface NavItem {
@@ -161,11 +187,55 @@
 	<div class="min-h-screen flex">
 		<!-- Left sidebar -->
 		<aside class="w-48 shrink-0 border-r border-border bg-bg-secondary flex flex-col">
-			<!-- Logo -->
+			<!-- Logo + Project Switcher -->
 			<div class="px-4 py-4 border-b border-border">
 				<a href="/" class="text-text font-bold text-base tracking-tight hover:text-accent transition-colors">
 					Traceway
 				</a>
+
+				{#if isCloudMode && projects.length > 0}
+					<!-- Project switcher -->
+					<div class="relative mt-2.5">
+						<button
+							onclick={() => projectDropdownOpen = !projectDropdownOpen}
+							class="w-full flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-md border border-border bg-bg text-left text-xs hover:border-text-muted/40 transition-colors cursor-pointer"
+						>
+							<div class="flex items-center gap-1.5 min-w-0">
+								<span class="w-2 h-2 rounded-sm bg-accent shrink-0"></span>
+								<span class="truncate text-text">{currentProject?.name ?? 'Select project'}</span>
+							</div>
+							<svg class="w-3 h-3 shrink-0 text-text-muted transition-transform {projectDropdownOpen ? 'rotate-180' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+								<path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+							</svg>
+						</button>
+
+						{#if projectDropdownOpen}
+							<!-- Backdrop -->
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<div
+								class="fixed inset-0 z-40"
+								onclick={() => projectDropdownOpen = false}
+								onkeydown={(e) => e.key === 'Escape' && (projectDropdownOpen = false)}
+							></div>
+
+							<!-- Dropdown -->
+							<div class="absolute left-0 right-0 top-full mt-1 z-50 bg-bg-secondary border border-border rounded-md shadow-lg py-1 max-h-60 overflow-y-auto">
+								{#each projects as project}
+									<button
+										onclick={() => handleSwitchProject(project.id)}
+										class="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-left transition-colors cursor-pointer
+											{project.id === currentProject?.id
+												? 'text-text bg-bg-tertiary'
+												: 'text-text-secondary hover:text-text hover:bg-bg-tertiary/50'}"
+									>
+										<span class="w-2 h-2 rounded-sm shrink-0 {project.id === currentProject?.id ? 'bg-accent' : 'bg-text-muted/30'}"></span>
+										<span class="truncate">{project.name}</span>
+									</button>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
 			</div>
 
 			<!-- Nav items -->

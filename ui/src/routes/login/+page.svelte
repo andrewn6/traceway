@@ -16,7 +16,7 @@
 		const result = await login(email, password);
 
 		if (result.ok) {
-			goto('/');
+			window.location.href = '/';
 		} else {
 			error = result.error ?? 'Invalid email or password';
 		}
