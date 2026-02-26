@@ -79,6 +79,38 @@ const MIGRATIONS: &[(&str, &str)] = &[
         CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id);
         "#,
     ),
+    (
+        "003_projects",
+        r#"
+        CREATE TABLE IF NOT EXISTS projects (
+            id          UUID PRIMARY KEY,
+            org_id      UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            name        TEXT NOT NULL,
+            slug        TEXT NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(org_id, slug)
+        );
+        CREATE INDEX IF NOT EXISTS idx_projects_org_id ON projects(org_id);
+
+        -- Add project_id column to api_keys (nullable for backwards compat during migration)
+        ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE CASCADE;
+        CREATE INDEX IF NOT EXISTS idx_api_keys_project_id ON api_keys(project_id);
+
+        -- Create a default project for every existing org
+        INSERT INTO projects (id, org_id, name, slug, created_at, updated_at)
+        SELECT gen_random_uuid(), id, 'Default', 'default', NOW(), NOW()
+        FROM organizations
+        WHERE NOT EXISTS (
+            SELECT 1 FROM projects WHERE projects.org_id = organizations.id
+        );
+
+        -- Backfill api_keys with their org's default project
+        UPDATE api_keys SET project_id = (
+            SELECT p.id FROM projects p WHERE p.org_id = api_keys.org_id AND p.slug = 'default' LIMIT 1
+        ) WHERE project_id IS NULL;
+        "#,
+    ),
 ];
 
 /// Run pending migrations.

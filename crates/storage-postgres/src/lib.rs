@@ -9,7 +9,7 @@ pub mod migrations;
 use async_trait::async_trait;
 use auth::{
     ApiKey, ApiKeyId, AuthStore, AuthStoreError, Invite, OrgId, Organization, PasswordResetToken,
-    Role, Scope, User, UserId,
+    Project, ProjectId, Role, Scope, User, UserId,
 };
 use chrono::{DateTime, Utc};
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -153,6 +153,87 @@ impl AuthStore for PostgresAuthStore {
         Ok(row.map(|r| r.into()))
     }
 
+    // ── Project ───────────────────────────────────────────────────────
+
+    async fn save_project(&self, project: &Project) -> Result<(), AuthStoreError> {
+        sqlx::query(
+            r#"INSERT INTO projects (id, org_id, name, slug, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               ON CONFLICT (id) DO UPDATE SET
+                 name = EXCLUDED.name,
+                 slug = EXCLUDED.slug,
+                 updated_at = EXCLUDED.updated_at"#,
+        )
+        .bind(project.id)
+        .bind(project.org_id)
+        .bind(&project.name)
+        .bind(&project.slug)
+        .bind(project.created_at)
+        .bind(project.updated_at)
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn get_project(&self, id: ProjectId) -> Result<Option<Project>, AuthStoreError> {
+        let row = sqlx::query_as::<_, ProjectRow>(
+            "SELECT id, org_id, name, slug, created_at, updated_at FROM projects WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_err)?;
+
+        Ok(row.map(|r| r.into()))
+    }
+
+    async fn get_project_by_slug(&self, org_id: OrgId, slug: &str) -> Result<Option<Project>, AuthStoreError> {
+        let row = sqlx::query_as::<_, ProjectRow>(
+            "SELECT id, org_id, name, slug, created_at, updated_at FROM projects WHERE org_id = $1 AND slug = $2",
+        )
+        .bind(org_id)
+        .bind(slug)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_err)?;
+
+        Ok(row.map(|r| r.into()))
+    }
+
+    async fn list_projects_for_org(&self, org_id: OrgId) -> Result<Vec<Project>, AuthStoreError> {
+        let rows = sqlx::query_as::<_, ProjectRow>(
+            "SELECT id, org_id, name, slug, created_at, updated_at FROM projects WHERE org_id = $1 ORDER BY created_at",
+        )
+        .bind(org_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    async fn delete_project(&self, id: ProjectId) -> Result<bool, AuthStoreError> {
+        let result = sqlx::query("DELETE FROM projects WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(db_err)?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn get_default_project(&self, org_id: OrgId) -> Result<Project, AuthStoreError> {
+        // Try to find the default project
+        if let Some(project) = self.get_project_by_slug(org_id, "default").await? {
+            return Ok(project);
+        }
+
+        // If no default project exists, create one
+        let project = Project::default_for_org(org_id);
+        self.save_project(&project).await?;
+        Ok(project)
+    }
+
     // ── User ─────────────────────────────────────────────────────────
 
     async fn save_user(&self, user: &User) -> Result<(), AuthStoreError> {
@@ -220,15 +301,17 @@ impl AuthStore for PostgresAuthStore {
 
     async fn save_api_key(&self, key: &ApiKey) -> Result<(), AuthStoreError> {
         sqlx::query(
-            r#"INSERT INTO api_keys (id, org_id, name, key_prefix, key_hash, scopes, created_at, last_used_at, expires_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            r#"INSERT INTO api_keys (id, org_id, project_id, name, key_prefix, key_hash, scopes, created_at, last_used_at, expires_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                ON CONFLICT (id) DO UPDATE SET
                  name = EXCLUDED.name,
                  scopes = EXCLUDED.scopes,
-                 last_used_at = EXCLUDED.last_used_at"#,
+                 last_used_at = EXCLUDED.last_used_at,
+                 project_id = EXCLUDED.project_id"#,
         )
         .bind(key.id)
         .bind(key.org_id)
+        .bind(key.project_id)
         .bind(&key.name)
         .bind(&key.key_prefix)
         .bind(&key.key_hash)
@@ -244,7 +327,7 @@ impl AuthStore for PostgresAuthStore {
 
     async fn get_api_key(&self, id: ApiKeyId) -> Result<Option<ApiKey>, AuthStoreError> {
         let row = sqlx::query_as::<_, ApiKeyRow>(
-            "SELECT id, org_id, name, key_prefix, key_hash, scopes, created_at, last_used_at, expires_at FROM api_keys WHERE id = $1",
+            "SELECT id, org_id, project_id, name, key_prefix, key_hash, scopes, created_at, last_used_at, expires_at FROM api_keys WHERE id = $1",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -256,7 +339,7 @@ impl AuthStore for PostgresAuthStore {
 
     async fn list_api_keys_for_org(&self, org_id: OrgId) -> Result<Vec<ApiKey>, AuthStoreError> {
         let rows = sqlx::query_as::<_, ApiKeyRow>(
-            "SELECT id, org_id, name, key_prefix, key_hash, scopes, created_at, last_used_at, expires_at FROM api_keys WHERE org_id = $1 ORDER BY created_at DESC",
+            "SELECT id, org_id, project_id, name, key_prefix, key_hash, scopes, created_at, last_used_at, expires_at FROM api_keys WHERE org_id = $1 ORDER BY created_at DESC",
         )
         .bind(org_id)
         .fetch_all(&self.pool)
@@ -266,9 +349,21 @@ impl AuthStore for PostgresAuthStore {
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }
 
+    async fn list_api_keys_for_project(&self, project_id: ProjectId) -> Result<Vec<ApiKey>, AuthStoreError> {
+        let rows = sqlx::query_as::<_, ApiKeyRow>(
+            "SELECT id, org_id, project_id, name, key_prefix, key_hash, scopes, created_at, last_used_at, expires_at FROM api_keys WHERE project_id = $1 ORDER BY created_at DESC",
+        )
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
+
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
     async fn lookup_api_key_by_prefix(&self, prefix: &str) -> Result<Option<ApiKey>, AuthStoreError> {
         let row = sqlx::query_as::<_, ApiKeyRow>(
-            "SELECT id, org_id, name, key_prefix, key_hash, scopes, created_at, last_used_at, expires_at FROM api_keys WHERE key_prefix = $1",
+            "SELECT id, org_id, project_id, name, key_prefix, key_hash, scopes, created_at, last_used_at, expires_at FROM api_keys WHERE key_prefix = $1",
         )
         .bind(prefix)
         .fetch_optional(&self.pool)
@@ -426,6 +521,29 @@ impl From<OrgRow> for Organization {
 }
 
 #[derive(sqlx::FromRow)]
+struct ProjectRow {
+    id: uuid::Uuid,
+    org_id: uuid::Uuid,
+    name: String,
+    slug: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl From<ProjectRow> for Project {
+    fn from(r: ProjectRow) -> Self {
+        Self {
+            id: r.id,
+            org_id: r.org_id,
+            name: r.name,
+            slug: r.slug,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
 struct UserRow {
     id: uuid::Uuid,
     email: String,
@@ -456,6 +574,7 @@ impl From<UserRow> for User {
 struct ApiKeyRow {
     id: uuid::Uuid,
     org_id: uuid::Uuid,
+    project_id: Option<uuid::Uuid>,
     name: String,
     key_prefix: String,
     key_hash: String,
@@ -470,6 +589,7 @@ impl From<ApiKeyRow> for ApiKey {
         Self {
             id: r.id,
             org_id: r.org_id,
+            project_id: r.project_id.unwrap_or(uuid::Uuid::nil()),
             name: r.name,
             key_prefix: r.key_prefix,
             key_hash: r.key_hash,
