@@ -88,11 +88,12 @@ with client.trace("summarize-doc") as t:
 				getTraces(),
 				getSpans()
 			]);
-			traces = traceResult.traces;
+			traces = traceResult.items;
 
 			// Group spans by trace_id client-side
+			const allSpans: Span[] = spanResult.items;
 			const spanMap = new Map<string, Span[]>();
-			for (const span of spanResult.spans) {
+			for (const span of allSpans) {
 				const existing = spanMap.get(span.trace_id) ?? [];
 				existing.push(span);
 				spanMap.set(span.trace_id, existing);

@@ -42,7 +42,7 @@
 				getSpans()
 			]);
 			summary = summaryRes;
-			recentSpans = spanRes.spans
+			recentSpans = spanRes.items
 				.sort((a, b) => new Date(spanStartedAt(b)).getTime() - new Date(spanStartedAt(a)).getTime())
 				.slice(0, 20);
 		} catch {
