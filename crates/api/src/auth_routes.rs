@@ -168,12 +168,12 @@ fn session_cookie(token: &str) -> String {
     let cross_origin = std::env::var("ALLOWED_ORIGINS").is_ok();
     if cross_origin {
         format!(
-            "session={}; HttpOnly; SameSite=None; Secure; Path=/; Max-Age=604800",
+            "session={}; HttpOnly; SameSite=None; Secure; Path=/; Max-Age=2592000",
             token
         )
     } else {
         format!(
-            "session={}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800",
+            "session={}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000",
             token
         )
     }

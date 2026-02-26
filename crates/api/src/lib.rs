@@ -669,6 +669,11 @@ async fn list_traces(
 ) -> Result<Json<Page<Trace>>, (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::TracesRead)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
+    // Sync from backend to pick up data from other instances
+    {
+        let mut w = store.write().await;
+        w.sync_from_backend().await;
+    }
     let r = store.read().await;
     let traces: Vec<Trace> = r.all_traces().cloned().collect();
     let page = paginate(traces, &params).map_err(|s| (s, Json(serde_json::json!({"error": "invalid pagination"}))))?;
@@ -723,17 +728,17 @@ async fn get_trace(
 ) -> Result<Json<SpanList>, StatusCode> {
     require_scope(&ctx, auth::Scope::TracesRead).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
-    let r = store.read().await;
-    let span_ids = r.spans_for_trace(trace_id);
+    let mut w = store.write().await;
+    // Use fallback to storage backend for multi-instance support
+    let span_ids: Vec<SpanId> = w.spans_for_trace_or_load(trace_id).await.to_vec();
     if span_ids.is_empty() {
-        // Check if trace exists in metadata
-        if r.get_trace(trace_id).is_none() {
+        if w.get_trace(trace_id).is_none() {
             return Err(StatusCode::NOT_FOUND);
         }
     }
     let spans: Vec<Span> = span_ids
         .iter()
-        .filter_map(|id| r.get(*id).cloned())
+        .filter_map(|id| w.get(*id).cloned())
         .collect();
     let count = spans.len();
     Ok(Json(SpanList { spans, count }))
@@ -760,6 +765,11 @@ async fn list_spans(
 ) -> Result<Json<Page<Span>>, (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::TracesRead)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
+    // Sync from backend to pick up data from other instances
+    {
+        let mut w = store.write().await;
+        w.sync_from_backend().await;
+    }
     let r = store.read().await;
     let filter = SpanFilter {
         kind: params.kind,
@@ -2154,6 +2164,11 @@ async fn analytics_summary(
 ) -> Result<Json<AnalyticsSummary>, (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::AnalyticsRead)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
+    // Sync from backend to pick up data from other instances
+    {
+        let mut w = store.write().await;
+        w.sync_from_backend().await;
+    }
     let r = store.read().await;
     let spans: Vec<&trace::Span> = r.all_spans().collect();
     let trace_count = r.trace_count();
@@ -3385,8 +3400,23 @@ fn build_router(
     let cors = if let Ok(origins) = std::env::var("ALLOWED_ORIGINS") {
         let origins: Vec<axum::http::HeaderValue> = origins
             .split(',')
-            .filter_map(|s| s.trim().parse().ok())
+            .filter_map(|s| {
+                let trimmed = s.trim();
+                match trimmed.parse::<axum::http::HeaderValue>() {
+                    Ok(v) => {
+                        tracing::info!(origin = trimmed, "CORS: allowing origin");
+                        Some(v)
+                    }
+                    Err(e) => {
+                        tracing::warn!(origin = trimmed, error = %e, "CORS: failed to parse origin, skipping");
+                        None
+                    }
+                }
+            })
             .collect();
+        if origins.is_empty() {
+            tracing::warn!("CORS: ALLOWED_ORIGINS set but no valid origins parsed, falling back to permissive");
+        }
         CorsLayer::new()
             .allow_origin(AllowOrigin::list(origins))
             .allow_methods([

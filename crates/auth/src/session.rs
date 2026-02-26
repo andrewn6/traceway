@@ -31,7 +31,7 @@ pub struct SessionToken {
     pub expires_at: DateTime<Utc>,
 }
 
-const SESSION_DURATION_DAYS: i64 = 7;
+const SESSION_DURATION_DAYS: i64 = 30;
 
 /// Create a new session token (JWT)
 pub fn create_session(
