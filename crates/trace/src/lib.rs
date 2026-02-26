@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+pub mod pricing;
+
 pub type SpanId = Uuid;
 pub type TraceId = Uuid;
 pub type DatasetId = Uuid;
@@ -113,6 +115,35 @@ impl SpanKind {
         match self {
             SpanKind::LlmCall { cost, .. } => *cost,
             _ => None,
+        }
+    }
+
+    /// If this is an LlmCall with token counts but no cost, estimate cost
+    /// from the model pricing table and fill it in. Returns self (mutated).
+    pub fn with_estimated_cost(self) -> Self {
+        match self {
+            SpanKind::LlmCall {
+                model,
+                provider,
+                input_tokens,
+                output_tokens,
+                cost,
+                input_preview,
+                output_preview,
+            } => {
+                let final_cost =
+                    cost.or_else(|| pricing::estimate_cost(&model, input_tokens, output_tokens));
+                SpanKind::LlmCall {
+                    model,
+                    provider,
+                    input_tokens,
+                    output_tokens,
+                    cost: final_cost,
+                    input_preview,
+                    output_preview,
+                }
+            }
+            other => other,
         }
     }
 }
