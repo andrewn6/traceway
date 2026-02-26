@@ -6,7 +6,7 @@
 //! - Query parameter auth extraction for SSE endpoints
 
 use async_trait::async_trait;
-use auth::{ApiKeyLookup, AuthConfig, OrgId, Scope};
+use auth::{ApiKeyLookup, AuthConfig, OrgId, ProjectId, Scope};
 use tracing::{debug, info};
 
 /// API key record stored in memory
@@ -15,6 +15,7 @@ pub struct ApiKeyRecord {
     pub prefix: String,
     pub key_hash: String,
     pub org_id: OrgId,
+    pub project_id: ProjectId,
     pub scopes: Vec<Scope>,
 }
 
@@ -54,6 +55,7 @@ impl EnvApiKeyLookup {
                     prefix,
                     key_hash,
                     org_id: uuid::Uuid::nil(), // Default org for env-based keys
+                    project_id: uuid::Uuid::nil(), // Default project for env-based keys
                     scopes: Scope::all(),
                 });
             }
@@ -74,6 +76,7 @@ impl EnvApiKeyLookup {
                     prefix,
                     key_hash,
                     org_id: uuid::Uuid::nil(),
+                    project_id: uuid::Uuid::nil(),
                     scopes: Scope::all(),
                 });
                 
@@ -92,11 +95,11 @@ impl EnvApiKeyLookup {
 
 #[async_trait]
 impl ApiKeyLookup for EnvApiKeyLookup {
-    async fn lookup_api_key(&self, prefix: &str) -> Option<(OrgId, String, Vec<Scope>)> {
+    async fn lookup_api_key(&self, prefix: &str) -> Option<(OrgId, ProjectId, String, Vec<Scope>)> {
         self.keys
             .iter()
             .find(|k| k.prefix == prefix)
-            .map(|k| (k.org_id, k.key_hash.clone(), k.scopes.clone()))
+            .map(|k| (k.org_id, k.project_id, k.key_hash.clone(), k.scopes.clone()))
     }
 }
 
@@ -105,7 +108,7 @@ pub struct NoopApiKeyLookup;
 
 #[async_trait]
 impl ApiKeyLookup for NoopApiKeyLookup {
-    async fn lookup_api_key(&self, _prefix: &str) -> Option<(OrgId, String, Vec<Scope>)> {
+    async fn lookup_api_key(&self, _prefix: &str) -> Option<(OrgId, ProjectId, String, Vec<Scope>)> {
         None
     }
 }
@@ -126,7 +129,7 @@ impl StoreApiKeyLookup {
 
 #[async_trait]
 impl ApiKeyLookup for StoreApiKeyLookup {
-    async fn lookup_api_key(&self, prefix: &str) -> Option<(OrgId, String, Vec<Scope>)> {
+    async fn lookup_api_key(&self, prefix: &str) -> Option<(OrgId, ProjectId, String, Vec<Scope>)> {
         match self.store.lookup_api_key_by_prefix(prefix).await {
             Ok(Some(key)) => {
                 // Check expiry
@@ -142,7 +145,7 @@ impl ApiKeyLookup for StoreApiKeyLookup {
                 tokio::spawn(async move {
                     let _ = store.update_api_key_last_used(key_id).await;
                 });
-                Some((key.org_id, key.key_hash, key.scopes))
+                Some((key.org_id, key.project_id, key.key_hash, key.scopes))
             }
             Ok(None) => None,
             Err(e) => {
@@ -170,7 +173,7 @@ impl CompositeApiKeyLookup {
 
 #[async_trait]
 impl ApiKeyLookup for CompositeApiKeyLookup {
-    async fn lookup_api_key(&self, prefix: &str) -> Option<(OrgId, String, Vec<Scope>)> {
+    async fn lookup_api_key(&self, prefix: &str) -> Option<(OrgId, ProjectId, String, Vec<Scope>)> {
         // Try DB first, then env
         if let Some(result) = self.store_lookup.lookup_api_key(prefix).await {
             return Some(result);

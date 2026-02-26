@@ -13,7 +13,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use auth::{
-    generate_api_key, Auth, Email, Invite, Organization, PasswordResetToken, Role, Scope, User,
+    generate_api_key, Auth, Email, Invite, Organization, PasswordResetToken, Project, Role, Scope, User,
     create_session,
 };
 use chrono::{Duration, Utc};
@@ -26,6 +26,7 @@ use crate::AppState;
 #[derive(Serialize)]
 pub struct MeResponse {
     pub org_id: String,
+    pub project_id: String,
     pub user_id: Option<String>,
     pub scopes: Vec<Scope>,
     pub is_local_mode: bool,
@@ -246,6 +247,7 @@ async fn get_auth_config(State(state): State<AppState>) -> Json<ConfigResponse> 
 async fn get_me(Auth(ctx): Auth) -> Json<MeResponse> {
     Json(MeResponse {
         org_id: ctx.org_id.to_string(),
+        project_id: ctx.project_id.to_string(),
         user_id: ctx.user_id.map(|id| id.to_string()),
         scopes: ctx.scopes,
         is_local_mode: ctx.is_local_mode,
@@ -283,6 +285,10 @@ async fn signup(
 
     auth_store.save_org(&org).await.map_err(internal_err)?;
 
+    // Create default project for the new org
+    let project = auth::Project::default_for_org(org.id);
+    auth_store.save_project(&project).await.map_err(internal_err)?;
+
     // Create user (Owner of the new org)
     let user = User::new(&req.email, org.id, Role::Owner)
         .with_password(&req.password);
@@ -291,8 +297,8 @@ async fn signup(
 
     auth_store.save_user(&user).await.map_err(internal_err)?;
 
-    // Issue session JWT
-    let token = create_session(user.id, org.id, Scope::all(), &state.auth_config.jwt_secret)
+    // Issue session JWT (default project)
+    let token = create_session(user.id, org.id, project.id, Scope::all(), &state.auth_config.jwt_secret)
         .map_err(|e| internal_err(format!("Failed to create session: {}", e)))?;
 
     let body = AuthResponse {
@@ -334,7 +340,10 @@ async fn login(
         return Err((StatusCode::UNAUTHORIZED, "Invalid email or password".into()));
     }
 
-    let token = create_session(user.id, user.org_id, Scope::all(), &state.auth_config.jwt_secret)
+    // Get or create default project for the user's org
+    let project = auth_store.get_default_project(user.org_id).await.map_err(internal_err)?;
+
+    let token = create_session(user.id, user.org_id, project.id, Scope::all(), &state.auth_config.jwt_secret)
         .map_err(|e| internal_err(format!("Failed to create session: {}", e)))?;
 
     let body = AuthResponse {
@@ -508,7 +517,7 @@ async fn create_api_key_handler(
         req.scopes.clone()
     };
 
-    let (generated, stored) = generate_api_key(ctx.org_id, req.name.clone(), scopes.clone());
+    let (generated, stored) = generate_api_key(ctx.org_id, ctx.project_id, req.name.clone(), scopes.clone());
 
     auth_store
         .save_api_key(&stored)
@@ -746,8 +755,11 @@ async fn accept_invite(
     // Delete the invite
     auth_store.delete_invite(invite.id).await.map_err(internal_err)?;
 
+    // Get or create default project for the invited user's org
+    let project = auth_store.get_default_project(invite.org_id).await.map_err(internal_err)?;
+
     // Issue session
-    let token = create_session(user.id, invite.org_id, Scope::all(), &state.auth_config.jwt_secret)
+    let token = create_session(user.id, invite.org_id, project.id, Scope::all(), &state.auth_config.jwt_secret)
         .map_err(|e| internal_err(format!("Failed to create session: {}", e)))?;
 
     let body = AuthResponse {
@@ -883,6 +895,162 @@ async fn reset_password(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+// ── project types ────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct ProjectResponse {
+    pub id: String,
+    pub org_id: String,
+    pub name: String,
+    pub slug: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<Project> for ProjectResponse {
+    fn from(p: Project) -> Self {
+        Self {
+            id: p.id.to_string(),
+            org_id: p.org_id.to_string(),
+            name: p.name,
+            slug: p.slug,
+            created_at: p.created_at.to_rfc3339(),
+            updated_at: p.updated_at.to_rfc3339(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct CreateProjectRequest {
+    pub name: String,
+}
+
+#[derive(Deserialize)]
+pub struct SwitchProjectRequest {
+    pub project_id: String,
+}
+
+// ── project handlers ─────────────────────────────────────────────────
+
+/// GET /api/projects – list projects for the current org.
+async fn list_projects(
+    Auth(ctx): Auth,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ProjectResponse>>, (StatusCode, String)> {
+    let auth_store = state.auth_store.as_ref()
+        .ok_or_else(|| (StatusCode::SERVICE_UNAVAILABLE, "Auth store not configured".into()))?;
+
+    // In local mode, return a single virtual project
+    if ctx.is_local_mode {
+        return Ok(Json(vec![ProjectResponse::from(Project::local())]));
+    }
+
+    let projects = auth_store
+        .list_projects_for_org(ctx.org_id)
+        .await
+        .map_err(internal_err)?;
+
+    Ok(Json(projects.into_iter().map(ProjectResponse::from).collect()))
+}
+
+/// POST /api/projects – create a new project.
+async fn create_project(
+    Auth(ctx): Auth,
+    State(state): State<AppState>,
+    Json(req): Json<CreateProjectRequest>,
+) -> Result<(StatusCode, Json<ProjectResponse>), (StatusCode, String)> {
+    if ctx.is_local_mode {
+        return Err((StatusCode::NOT_FOUND, "Not available in local mode".into()));
+    }
+
+    let auth_store = state.auth_store.as_ref()
+        .ok_or_else(|| (StatusCode::SERVICE_UNAVAILABLE, "Auth store not configured".into()))?;
+
+    let slug = slug_from_name(&req.name);
+
+    // Check for duplicate slug within the org
+    if auth_store.get_project_by_slug(ctx.org_id, &slug).await.map_err(internal_err)?.is_some() {
+        return Err((StatusCode::CONFLICT, format!("Project with slug '{}' already exists", slug)));
+    }
+
+    let project = Project::new(ctx.org_id, &req.name, &slug);
+    auth_store.save_project(&project).await.map_err(internal_err)?;
+
+    Ok((StatusCode::CREATED, Json(ProjectResponse::from(project))))
+}
+
+/// DELETE /api/projects/:id – delete a project.
+async fn delete_project_handler(
+    Auth(ctx): Auth,
+    State(state): State<AppState>,
+    axum::extract::Path(project_id): axum::extract::Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    if ctx.is_local_mode {
+        return Err((StatusCode::NOT_FOUND, "Not available in local mode".into()));
+    }
+
+    let auth_store = state.auth_store.as_ref()
+        .ok_or_else(|| (StatusCode::SERVICE_UNAVAILABLE, "Auth store not configured".into()))?;
+
+    let project_uuid: Uuid = project_id.parse()
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid project ID".into()))?;
+
+    // Don't allow deleting the default project
+    let project = auth_store.get_project(project_uuid).await.map_err(internal_err)?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".into()))?;
+
+    if project.slug == "default" {
+        return Err((StatusCode::FORBIDDEN, "Cannot delete the default project".into()));
+    }
+
+    // Verify it belongs to the user's org
+    if project.org_id != ctx.org_id {
+        return Err((StatusCode::NOT_FOUND, "Project not found".into()));
+    }
+
+    auth_store.delete_project(project_uuid).await.map_err(internal_err)?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// POST /api/projects/switch – switch the active project, returns a new session cookie.
+async fn switch_project(
+    Auth(ctx): Auth,
+    State(state): State<AppState>,
+    Json(req): Json<SwitchProjectRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    if ctx.is_local_mode {
+        return Err((StatusCode::NOT_FOUND, "Not available in local mode".into()));
+    }
+
+    let auth_store = state.auth_store.as_ref()
+        .ok_or_else(|| (StatusCode::SERVICE_UNAVAILABLE, "Auth store not configured".into()))?;
+
+    let project_id: Uuid = req.project_id.parse()
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid project ID".into()))?;
+
+    // Verify the project exists and belongs to the user's org
+    let project = auth_store.get_project(project_id).await.map_err(internal_err)?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".into()))?;
+
+    if project.org_id != ctx.org_id {
+        return Err((StatusCode::NOT_FOUND, "Project not found".into()));
+    }
+
+    let user_id = ctx.user_id
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "User session required".into()))?;
+
+    // Issue a new session JWT with the new project_id
+    let token = create_session(user_id, ctx.org_id, project.id, Scope::all(), &state.auth_config.jwt_secret)
+        .map_err(|e| internal_err(format!("Failed to create session: {}", e)))?;
+
+    Ok((
+        StatusCode::OK,
+        [(header::SET_COOKIE, session_cookie(&token))],
+        Json(ProjectResponse::from(project)),
+    ))
+}
+
 // ── routers ──────────────────────────────────────────────────────────
 
 /// Public auth routes (no auth middleware needed).
@@ -913,4 +1081,8 @@ pub fn protected_auth_router() -> Router<AppState> {
             get(list_invites).post(create_invite),
         )
         .route("/org/invites/:id", delete(delete_invite))
+        // Project routes
+        .route("/projects", get(list_projects).post(create_project))
+        .route("/projects/switch", post(switch_project))
+        .route("/projects/:id", delete(delete_project_handler))
 }
