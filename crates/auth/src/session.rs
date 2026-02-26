@@ -2,7 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 
-use crate::{AuthError, OrgId, Scope, UserId};
+use crate::{AuthError, OrgId, ProjectId, Scope, UserId};
 
 /// JWT claims for session tokens
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11,6 +11,8 @@ pub struct SessionClaims {
     pub sub: String,
     /// Organization ID
     pub org: String,
+    /// Project ID
+    pub project: String,
     /// Scopes
     pub scopes: Vec<Scope>,
     /// Issued at
@@ -24,6 +26,7 @@ pub struct SessionClaims {
 pub struct SessionToken {
     pub user_id: UserId,
     pub org_id: OrgId,
+    pub project_id: ProjectId,
     pub scopes: Vec<Scope>,
     pub expires_at: DateTime<Utc>,
 }
@@ -34,6 +37,7 @@ const SESSION_DURATION_DAYS: i64 = 7;
 pub fn create_session(
     user_id: UserId,
     org_id: OrgId,
+    project_id: ProjectId,
     scopes: Vec<Scope>,
     secret: &[u8],
 ) -> Result<String, AuthError> {
@@ -43,6 +47,7 @@ pub fn create_session(
     let claims = SessionClaims {
         sub: user_id.to_string(),
         org: org_id.to_string(),
+        project: project_id.to_string(),
         scopes,
         iat: now.timestamp(),
         exp: exp.timestamp(),
@@ -75,11 +80,16 @@ pub fn verify_session(token: &str, secret: &[u8]) -> Result<SessionToken, AuthEr
 
     let user_id = claims.sub.parse().map_err(|_| AuthError::InvalidSession)?;
     let org_id = claims.org.parse().map_err(|_| AuthError::InvalidSession)?;
+    let project_id = claims
+        .project
+        .parse()
+        .map_err(|_| AuthError::InvalidSession)?;
     let expires_at = DateTime::from_timestamp(claims.exp, 0).ok_or(AuthError::InvalidSession)?;
 
     Ok(SessionToken {
         user_id,
         org_id,
+        project_id,
         scopes: claims.scopes,
         expires_at,
     })
@@ -103,13 +113,15 @@ mod tests {
         let secret = generate_secret();
         let user_id = Uuid::now_v7();
         let org_id = Uuid::now_v7();
+        let project_id = Uuid::now_v7();
         let scopes = vec![Scope::TracesRead, Scope::TracesWrite];
 
-        let token = create_session(user_id, org_id, scopes.clone(), &secret).unwrap();
+        let token = create_session(user_id, org_id, project_id, scopes.clone(), &secret).unwrap();
         let parsed = verify_session(&token, &secret).unwrap();
 
         assert_eq!(parsed.user_id, user_id);
         assert_eq!(parsed.org_id, org_id);
+        assert_eq!(parsed.project_id, project_id);
         assert_eq!(parsed.scopes, scopes);
     }
 
@@ -119,8 +131,9 @@ mod tests {
         let secret2 = generate_secret();
         let user_id = Uuid::now_v7();
         let org_id = Uuid::now_v7();
+        let project_id = Uuid::now_v7();
 
-        let token = create_session(user_id, org_id, vec![], &secret1).unwrap();
+        let token = create_session(user_id, org_id, project_id, vec![], &secret1).unwrap();
         let result = verify_session(&token, &secret2);
 
         assert!(matches!(result, Err(AuthError::InvalidSession)));

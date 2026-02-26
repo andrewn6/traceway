@@ -1,12 +1,13 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{OrgId, Scope, UserId};
+use crate::{OrgId, ProjectId, Scope, UserId};
 
 /// Authentication context attached to each request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthContext {
     pub org_id: OrgId,
+    pub project_id: ProjectId,
     pub user_id: Option<UserId>,
     pub scopes: Vec<Scope>,
     pub is_local_mode: bool,
@@ -17,7 +18,8 @@ impl AuthContext {
     /// Create context for local mode (no auth required)
     pub fn local() -> Self {
         Self {
-            org_id: Uuid::nil(), // Nil UUID for local org
+            org_id: Uuid::nil(),     // Nil UUID for local org
+            project_id: Uuid::nil(), // Nil UUID for local project
             user_id: None,
             scopes: Scope::all(),
             is_local_mode: true,
@@ -26,9 +28,10 @@ impl AuthContext {
     }
 
     /// Create context from API key authentication
-    pub fn from_api_key(org_id: OrgId, scopes: Vec<Scope>) -> Self {
+    pub fn from_api_key(org_id: OrgId, project_id: ProjectId, scopes: Vec<Scope>) -> Self {
         Self {
             org_id,
+            project_id,
             user_id: None,
             scopes,
             is_local_mode: false,
@@ -37,9 +40,15 @@ impl AuthContext {
     }
 
     /// Create context from session (dashboard user)
-    pub fn from_session(org_id: OrgId, user_id: UserId, scopes: Vec<Scope>) -> Self {
+    pub fn from_session(
+        org_id: OrgId,
+        project_id: ProjectId,
+        user_id: UserId,
+        scopes: Vec<Scope>,
+    ) -> Self {
         Self {
             org_id,
+            project_id,
             user_id: Some(user_id),
             scopes,
             is_local_mode: false,

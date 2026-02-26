@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 
-use crate::{ApiKey, ApiKeyId, Invite, OrgId, Organization, PasswordResetToken, Scope, User, UserId};
+use crate::{ApiKey, ApiKeyId, Invite, OrgId, Organization, PasswordResetToken, Project, ProjectId, User, UserId};
 
 /// Error type for auth storage operations
 #[derive(Debug, thiserror::Error)]
@@ -31,6 +31,21 @@ pub trait AuthStore: Send + Sync {
 
     async fn get_org_by_slug(&self, slug: &str) -> Result<Option<Organization>, AuthStoreError>;
 
+    // --- Project ---
+
+    async fn save_project(&self, project: &Project) -> Result<(), AuthStoreError>;
+
+    async fn get_project(&self, id: ProjectId) -> Result<Option<Project>, AuthStoreError>;
+
+    async fn get_project_by_slug(&self, org_id: OrgId, slug: &str) -> Result<Option<Project>, AuthStoreError>;
+
+    async fn list_projects_for_org(&self, org_id: OrgId) -> Result<Vec<Project>, AuthStoreError>;
+
+    async fn delete_project(&self, id: ProjectId) -> Result<bool, AuthStoreError>;
+
+    /// Get the default project for an org (first project, or create one if none exists).
+    async fn get_default_project(&self, org_id: OrgId) -> Result<Project, AuthStoreError>;
+
     // --- User ---
 
     async fn save_user(&self, user: &User) -> Result<(), AuthStoreError>;
@@ -48,6 +63,8 @@ pub trait AuthStore: Send + Sync {
     async fn get_api_key(&self, id: ApiKeyId) -> Result<Option<ApiKey>, AuthStoreError>;
 
     async fn list_api_keys_for_org(&self, org_id: OrgId) -> Result<Vec<ApiKey>, AuthStoreError>;
+
+    async fn list_api_keys_for_project(&self, project_id: ProjectId) -> Result<Vec<ApiKey>, AuthStoreError>;
 
     async fn lookup_api_key_by_prefix(
         &self,

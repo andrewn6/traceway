@@ -17,10 +17,14 @@ pub use middleware::{Auth, AuthConfig, ApiKeyLookup};
 pub use session::{SessionToken, create_session, verify_session};
 pub use store::{AuthStore, AuthStoreError};
 
+// Re-export Project (defined in this file, no need for `use`)
+// ProjectId is already a type alias above
+
 // --- ID Types ---
 
 pub type OrgId = Uuid;
 pub type UserId = Uuid;
+pub type ProjectId = Uuid;
 
 // --- Organization ---
 
@@ -54,6 +58,49 @@ impl Organization {
             name: "Local".to_string(),
             slug: "local".to_string(),
             plan: Plan::Free,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+}
+
+// --- Project ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Project {
+    pub id: ProjectId,
+    pub org_id: OrgId,
+    pub name: String,
+    pub slug: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Project {
+    pub fn new(org_id: OrgId, name: impl Into<String>, slug: impl Into<String>) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::now_v7(),
+            org_id,
+            name: name.into(),
+            slug: slug.into(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Create the default project for an org
+    pub fn default_for_org(org_id: OrgId) -> Self {
+        Self::new(org_id, "Default", "default")
+    }
+
+    /// Create the implicit local project (for local mode)
+    pub fn local() -> Self {
+        Self {
+            id: Uuid::nil(),
+            org_id: Uuid::nil(),
+            name: "Local".to_string(),
+            slug: "local".to_string(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

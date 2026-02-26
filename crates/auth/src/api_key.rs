@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{OrgId, Scope};
+use crate::{OrgId, ProjectId, Scope};
 
 pub type ApiKeyId = Uuid;
 
@@ -11,6 +11,7 @@ pub type ApiKeyId = Uuid;
 pub struct ApiKey {
     pub id: ApiKeyId,
     pub org_id: OrgId,
+    pub project_id: ProjectId,
     pub name: String,
     pub key_prefix: String, // First 8 chars for identification: "tw_sk"
     pub key_hash: String,   // bcrypt hash of full key
@@ -35,6 +36,7 @@ const KEY_BYTES: usize = 24;
 /// Returns the full key (show to user once) and metadata for storage
 pub fn generate_api_key(
     org_id: OrgId,
+    project_id: ProjectId,
     name: String,
     scopes: Vec<Scope>,
 ) -> (GeneratedApiKey, ApiKey) {
@@ -68,6 +70,7 @@ pub fn generate_api_key(
     let stored = ApiKey {
         id,
         org_id,
+        project_id,
         name,
         key_prefix,
         key_hash,
@@ -111,8 +114,13 @@ mod tests {
     #[test]
     fn test_generate_and_verify() {
         let org_id = Uuid::now_v7();
-        let (generated, stored) =
-            generate_api_key(org_id, "Test Key".to_string(), Scope::default_sdk());
+        let project_id = Uuid::now_v7();
+        let (generated, stored) = generate_api_key(
+            org_id,
+            project_id,
+            "Test Key".to_string(),
+            Scope::default_sdk(),
+        );
 
         assert!(generated.key.starts_with("tw_sk_"));
         assert!(is_api_key(&generated.key));

@@ -43,7 +43,8 @@ impl AuthConfig {
 /// Trait for looking up API keys - implement this on your app state
 #[async_trait::async_trait]
 pub trait ApiKeyLookup: Send + Sync {
-    async fn lookup_api_key(&self, prefix: &str) -> Option<(crate::OrgId, String, Vec<Scope>)>;
+    /// Returns (org_id, project_id, key_hash, scopes) for a given key prefix.
+    async fn lookup_api_key(&self, prefix: &str) -> Option<(crate::OrgId, crate::ProjectId, String, Vec<Scope>)>;
 }
 
 /// Auth middleware that extracts AuthContext from request
@@ -139,7 +140,7 @@ async fn validate_api_key(
     };
 
     // Look up key by prefix
-    let (org_id, key_hash, scopes) = lookup
+    let (org_id, project_id, key_hash, scopes) = lookup
         .lookup_api_key(prefix)
         .await
         .ok_or(AuthError::InvalidApiKey)?;
@@ -149,13 +150,14 @@ async fn validate_api_key(
         return Err(AuthError::InvalidApiKey);
     }
 
-    Ok(AuthContext::from_api_key(org_id, scopes))
+    Ok(AuthContext::from_api_key(org_id, project_id, scopes))
 }
 
 fn validate_session(token: &str, config: &AuthConfig) -> Result<AuthContext, AuthError> {
     let session = crate::verify_session(token, &config.jwt_secret)?;
     Ok(AuthContext::from_session(
         session.org_id,
+        session.project_id,
         session.user_id,
         session.scopes,
     ))
