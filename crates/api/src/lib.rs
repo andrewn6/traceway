@@ -263,6 +263,9 @@ pub struct CreateSpanRequest {
 pub struct CompleteSpanRequest {
     #[serde(default)]
     pub output: Option<serde_json::Value>,
+    /// Updated span kind (e.g. to populate token counts after an LLM call completes).
+    #[serde(default)]
+    pub kind: Option<SpanKind>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -916,7 +919,10 @@ async fn complete_span(
     if !ctx.has_scope(auth::Scope::TracesWrite) {
         return StatusCode::FORBIDDEN;
     }
-    let output = body.and_then(|b| b.0.output);
+    let (output, kind) = match body {
+        Some(Json(b)) => (b.output, b.kind),
+        None => (None, None),
+    };
 
     let store = match state.store_for_project(ctx.org_id, ctx.project_id).await {
         Ok(s) => s,
@@ -934,7 +940,16 @@ async fn complete_span(
         return StatusCode::NOT_FOUND;
     }
 
-    if let Some(span) = w.complete_span(span_id, output).await {
+    // If kind is provided (e.g. with updated token counts), use complete_span_with_kind.
+    // Run with_estimated_cost() to auto-calculate cost from the pricing table.
+    let result = if let Some(kind) = kind {
+        let kind = kind.with_estimated_cost();
+        w.complete_span_with_kind(span_id, kind, output).await
+    } else {
+        w.complete_span(span_id, output).await
+    };
+
+    if let Some(span) = result {
         drop(w);
         let _ = state.events_tx.send(SystemEvent::SpanCompleted { span: span.clone() });
         tracing::debug!(%span_id, "span completed");
