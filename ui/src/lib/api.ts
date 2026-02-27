@@ -412,12 +412,16 @@ export function importFile(datasetId: string, file: File): Promise<{ imported: n
 
 export const getQueue = (datasetId: string) =>
 	get<Page<QueueItem>>(`/datasets/${datasetId}/queue`);
+export const getAllQueueItems = (status?: string) =>
+	get<Page<QueueItem>>(`/queue${status ? `?status=${status}` : ''}`);
 export const enqueueDatapoints = (datasetId: string, datapointIds: string[]) =>
 	post<unknown>(`/datasets/${datasetId}/queue`, { datapoint_ids: datapointIds });
 export const claimQueueItem = (itemId: string, claimedBy: string) =>
 	post<QueueItem>(`/queue/${itemId}/claim`, { claimed_by: claimedBy });
 export const submitQueueItem = (itemId: string, editedData?: unknown) =>
 	post<QueueItem>(`/queue/${itemId}/submit`, { edited_data: editedData });
+export const exportSpanAndEnqueue = (datasetId: string, spanId: string) =>
+	post<QueueItem>(`/datasets/${datasetId}/export-span-and-enqueue`, { span_id: spanId });
 
 // ─── Eval Run Endpoints ──────────────────────────────────────────────
 

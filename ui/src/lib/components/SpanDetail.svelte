@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Span, DatasetWithCount } from '$lib/api';
-	import { spanStatus, spanStartedAt, spanEndedAt, spanDurationMs, spanError, spanKindLabel, shortId, getDatasets, exportSpanToDataset, completeSpan, failSpan, deleteSpan, getFileContent } from '$lib/api';
+	import { spanStatus, spanStartedAt, spanEndedAt, spanDurationMs, spanError, spanKindLabel, shortId, getDatasets, exportSpanToDataset, exportSpanAndEnqueue, completeSpan, failSpan, deleteSpan, getFileContent } from '$lib/api';
 	import StatusBadge from './StatusBadge.svelte';
 	import SpanKindIcon from './SpanKindIcon.svelte';
 
@@ -79,6 +79,7 @@
 
 	async function openExportDropdown() {
 		showExportDropdown = !showExportDropdown;
+		showReviewDropdown = false;
 		if (showExportDropdown) {
 			try {
 				const result = await getDatasets();
@@ -103,6 +104,41 @@
 		}
 		exportLoading = false;
 		setTimeout(() => (exportSuccess = ''), 3000);
+	}
+
+	// ── Send to review (export + enqueue) ────────────────────────────
+	let showReviewDropdown = $state(false);
+	let reviewDatasets: DatasetWithCount[] = $state([]);
+	let reviewLoading = $state(false);
+	let reviewSuccess = $state('');
+
+	async function openReviewDropdown() {
+		showReviewDropdown = !showReviewDropdown;
+		showExportDropdown = false;
+		if (showReviewDropdown) {
+			try {
+				const result = await getDatasets();
+				reviewDatasets = result.datasets;
+			} catch {
+				reviewDatasets = [];
+			}
+		}
+	}
+
+	async function doReview(datasetId: string) {
+		if (!span) return;
+		reviewLoading = true;
+		reviewSuccess = '';
+		try {
+			await exportSpanAndEnqueue(datasetId, span.id);
+			const ds = reviewDatasets.find((d) => d.id === datasetId);
+			reviewSuccess = `Sent to review in ${ds?.name ?? shortId(datasetId)}`;
+			showReviewDropdown = false;
+		} catch {
+			reviewSuccess = 'Failed to send to review';
+		}
+		reviewLoading = false;
+		setTimeout(() => (reviewSuccess = ''), 3000);
 	}
 
 	// ── Delete span ───────────────────────────────────────────────────
@@ -397,9 +433,38 @@
 					{/if}
 				</div>
 
-				{#if exportSuccess}
-					<span class="text-[11px] text-success">{exportSuccess}</span>
-				{/if}
+			<!-- Send to Review -->
+				<div class="relative">
+					<button
+						class="px-2.5 py-1 text-[11px] bg-warning/10 text-warning border border-warning/20 rounded hover:bg-warning/20 transition-colors"
+						onclick={openReviewDropdown}
+					>Send to review</button>
+					{#if showReviewDropdown}
+						<div class="absolute left-0 top-full mt-1 w-56 bg-bg-secondary border border-border rounded shadow-lg z-10">
+							{#if reviewDatasets.length === 0}
+								<div class="px-3 py-2 text-xs text-text-muted">No datasets. Create one first.</div>
+							{:else}
+								{#each reviewDatasets as ds (ds.id)}
+									<button
+										class="w-full text-left px-3 py-2 text-xs hover:bg-bg-tertiary transition-colors text-text-secondary"
+										disabled={reviewLoading}
+										onclick={() => doReview(ds.id)}
+									>
+										<div class="text-text">{ds.name}</div>
+										<div class="text-text-muted">{ds.datapoint_count} datapoints</div>
+									</button>
+								{/each}
+							{/if}
+						</div>
+					{/if}
+				</div>
+
+			{#if exportSuccess}
+				<span class="text-[11px] text-success">{exportSuccess}</span>
+			{/if}
+			{#if reviewSuccess}
+				<span class="text-[11px] text-success">{reviewSuccess}</span>
+			{/if}
 
 				<div class="flex-1"></div>
 
