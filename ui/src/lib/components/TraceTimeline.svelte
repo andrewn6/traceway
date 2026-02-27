@@ -2,6 +2,8 @@
 	import type { Span } from '$lib/api';
 	import { spanStatus, spanStartedAt, spanEndedAt, spanDurationMs } from '$lib/api';
 	import SpanKindIcon from './SpanKindIcon.svelte';
+	import TimelineView from './TimelineView.svelte';
+	import ReaderView from './ReaderView.svelte';
 	import { onMount, onDestroy } from 'svelte';
 
 	let {
@@ -30,8 +32,21 @@
 		return lines * PREVIEW_LINE_HEIGHT + PREVIEW_PADDING;
 	}
 
-	// ── View mode ─────────────────────────────────────────────────────
-	let viewMode: 'tree' | 'flat' = $state('tree');
+	// ── View mode (persisted to localStorage) ─────────────────────────
+	type ViewMode = 'tree' | 'flat' | 'timeline' | 'reader';
+	const VIEW_MODE_KEY = 'traceway:trace-view-mode';
+	let viewMode: ViewMode = $state('tree');
+
+	onMount(() => {
+		const stored = localStorage.getItem(VIEW_MODE_KEY);
+		if (stored === 'tree' || stored === 'flat' || stored === 'timeline' || stored === 'reader') {
+			viewMode = stored;
+		}
+	});
+
+	$effect(() => {
+		localStorage.setItem(VIEW_MODE_KEY, viewMode);
+	});
 
 	// ── Collapse state ─────────────────────────────────────────────────
 	let collapsed: Set<string> = $state(new Set());
@@ -342,7 +357,9 @@
 <div class="flex flex-col h-full min-h-0 bg-bg-secondary border-r border-border">
 	<!-- Toolbar -->
 	<div class="flex items-center gap-2 px-3 py-1.5 border-b border-border shrink-0">
-		<span class="text-[11px] text-text-muted">{flatTree.filter(n => n.type === 'span').length} spans</span>
+		{#if viewMode === 'tree' || viewMode === 'flat'}
+			<span class="text-[11px] text-text-muted">{flatTree.filter(n => n.type === 'span').length} spans</span>
+		{/if}
 
 		<div class="flex-1"></div>
 
@@ -356,125 +373,129 @@
 
 		<!-- View mode toggle -->
 		<div class="flex items-center bg-bg-tertiary rounded text-[10px]">
-			<button
-				class="px-2 py-0.5 rounded transition-colors {viewMode === 'tree' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text'}"
-				onclick={() => viewMode = 'tree'}
-			>Tree</button>
-			<button
-				class="px-2 py-0.5 rounded transition-colors {viewMode === 'flat' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text'}"
-				onclick={() => viewMode = 'flat'}
-			>Flat</button>
-		</div>
-	</div>
-
-	<!-- Virtual scroll area -->
-	<div
-		bind:this={scrollContainer}
-		bind:clientHeight={containerHeight}
-		class="flex-1 min-h-0 overflow-y-auto"
-		onscroll={onScroll}
-	>
-		<div class="relative" style="height: {totalHeight}px">
-			{#each visibleNodes as node, i (`${node.type}-${node.span.id}-${i}`)}
-				{@const idx = visibleRange.startIdx + i}
-				{@const topPx = rowOffsets[idx]}
-				{@const s = node.span}
-
-				{#if node.type === 'preview'}
-					<!-- Content preview block -->
-					<div
-						class="absolute left-0 right-0 cursor-pointer
-							{selectedId === s.id ? 'bg-accent/5 border-l-2 border-l-accent' : 'border-l-2 border-l-transparent hover:bg-bg-tertiary/50'}"
-						style="top: {topPx}px; height: {node.height}px"
-						role="button"
-						tabindex={-1}
-						onclick={() => onSelect?.(s)}
-						onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') onSelect?.(s); }}
-					>
-						<div class="overflow-hidden pr-3" style="padding-left: {(node.depth + (viewMode === 'tree' ? 1 : 0)) * INDENT_PX + 46}px; padding-top: 2px">
-							<p class="text-[11px] text-text-muted/80 leading-[18px] line-clamp-3">{node.text}</p>
-						</div>
-					</div>
-				{:else}
-					<!-- Span row -->
-					{@const status = spanStatus(s)}
-					{@const duration = spanDurationMs(s)}
-					{@const model = modelBadge(s)}
-					{@const tokens = tokenCount(s)}
-					{@const cost = costBadge(s)}
-					{@const bytes = bytesBadge(s)}
-					<button
-						class="absolute left-0 right-0 flex items-center text-xs transition-colors group
-							{selectedId === s.id ? 'bg-accent/10 border-l-2 border-l-accent' : 'hover:bg-bg-tertiary border-l-2 border-l-transparent'}"
-						style="top: {topPx}px; height: {node.height}px"
-						onclick={() => onSelect?.(s)}
-					>
-						<!-- Span info -->
-						<div class="flex items-center gap-1.5 flex-1 px-2 overflow-hidden min-w-0">
-							<!-- Indent + collapse -->
-							{#if viewMode === 'tree'}
-								<div class="flex items-center shrink-0" style="width: {node.depth * INDENT_PX + 20}px">
-									<div style="width: {node.depth * INDENT_PX}px"></div>
-									{#if node.hasChildren}
-										<!-- svelte-ignore a11y_click_events_have_key_events -->
-										<span
-											role="switch"
-											aria-checked={!collapsed.has(s.id)}
-											tabindex={-1}
-											class="w-5 h-5 flex items-center justify-center text-text-muted hover:text-text transition-colors cursor-pointer"
-											onclick={(e: MouseEvent) => { e.stopPropagation(); toggleCollapse(s.id); }}
-										>
-											{#if collapsed.has(s.id)}
-												<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M4 2l6 4-6 4V2z"/></svg>
-											{:else}
-												<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M2 4l4 6 4-6H2z"/></svg>
-											{/if}
-										</span>
-									{:else}
-										<div class="w-5"></div>
-									{/if}
-								</div>
-							{/if}
-
-							<!-- Status dot -->
-							<span class="w-2 h-2 rounded-full shrink-0 {statusDotClass(s)}"></span>
-
-							<!-- Icon -->
-							<div class="shrink-0">
-								<SpanKindIcon span={s} />
-							</div>
-
-							<!-- Name -->
-							<span class="text-text truncate text-xs font-medium">{s.name}</span>
-
-							<!-- Inline badges -->
-							{#if model}
-								<span class="shrink-0 text-purple-400 text-[10px] bg-purple-400/10 rounded px-1 py-px">{model}</span>
-							{/if}
-							{#if tokens}
-								<span class="shrink-0 text-text-muted text-[10px]">{tokens}tok</span>
-							{/if}
-							{#if cost}
-								<span class="shrink-0 text-success text-[10px]">{cost}</span>
-							{/if}
-							{#if bytes}
-								<span class="shrink-0 text-text-muted text-[10px]">{bytes}</span>
-							{/if}
-
-							<!-- Collapsed count -->
-							{#if node.hasChildren && collapsed.has(s.id)}
-								<span class="shrink-0 text-text-muted text-[10px] bg-bg-tertiary rounded px-1.5 py-px">+{node.descendantCount}</span>
-							{/if}
-						</div>
-
-						<!-- Duration / offset (right side) -->
-						<div class="shrink-0 flex flex-col items-end pr-3 text-right min-w-16">
-							<span class="text-xs text-text-secondary font-mono">{formatDuration(duration)}</span>
-							<span class="text-[10px] text-text-muted font-mono">{relativeOffset(s)}</span>
-						</div>
-					</button>
-				{/if}
+			{#each (['tree', 'flat', 'timeline', 'reader'] as const) as mode}
+				<button
+					class="px-2 py-0.5 rounded transition-colors capitalize {viewMode === mode ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text'}"
+					onclick={() => viewMode = mode}
+				>{mode}</button>
 			{/each}
 		</div>
 	</div>
+
+	{#if viewMode === 'timeline'}
+		<TimelineView {spans} {selectedId} {onSelect} {searchQuery} />
+	{:else if viewMode === 'reader'}
+		<ReaderView {spans} {selectedId} {onSelect} {searchQuery} />
+	{:else}
+		<!-- Virtual scroll area (tree/flat modes) -->
+		<div
+			bind:this={scrollContainer}
+			bind:clientHeight={containerHeight}
+			class="flex-1 min-h-0 overflow-y-auto"
+			onscroll={onScroll}
+		>
+			<div class="relative" style="height: {totalHeight}px">
+				{#each visibleNodes as node, i (`${node.type}-${node.span.id}-${i}`)}
+					{@const idx = visibleRange.startIdx + i}
+					{@const topPx = rowOffsets[idx]}
+					{@const s = node.span}
+
+					{#if node.type === 'preview'}
+						<!-- Content preview block -->
+						<div
+							class="absolute left-0 right-0 cursor-pointer
+								{selectedId === s.id ? 'bg-accent/5 border-l-2 border-l-accent' : 'border-l-2 border-l-transparent hover:bg-bg-tertiary/50'}"
+							style="top: {topPx}px; height: {node.height}px"
+							role="button"
+							tabindex={-1}
+							onclick={() => onSelect?.(s)}
+							onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') onSelect?.(s); }}
+						>
+							<div class="overflow-hidden pr-3" style="padding-left: {(node.depth + (viewMode === 'tree' ? 1 : 0)) * INDENT_PX + 46}px; padding-top: 2px">
+								<p class="text-[11px] text-text-muted/80 leading-[18px] line-clamp-3">{node.text}</p>
+							</div>
+						</div>
+					{:else}
+						<!-- Span row -->
+						{@const status = spanStatus(s)}
+						{@const duration = spanDurationMs(s)}
+						{@const model = modelBadge(s)}
+						{@const tokens = tokenCount(s)}
+						{@const cost = costBadge(s)}
+						{@const bytes = bytesBadge(s)}
+						<button
+							class="absolute left-0 right-0 flex items-center text-xs transition-colors group
+								{selectedId === s.id ? 'bg-accent/10 border-l-2 border-l-accent' : 'hover:bg-bg-tertiary border-l-2 border-l-transparent'}"
+							style="top: {topPx}px; height: {node.height}px"
+							onclick={() => onSelect?.(s)}
+						>
+							<!-- Span info -->
+							<div class="flex items-center gap-1.5 flex-1 px-2 overflow-hidden min-w-0">
+								<!-- Indent + collapse -->
+								{#if viewMode === 'tree'}
+									<div class="flex items-center shrink-0" style="width: {node.depth * INDENT_PX + 20}px">
+										<div style="width: {node.depth * INDENT_PX}px"></div>
+										{#if node.hasChildren}
+											<!-- svelte-ignore a11y_click_events_have_key_events -->
+											<span
+												role="switch"
+												aria-checked={!collapsed.has(s.id)}
+												tabindex={-1}
+												class="w-5 h-5 flex items-center justify-center text-text-muted hover:text-text transition-colors cursor-pointer"
+												onclick={(e: MouseEvent) => { e.stopPropagation(); toggleCollapse(s.id); }}
+											>
+												{#if collapsed.has(s.id)}
+													<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M4 2l6 4-6 4V2z"/></svg>
+												{:else}
+													<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M2 4l4 6 4-6H2z"/></svg>
+												{/if}
+											</span>
+										{:else}
+											<div class="w-5"></div>
+										{/if}
+									</div>
+								{/if}
+
+								<!-- Status dot -->
+								<span class="w-2 h-2 rounded-full shrink-0 {statusDotClass(s)}"></span>
+
+								<!-- Icon -->
+								<div class="shrink-0">
+									<SpanKindIcon span={s} />
+								</div>
+
+								<!-- Name -->
+								<span class="text-text truncate text-xs font-medium">{s.name}</span>
+
+								<!-- Inline badges -->
+								{#if model}
+									<span class="shrink-0 text-purple-400 text-[10px] bg-purple-400/10 rounded px-1 py-px">{model}</span>
+								{/if}
+								{#if tokens}
+									<span class="shrink-0 text-text-muted text-[10px]">{tokens}tok</span>
+								{/if}
+								{#if cost}
+									<span class="shrink-0 text-success text-[10px]">{cost}</span>
+								{/if}
+								{#if bytes}
+									<span class="shrink-0 text-text-muted text-[10px]">{bytes}</span>
+								{/if}
+
+								<!-- Collapsed count -->
+								{#if node.hasChildren && collapsed.has(s.id)}
+									<span class="shrink-0 text-text-muted text-[10px] bg-bg-tertiary rounded px-1.5 py-px">+{node.descendantCount}</span>
+								{/if}
+							</div>
+
+							<!-- Duration / offset (right side) -->
+							<div class="shrink-0 flex flex-col items-end pr-3 text-right min-w-16">
+								<span class="text-xs text-text-secondary font-mono">{formatDuration(duration)}</span>
+								<span class="text-[10px] text-text-muted font-mono">{relativeOffset(s)}</span>
+							</div>
+						</button>
+					{/if}
+				{/each}
+			</div>
+		</div>
+	{/if}
 </div>

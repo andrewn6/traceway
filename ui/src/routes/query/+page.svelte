@@ -172,6 +172,11 @@
 						results.push({ label: f, insert: `${prefix}sort:${f}`, category: 'sort' });
 					}
 				}
+			} else if (key === 'text' || key === 'input' || key === 'output') {
+				// No value suggestions for free-text search — user types their own query
+				if (!valuePart) {
+					results.push({ label: `"search phrase"`, insert: `${prefix}${key}:`, category: 'search', description: 'Type a search phrase (use quotes for multi-word)' });
+				}
 			}
 		} else {
 			// Suggest key prefixes
@@ -186,6 +191,9 @@
 				{ label: 'duration:', insert: `${prefix}duration:`, category: 'filter', description: 'Duration filter (e.g. >500ms)' },
 				{ label: 'tokens:', insert: `${prefix}tokens:`, category: 'filter', description: 'Token count (e.g. >1000)' },
 				{ label: 'cost:', insert: `${prefix}cost:`, category: 'filter', description: 'Cost filter (e.g. >0.01)' },
+				{ label: 'text:', insert: `${prefix}text:`, category: 'filter', description: 'Search input & output content' },
+				{ label: 'input:', insert: `${prefix}input:`, category: 'filter', description: 'Search input content only' },
+				{ label: 'output:', insert: `${prefix}output:`, category: 'filter', description: 'Search output content only' },
 				{ label: 'name:', insert: `${prefix}name:`, category: 'filter', description: 'Search span name' },
 				{ label: 'trace:', insert: `${prefix}trace:`, category: 'filter', description: 'Filter by trace ID' },
 				{ label: 'sort:', insert: `${prefix}sort:`, category: 'filter', description: 'Sort results' },

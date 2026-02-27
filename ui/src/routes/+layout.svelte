@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getStats, getAuthConfig, getAuthMe, getProjects, createProject, deleteProject, switchProject, logout, subscribeEvents, getAllQueueItems, type Stats, type AuthConfig, type AuthMe, type Project } from '$lib/api';
+	import SearchModal from '$lib/components/SearchModal.svelte';
 	import { onMount } from 'svelte';
 
 	let { children } = $props();
@@ -28,6 +29,16 @@
 	// Review queue pending count for sidebar badge
 	let pendingReviewCount = $state(0);
 
+	// Cmd+K search modal
+	let searchOpen = $state(false);
+
+	function handleGlobalKeydown(e: KeyboardEvent) {
+		if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+			e.preventDefault();
+			searchOpen = !searchOpen;
+		}
+	}
+
 	// Auth pages don't need sidebar or auth check
 	const authPages = ['/login', '/signup', '/accept-invite', '/forgot-password', '/reset-password'];
 	const isAuthPage = $derived(authPages.includes(page.url.pathname));
@@ -35,6 +46,8 @@
 	const isAuthenticated = $derived(authMe !== null || authConfig.mode === 'local');
 
 	onMount(() => {
+		document.addEventListener('keydown', handleGlobalKeydown);
+
 		// Load auth config first, then conditionally check auth
 		getAuthConfig()
 			.then(async (c) => {
@@ -97,6 +110,7 @@
 		return () => {
 			unsub();
 			clearInterval(interval);
+			document.removeEventListener('keydown', handleGlobalKeydown);
 		};
 	});
 
@@ -507,4 +521,7 @@
 			</div>
 		</div>
 	{/if}
+
 {/if}
+
+<SearchModal bind:open={searchOpen} />

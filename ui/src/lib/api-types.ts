@@ -349,6 +349,12 @@ export interface components {
             tokens_min?: string | null;
             /** Minimum cost in dollars */
             cost_min?: string | null;
+            /** Full-text search across input and output content */
+            text_contains?: string | null;
+            /** Full-text search within input content only */
+            input_contains?: string | null;
+            /** Full-text search within output content only */
+            output_contains?: string | null;
             /** Sort field: started_at, duration, tokens, cost, name */
             sort_by?: string | null;
             /** Sort order: asc or desc */
