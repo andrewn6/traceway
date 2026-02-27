@@ -1,5 +1,5 @@
 <script lang="ts">
-	let { children, class: className = '', delay = 0, threshold = 0.15 } = $props();
+	let { children, class: className = '', delay = 0, threshold = 0.15, once = true } = $props();
 	let visible = $state(false);
 	let el: HTMLDivElement;
 
@@ -10,7 +10,9 @@
 				entries.forEach((entry) => {
 					if (entry.isIntersecting) {
 						setTimeout(() => { visible = true; }, delay);
-						observer.unobserve(entry.target);
+						if (once) observer.unobserve(entry.target);
+					} else if (!once) {
+						visible = false;
 					}
 				});
 			},
@@ -23,7 +25,7 @@
 
 <div
 	bind:this={el}
-	class="{className} transition-all duration-700 ease-out {visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}"
+	class="{className} transition-all duration-700 ease-out {visible ? 'opacity-100 translate-y-0 scale-100 blur-0' : 'opacity-0 translate-y-6 scale-[0.98] blur-[2px]'}"
 >
 	{@render children()}
 </div>
