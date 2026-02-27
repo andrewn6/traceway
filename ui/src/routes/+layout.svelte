@@ -309,7 +309,7 @@
 			</nav>
 
 			<!-- Status footer -->
-			<div class="px-3 py-3 border-t border-border space-y-2">
+			<div class="px-3 py-3 border-t border-border space-y-2.5">
 				{#if isCloudMode && projects.length > 0}
 					<!-- Project switcher -->
 					<div class="relative">
@@ -379,20 +379,27 @@
 						{/if}
 					</div>
 				{/if}
+
+				<!-- Stats -->
+				<div class="flex items-center gap-2 text-[11px] text-text-muted">
+					<span class="w-1.5 h-1.5 rounded-full {connected ? 'bg-success' : 'bg-text-muted'}"></span>
+					<span>{stats.trace_count} traces</span>
+					<span class="text-text-muted/40">/</span>
+					<span>{stats.span_count} spans</span>
+				</div>
+
 				{#if isCloudMode && authMe}
 					<button
 						onclick={handleLogout}
-						class="text-xs text-text-muted hover:text-text transition-colors cursor-pointer"
+						class="w-full px-2 py-1.5 rounded border border-border bg-bg text-[11px] text-text-muted hover:text-text hover:border-text-muted/40 transition-colors cursor-pointer text-left"
 					>
-						{authMe.org_id.slice(0, 8)} &middot; Sign out
+						Sign out
 					</button>
 				{/if}
-				<div class="flex items-center gap-1.5 text-xs text-text-muted">
-					<span class="w-1.5 h-1.5 rounded-full {connected ? 'bg-success' : 'bg-text-muted'}"></span>
-					{connected ? 'connected' : 'connecting'}
-				</div>
-				<div class="text-xs text-text-muted font-mono">
-					{stats.trace_count} traces &middot; {stats.span_count} spans
+
+				<!-- Branding -->
+				<div class="text-[10px] text-text-muted/40 tracking-wide">
+					TracewayAI &middot; 2026
 				</div>
 			</div>
 		</aside>

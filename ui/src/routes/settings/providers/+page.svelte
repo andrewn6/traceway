@@ -4,11 +4,8 @@
 		createProviderConnection,
 		updateProviderConnection,
 		deleteProviderConnection,
-		testProviderConnection,
-		listProviderModels,
 		getAuthConfig,
 		type ProviderConnectionInfo,
-		type ProviderModelInfo,
 		type AuthConfig
 	} from '$lib/api';
 	import { onMount } from 'svelte';
@@ -51,6 +48,46 @@
 			needsKey: true,
 		},
 		{
+			id: 'gemini',
+			name: 'Google Gemini',
+			icon: `<svg viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12c2.8 0 5.4-1 7.4-2.6l-3.7-2.8c-1.1.7-2.4 1.1-3.7 1.1-3.4 0-6.2-2.3-7.2-5.4h-.1c1-3.1 3.8-5.3 7.3-5.3 1.3 0 2.5.3 3.5 1l3.6-2.8C17.2 1 14.7 0 12 0z"/></svg>`,
+			color: '#4285f4',
+			baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+			defaultModel: 'gemini-2.0-flash',
+			keyPlaceholder: 'AIza...',
+			needsKey: true,
+		},
+		{
+			id: 'groq',
+			name: 'Groq',
+			icon: `<svg viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 3a7 7 0 1 1 0 14 7 7 0 0 1 0-14zm0 2.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z"/></svg>`,
+			color: '#f55036',
+			baseUrl: 'https://api.groq.com/openai/v1',
+			defaultModel: 'llama-3.3-70b-versatile',
+			keyPlaceholder: 'gsk_...',
+			needsKey: true,
+		},
+		{
+			id: 'mistral',
+			name: 'Mistral',
+			icon: `<svg viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5"><rect x="3" y="3" width="5" height="5" rx="0.5"/><rect x="3" y="10" width="5" height="5" rx="0.5"/><rect x="10" y="3" width="5" height="5" rx="0.5"/><rect x="10" y="10" width="5" height="5" rx="0.5"/><rect x="17" y="10" width="5" height="5" rx="0.5"/><rect x="3" y="17" width="5" height="5" rx="0.5"/><rect x="17" y="17" width="5" height="5" rx="0.5"/></svg>`,
+			color: '#ff7000',
+			baseUrl: 'https://api.mistral.ai/v1',
+			defaultModel: 'mistral-large-latest',
+			keyPlaceholder: 'api-key...',
+			needsKey: true,
+		},
+		{
+			id: 'azure',
+			name: 'Azure OpenAI',
+			icon: `<svg viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5"><path d="M13.05 4.24L6.56 18.05l2.11-.01 1.05-2.43h6.73l1.08 2.43 2.03.01L13.05 4.24zM10.57 13.75L13.15 7.4l2.51 6.35h-5.09zM5.88 18.34l-2.69 2.95h5.77l-3.08-2.95zM2 3.47l1.74 8.12 4.85-5.5L2 3.47z"/></svg>`,
+			color: '#0078d4',
+			baseUrl: '',
+			defaultModel: 'gpt-4o',
+			keyPlaceholder: 'Azure API key...',
+			needsKey: true,
+		},
+		{
 			id: 'ollama',
 			name: 'Ollama',
 			icon: `<svg viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>`,
@@ -83,48 +120,32 @@
 	let error = $state('');
 	let success = $state('');
 
-	// Add flow
-	let addingProvider: ProviderDef | null = $state(null);
+	// Modal state
+	let showModal = $state(false);
+	let selectedProviderId = $state('');
 	let formName = $state('');
 	let formBaseUrl = $state('');
 	let formApiKey = $state('');
 	let formDefaultModel = $state('');
 	let creating = $state(false);
 
-	// Test / models
-	let testing = $state(false);
-	let testOk = $state(false);
-	let testError = $state('');
-	let availableModels: ProviderModelInfo[] = $state([]);
-	let modelSearch = $state('');
-
 	// Edit state
 	let editingId: string | null = $state(null);
 	let editName = $state('');
-	let editProvider = $state('openai');
 	let editBaseUrl = $state('');
 	let editApiKey = $state('');
 	let editDefaultModel = $state('');
-	let editModels: ProviderModelInfo[] = $state([]);
-	let editModelSearch = $state('');
-	let editLoadingModels = $state(false);
 	let saving = $state(false);
 
 	// Delete confirm
 	let deletingId: string | null = $state(null);
 
-	// Derived: filtered model list for search
-	let filteredModels = $derived.by(() => {
-		const q = modelSearch.toLowerCase();
-		if (!q) return availableModels;
-		return availableModels.filter((m) => m.id.toLowerCase().includes(q));
-	});
+	// Derived
+	const selectedProvider = $derived(PROVIDERS.find(p => p.id === selectedProviderId));
 
-	let filteredEditModels = $derived.by(() => {
-		const q = editModelSearch.toLowerCase();
-		if (!q) return editModels;
-		return editModels.filter((m) => m.id.toLowerCase().includes(q));
-	});
+	const visibleProviders = $derived(
+		isLocalMode ? PROVIDERS : PROVIDERS.filter(p => p.id !== 'ollama')
+	);
 
 	// ─── Actions ────────────────────────────────────────────────────────
 
@@ -139,70 +160,46 @@
 		loading = false;
 	}
 
-	function startAdd(provider: ProviderDef) {
-		addingProvider = provider;
-		formName = provider.name;
-		formBaseUrl = provider.baseUrl;
+	function openAddModal() {
+		showModal = true;
+		selectedProviderId = '';
+		formName = '';
+		formBaseUrl = '';
 		formApiKey = '';
-		formDefaultModel = provider.defaultModel;
-		testOk = false;
-		testError = '';
-		availableModels = [];
-		modelSearch = '';
+		formDefaultModel = '';
 		error = '';
 	}
 
-	function cancelAdd() {
-		addingProvider = null;
-		availableModels = [];
-		testOk = false;
-		testError = '';
+	function closeModal() {
+		showModal = false;
+		selectedProviderId = '';
 	}
 
-	async function handleTest() {
-		if (!addingProvider) return;
-		testing = true;
-		testOk = false;
-		testError = '';
-		availableModels = [];
-
-		try {
-			const resp = await testProviderConnection({
-				provider: addingProvider.id,
-				base_url: formBaseUrl.trim() || undefined,
-				api_key: formApiKey.trim() || undefined,
-			});
-
-			if (resp.ok) {
-				testOk = true;
-				availableModels = resp.models;
-				// If the current default model isn't in the list and there are models, keep it
-				// (provider may have returned a subset or the model name may differ)
-			} else {
-				testError = resp.error || 'Connection failed';
-			}
-		} catch (e: any) {
-			testError = e?.message || 'Test request failed';
+	function selectProvider(id: string) {
+		selectedProviderId = id;
+		const prov = PROVIDERS.find(p => p.id === id);
+		if (prov) {
+			formName = prov.name;
+			formBaseUrl = prov.baseUrl;
+			formDefaultModel = prov.defaultModel;
 		}
-		testing = false;
 	}
 
 	async function handleCreate() {
-		if (!addingProvider || !formName.trim()) return;
+		if (!selectedProvider || !formName.trim()) return;
 		creating = true;
 		error = '';
 
 		try {
 			await createProviderConnection({
 				name: formName.trim(),
-				provider: addingProvider.id,
+				provider: selectedProvider.id,
 				base_url: formBaseUrl.trim() || undefined,
 				api_key: formApiKey.trim() || undefined,
 				default_model: formDefaultModel.trim() || undefined,
 			});
-			success = `${formName.trim()} connected`;
-			addingProvider = null;
-			availableModels = [];
+			success = `${formName.trim()} added`;
+			closeModal();
 			await loadConnections();
 			setTimeout(() => (success = ''), 3000);
 		} catch (e: any) {
@@ -214,27 +211,9 @@
 	function startEdit(conn: ProviderConnectionInfo) {
 		editingId = conn.id;
 		editName = conn.name;
-		editProvider = conn.provider;
 		editBaseUrl = conn.base_url ?? '';
 		editApiKey = '';
 		editDefaultModel = conn.default_model ?? '';
-		editModels = [];
-		editModelSearch = '';
-		// Fetch models for this saved connection
-		loadModelsForConnection(conn.id);
-	}
-
-	async function loadModelsForConnection(connId: string) {
-		editLoadingModels = true;
-		try {
-			const resp = await listProviderModels(connId);
-			if (resp.ok) {
-				editModels = resp.models;
-			}
-		} catch {
-			// Silently fail — they can still type a model name
-		}
-		editLoadingModels = false;
 	}
 
 	async function handleUpdate(e: Event) {
@@ -244,15 +223,15 @@
 		error = '';
 
 		try {
+			const conn = connections.find(c => c.id === editingId);
 			await updateProviderConnection(editingId, {
 				name: editName.trim(),
-				provider: editProvider,
+				provider: conn?.provider || 'openai',
 				base_url: editBaseUrl.trim() || undefined,
 				api_key: editApiKey.trim() || undefined,
 				default_model: editDefaultModel.trim() || undefined,
 			});
 			editingId = null;
-			editModels = [];
 			await loadConnections();
 		} catch (e: any) {
 			error = e?.message || 'Failed to update connection';
@@ -270,11 +249,6 @@
 		}
 	}
 
-	// Filter out Ollama in cloud mode (it's localhost-only)
-	const visibleProviders = $derived(
-		isLocalMode ? PROVIDERS : PROVIDERS.filter(p => p.id !== 'ollama')
-	);
-
 	onMount(() => {
 		loadConnections();
 		getAuthConfig().then(c => { authConfig = c; }).catch(() => {});
@@ -282,12 +256,18 @@
 </script>
 
 <div class="max-w-3xl space-y-6">
-	<div>
-		<h1 class="text-xl font-bold">Providers</h1>
-		<p class="text-text-muted text-sm mt-1">Connect LLM providers to use in evals and traces.</p>
+	<div class="flex items-center justify-between">
+		<div>
+			<h1 class="text-xl font-bold">Providers</h1>
+			<p class="text-text-muted text-sm mt-1">Connect LLM providers to use in evals and traces.</p>
+		</div>
+		<button
+			onclick={openAddModal}
+			class="px-4 py-2 text-sm bg-accent text-bg font-semibold rounded hover:bg-accent/80 transition-colors"
+		>+ Add Provider</button>
 	</div>
 
-	{#if error}
+	{#if error && !showModal}
 		<div class="bg-danger/10 border border-danger/30 rounded px-3 py-2 text-danger text-sm">{error}</div>
 	{/if}
 	{#if success}
@@ -297,7 +277,16 @@
 	<!-- Active connections -->
 	{#if loading}
 		<div class="text-text-muted text-sm py-8 text-center">Loading...</div>
-	{:else if connections.length > 0}
+	{:else if connections.length === 0 && !showModal}
+		<div class="text-center py-12 border border-dashed border-border rounded-lg">
+			<p class="text-text-muted text-sm mb-1">No providers connected yet.</p>
+			<p class="text-text-muted text-xs mb-4">Add a provider to run evals and use LLM features.</p>
+			<button
+				onclick={openAddModal}
+				class="px-4 py-2 text-sm bg-accent text-bg font-semibold rounded hover:bg-accent/80 transition-colors"
+			>+ Add Provider</button>
+		</div>
+	{:else}
 		<div class="space-y-2">
 			{#each connections as conn (conn.id)}
 				{@const prov = getProviderDef(conn.provider)}
@@ -319,32 +308,8 @@
 							</div>
 							<div>
 								<label for="edit-model" class="block text-xs text-text-secondary mb-1">Default Model</label>
-								{#if editModels.length > 0}
-									<div class="relative">
-										<input id="edit-model" type="text" bind:value={editDefaultModel} placeholder="Search models..."
-											onfocus={() => (editModelSearch = editDefaultModel)}
-											oninput={(e: Event) => { editDefaultModel = (e.target as HTMLInputElement).value; editModelSearch = editDefaultModel; }}
-											class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent font-mono" />
-										{#if editModelSearch && filteredEditModels.length > 0}
-											<div class="absolute z-10 top-full left-0 right-0 mt-1 bg-bg-tertiary border border-border rounded shadow-lg max-h-48 overflow-y-auto">
-												{#each filteredEditModels.slice(0, 30) as model}
-													<button type="button"
-														onclick={() => { editDefaultModel = model.id; editModelSearch = ''; }}
-														class="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-bg-secondary transition-colors {model.id === editDefaultModel ? 'bg-accent/10 text-accent' : ''}">
-														{model.id}
-													</button>
-												{/each}
-											</div>
-										{/if}
-									</div>
-								{:else if editLoadingModels}
-									<div class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text-muted">
-										Loading models...
-									</div>
-								{:else}
-									<input id="edit-model" type="text" bind:value={editDefaultModel} placeholder={prov.defaultModel}
-										class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent font-mono" />
-								{/if}
+								<input id="edit-model" type="text" bind:value={editDefaultModel} placeholder={prov.defaultModel}
+									class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent font-mono" />
 							</div>
 						</div>
 						<div>
@@ -362,7 +327,7 @@
 								class="px-3 py-1.5 text-xs bg-accent text-bg font-semibold rounded hover:bg-accent/80 disabled:opacity-50">
 								{saving ? 'Saving...' : 'Save'}
 							</button>
-							<button type="button" onclick={() => { editingId = null; editModels = []; }}
+							<button type="button" onclick={() => { editingId = null; }}
 								class="px-3 py-1.5 text-xs text-text-muted hover:text-text">Cancel</button>
 						</div>
 					</form>
@@ -409,131 +374,120 @@
 			{/each}
 		</div>
 	{/if}
+</div>
 
-	<!-- Add provider flow -->
-	{#if addingProvider}
-		{@const prov = addingProvider}
-		<div class="bg-bg-secondary border rounded-lg overflow-hidden" style="border-color: {prov.color}40">
+<!-- Add Provider Modal -->
+{#if showModal}
+	<!-- Backdrop -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onclick={(e) => { if (e.target === e.currentTarget) closeModal(); }}>
+		<div class="bg-bg-secondary border border-border rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
 			<!-- Header -->
-			<div class="px-4 py-3 flex items-center justify-between border-b" style="border-color: {prov.color}20; background: {prov.color}08">
-				<div class="flex items-center gap-3">
-					<div class="w-7 h-7 rounded flex items-center justify-center" style="color: {prov.color}">
-						{@html prov.icon}
-					</div>
-					<span class="text-sm font-semibold text-text">Add {prov.name}</span>
-				</div>
-				<button onclick={cancelAdd} class="text-xs text-text-muted hover:text-text transition-colors">Cancel</button>
+			<div class="px-5 py-4 border-b border-border flex items-center justify-between">
+				<h2 class="text-base font-semibold text-text">Add API key</h2>
+				<button onclick={closeModal} class="text-text-muted hover:text-text transition-colors">
+					<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+					</svg>
+				</button>
 			</div>
 
-			<div class="p-4 space-y-4">
-				<!-- Step 1: Credentials -->
-				<div class="space-y-3">
-					{#if prov.needsKey}
+			<div class="p-5 space-y-4">
+				{#if error}
+					<div class="bg-danger/10 border border-danger/30 rounded px-3 py-2 text-danger text-xs">{error}</div>
+				{/if}
+
+				<!-- Name -->
+				<div>
+					<label for="modal-name" class="block text-xs text-text-secondary mb-1.5">Name</label>
+					<input id="modal-name" type="text" bind:value={formName} placeholder="My OpenAI key"
+						class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent" />
+				</div>
+
+				<!-- Provider dropdown -->
+				<div>
+					<label for="modal-provider" class="block text-xs text-text-secondary mb-1.5">API key provider</label>
+					<div class="relative">
+						<select
+							id="modal-provider"
+							bind:value={selectedProviderId}
+							onchange={() => {
+								const prov = PROVIDERS.find(p => p.id === selectedProviderId);
+								if (prov) {
+									if (!formName.trim() || PROVIDERS.some(p => p.name === formName)) formName = prov.name;
+									formBaseUrl = prov.baseUrl;
+									formDefaultModel = prov.defaultModel;
+								}
+							}}
+							class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2.5 text-sm text-text focus:outline-none focus:border-accent appearance-none cursor-pointer"
+						>
+							<option value="" disabled>Select a provider...</option>
+							{#each visibleProviders as prov}
+								<option value={prov.id}>{prov.name}</option>
+							{/each}
+						</select>
+						<div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted">
+							<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+							</svg>
+						</div>
+					</div>
+
+					<!-- Provider icon preview -->
+					{#if selectedProvider}
+						<div class="flex items-center gap-2 mt-2 px-1">
+							<div class="w-5 h-5 flex items-center justify-center" style="color: {selectedProvider.color}">
+								{@html selectedProvider.icon}
+							</div>
+							<span class="text-xs text-text-secondary">{selectedProvider.name}</span>
+							{#if selectedProvider.defaultModel}
+								<span class="text-[10px] font-mono text-text-muted bg-bg-tertiary px-1.5 py-0.5 rounded">{selectedProvider.defaultModel}</span>
+							{/if}
+						</div>
+					{/if}
+				</div>
+
+				<!-- API Key -->
+				{#if selectedProvider}
+					{#if selectedProvider.needsKey}
 						<div>
-							<label for="add-key" class="block text-xs text-text-secondary mb-1">API Key</label>
-							<input id="add-key" type="password" bind:value={formApiKey} placeholder={prov.keyPlaceholder}
-								class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent font-mono" />
+							<label for="modal-key" class="block text-xs text-text-secondary mb-1.5">API Key</label>
+							<input id="modal-key" type="password" bind:value={formApiKey} placeholder={selectedProvider.keyPlaceholder}
+								class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent font-mono" />
 						</div>
 					{/if}
 
-					<div class="flex items-center gap-3">
-						<button onclick={handleTest} disabled={testing || (prov.needsKey && !formApiKey.trim())}
-							class="px-4 py-1.5 text-sm border rounded transition-colors disabled:opacity-40
-								{testOk ? 'border-success/50 text-success bg-success/5' : 'border-border text-text-secondary hover:border-accent hover:text-accent'}">
-							{#if testing}
-								Testing...
-							{:else if testOk}
-								Connected ({availableModels.length} models)
-							{:else}
-								Test Connection
-							{/if}
-						</button>
-
-						{#if testError}
-							<span class="text-xs text-danger">{testError}</span>
-						{/if}
+					<!-- Default model -->
+					<div>
+						<label for="modal-model" class="block text-xs text-text-secondary mb-1.5">Default Model</label>
+						<input id="modal-model" type="text" bind:value={formDefaultModel} placeholder={selectedProvider.defaultModel || 'e.g. gpt-4o'}
+							class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent font-mono" />
 					</div>
-				</div>
 
-				<!-- Step 2: Configuration (shown after test or immediately for no-key providers) -->
-				{#if testOk || !prov.needsKey}
-					<div class="border-t border-border/50 pt-4 space-y-3">
-						<div class="grid grid-cols-2 gap-3">
-							<div>
-								<label for="add-name" class="block text-xs text-text-secondary mb-1">Connection Name</label>
-								<input id="add-name" type="text" bind:value={formName}
-									class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text focus:outline-none focus:border-accent" />
-							</div>
-							<div>
-								<label for="add-model" class="block text-xs text-text-secondary mb-1">Default Model</label>
-								{#if availableModels.length > 0}
-									<!-- Searchable model dropdown -->
-									<div class="relative">
-										<input id="add-model" type="text" bind:value={formDefaultModel}
-											placeholder="Search {availableModels.length} models..."
-											onfocus={() => (modelSearch = formDefaultModel)}
-											oninput={(e: Event) => { formDefaultModel = (e.target as HTMLInputElement).value; modelSearch = formDefaultModel; }}
-											class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent font-mono" />
-										{#if modelSearch && filteredModels.length > 0 && modelSearch !== formDefaultModel}
-											<div class="absolute z-10 top-full left-0 right-0 mt-1 bg-bg-tertiary border border-border rounded shadow-lg max-h-48 overflow-y-auto">
-												{#each filteredModels.slice(0, 30) as model}
-													<button type="button"
-														onclick={() => { formDefaultModel = model.id; modelSearch = ''; }}
-														class="w-full text-left px-3 py-1.5 text-xs font-mono text-text hover:bg-bg-secondary transition-colors {model.id === formDefaultModel ? 'bg-accent/10 text-accent' : ''}">
-														{model.id}
-													</button>
-												{/each}
-											</div>
-										{/if}
-									</div>
-								{:else}
-									<input id="add-model" type="text" bind:value={formDefaultModel} placeholder={prov.defaultModel || 'e.g. gpt-4o'}
-										class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent font-mono" />
-								{/if}
-							</div>
+					<!-- Base URL (only for custom/azure or if changed) -->
+					{#if selectedProvider.id === 'custom' || selectedProvider.id === 'azure' || !selectedProvider.baseUrl}
+						<div>
+							<label for="modal-url" class="block text-xs text-text-secondary mb-1.5">Base URL</label>
+							<input id="modal-url" type="text" bind:value={formBaseUrl} placeholder={selectedProvider.baseUrl || 'https://api.example.com/v1'}
+								class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-xs text-text placeholder:text-text-muted focus:outline-none focus:border-accent font-mono" />
 						</div>
-
-						<!-- Advanced: base URL (collapsed by default for known providers) -->
-						{#if prov.id === 'custom' || formBaseUrl !== prov.baseUrl}
-							<div>
-								<label for="add-url" class="block text-xs text-text-secondary mb-1">Base URL</label>
-								<input id="add-url" type="text" bind:value={formBaseUrl} placeholder={prov.baseUrl || 'https://api.example.com/v1'}
-									class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-xs text-text placeholder:text-text-muted focus:outline-none focus:border-accent font-mono" />
-							</div>
-						{/if}
-
-						<div class="flex items-center gap-2 pt-1">
-							<button onclick={handleCreate} disabled={creating || !formName.trim()}
-								class="px-4 py-1.5 text-sm bg-accent text-bg font-semibold rounded hover:bg-accent/80 disabled:opacity-50 transition-colors">
-								{creating ? 'Saving...' : 'Save Connection'}
-							</button>
-						</div>
-					</div>
+					{/if}
 				{/if}
 			</div>
-		</div>
-	{:else}
-		<!-- Provider catalog cards -->
-		<div>
-			<h2 class="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Add a Provider</h2>
-			<div class="grid grid-cols-2 gap-3">
-				{#each visibleProviders as prov}
-					<button
-						onclick={() => startAdd(prov)}
-						class="bg-bg-secondary border border-border rounded-lg p-4 text-left hover:border-opacity-60 transition-all group"
-					>
-						<div class="flex items-center gap-3">
-							<div class="w-9 h-9 rounded-lg flex items-center justify-center transition-colors" style="background: {prov.color}12; color: {prov.color}">
-								{@html prov.icon}
-							</div>
-							<div>
-								<div class="text-sm font-medium text-text">{prov.name}</div>
-								<div class="text-[11px] text-text-muted">{prov.needsKey ? 'API key required' : 'No key required'}</div>
-							</div>
-						</div>
-					</button>
-				{/each}
+
+			<!-- Footer -->
+			<div class="px-5 py-4 border-t border-border flex items-center justify-end gap-3">
+				<button onclick={closeModal}
+					class="px-4 py-2 text-sm text-text-secondary hover:text-text transition-colors">Cancel</button>
+				<button
+					onclick={handleCreate}
+					disabled={creating || !selectedProvider || !formName.trim() || (selectedProvider?.needsKey && !formApiKey.trim())}
+					class="px-5 py-2 text-sm bg-accent text-bg font-semibold rounded-lg hover:bg-accent/80 disabled:opacity-40 transition-colors"
+				>
+					{creating ? 'Saving...' : 'Save'}
+				</button>
 			</div>
 		</div>
-	{/if}
-</div>
+	</div>
+{/if}
