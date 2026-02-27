@@ -57,6 +57,9 @@ impl ResendSender {
     pub fn from_env() -> Result<Self, EmailError> {
         let api_key = std::env::var("RESEND_API_KEY")
             .map_err(|_| EmailError::NotConfigured)?;
+        if api_key.trim().is_empty() {
+            return Err(EmailError::NotConfigured);
+        }
         let from = std::env::var("RESEND_FROM")
             .unwrap_or_else(|_| "Traceway <noreply@traceway.ai>".to_string());
         Ok(Self::new(api_key, from))
