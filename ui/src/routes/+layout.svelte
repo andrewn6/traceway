@@ -2,7 +2,7 @@
 	import '../app.css';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { getStats, getAuthConfig, getAuthMe, getProjects, switchProject, logout, subscribeEvents, type Stats, type AuthConfig, type AuthMe, type Project } from '$lib/api';
+	import { getStats, getAuthConfig, getAuthMe, getProjects, createProject, deleteProject, switchProject, logout, subscribeEvents, type Stats, type AuthConfig, type AuthMe, type Project } from '$lib/api';
 	import { onMount } from 'svelte';
 
 	let { children } = $props();
@@ -17,6 +17,10 @@
 	// Project state
 	let projects: Project[] = $state([]);
 	let projectDropdownOpen = $state(false);
+	let showNewProjectModal = $state(false);
+	let newProjectName = $state('');
+	let newProjectError = $state('');
+	let newProjectLoading = $state(false);
 	let currentProject = $derived(
 		projects.find(p => p.id === authMe?.project_id) || projects[0] || null
 	);
@@ -97,13 +101,53 @@
 	async function handleSwitchProject(projectId: string) {
 		try {
 			await switchProject(projectId);
-			// Refresh auth state (new JWT has new project_id)
 			authMe = await getAuthMe();
 			projectDropdownOpen = false;
-			// Reload data by navigating to the same page
 			location.reload();
 		} catch (e) {
 			console.error('Failed to switch project', e);
+		}
+	}
+
+	function openNewProjectModal() {
+		projectDropdownOpen = false;
+		newProjectName = '';
+		newProjectError = '';
+		newProjectLoading = false;
+		showNewProjectModal = true;
+	}
+
+	async function handleCreateProject() {
+		const name = newProjectName.trim();
+		if (!name) {
+			newProjectError = 'Project name is required';
+			return;
+		}
+		newProjectLoading = true;
+		newProjectError = '';
+		try {
+			const project = await createProject(name);
+			projects = await getProjects();
+			showNewProjectModal = false;
+			// Auto-switch to the new project
+			await handleSwitchProject(project.id);
+		} catch (e: any) {
+			newProjectError = e?.message || 'Failed to create project';
+			newProjectLoading = false;
+		}
+	}
+
+	async function handleDeleteProject(projectId: string, projectName: string) {
+		if (!confirm(`Delete project "${projectName}"? This will permanently remove all its data.`)) return;
+		try {
+			await deleteProject(projectId);
+			projects = await getProjects();
+			// If we just deleted the active project, switch to default
+			if (authMe?.project_id === projectId && projects.length > 0) {
+				await handleSwitchProject(projects[0].id);
+			}
+		} catch (e: any) {
+			alert(e?.message || 'Failed to delete project');
 		}
 	}
 
@@ -291,19 +335,46 @@
 								onkeydown={(e) => e.key === 'Escape' && (projectDropdownOpen = false)}
 							></div>
 							<!-- Dropdown opens upward from footer -->
-							<div class="absolute left-0 right-0 bottom-full mb-1 z-50 bg-bg-secondary border border-border rounded-md shadow-lg py-1 max-h-60 overflow-y-auto">
-								{#each projects as project}
+							<div class="absolute left-0 right-0 bottom-full mb-1 z-50 bg-bg-secondary border border-border rounded-md shadow-lg overflow-hidden">
+								<div class="py-1 max-h-48 overflow-y-auto">
+									{#each projects as project}
+										<div class="group flex items-center">
+											<button
+												onclick={() => handleSwitchProject(project.id)}
+												class="flex-1 flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-left transition-colors cursor-pointer
+													{project.id === currentProject?.id
+														? 'text-text bg-bg-tertiary'
+														: 'text-text-secondary hover:text-text hover:bg-bg-tertiary/50'}"
+											>
+												<span class="w-2 h-2 rounded-sm shrink-0 {project.id === currentProject?.id ? 'bg-accent' : 'bg-text-muted/30'}"></span>
+												<span class="truncate">{project.name}</span>
+											</button>
+											{#if project.slug !== 'default'}
+												<button
+													onclick={(e) => { e.stopPropagation(); handleDeleteProject(project.id, project.name); }}
+													class="px-2 py-1.5 text-text-muted/0 group-hover:text-text-muted hover:!text-error transition-colors cursor-pointer"
+													title="Delete project"
+												>
+													<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+														<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+													</svg>
+												</button>
+											{/if}
+										</div>
+									{/each}
+								</div>
+								<!-- New project button -->
+								<div class="border-t border-border">
 									<button
-										onclick={() => handleSwitchProject(project.id)}
-										class="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-left transition-colors cursor-pointer
-											{project.id === currentProject?.id
-												? 'text-text bg-bg-tertiary'
-												: 'text-text-secondary hover:text-text hover:bg-bg-tertiary/50'}"
+										onclick={openNewProjectModal}
+										class="w-full flex items-center gap-1.5 px-2.5 py-2 text-xs text-text-muted hover:text-text hover:bg-bg-tertiary/50 transition-colors cursor-pointer"
 									>
-										<span class="w-2 h-2 rounded-sm shrink-0 {project.id === currentProject?.id ? 'bg-accent' : 'bg-text-muted/30'}"></span>
-										<span class="truncate">{project.name}</span>
+										<svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+											<path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+										</svg>
+										New Project
 									</button>
-								{/each}
+								</div>
 							</div>
 						{/if}
 					</div>
@@ -333,4 +404,60 @@
 			</div>
 		</main>
 	</div>
+
+	<!-- New Project Modal -->
+	{#if showNewProjectModal}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="fixed inset-0 z-[100] flex items-center justify-center bg-black/50"
+			onclick={(e) => { if (e.target === e.currentTarget) showNewProjectModal = false; }}
+			onkeydown={(e) => { if (e.key === 'Escape') showNewProjectModal = false; }}
+		>
+			<div class="bg-bg-secondary border border-border rounded-lg shadow-xl w-full max-w-sm mx-4">
+				<div class="px-5 pt-5 pb-4">
+					<h3 class="text-sm font-semibold text-text">New Project</h3>
+					<p class="text-xs text-text-muted mt-1">Projects share your org's usage quota.</p>
+				</div>
+
+				<form
+					onsubmit={(e) => { e.preventDefault(); handleCreateProject(); }}
+					class="px-5 pb-5 space-y-3"
+				>
+					<div>
+						<label for="project-name" class="block text-xs font-medium text-text-secondary mb-1">Project name</label>
+						<input
+							id="project-name"
+							type="text"
+							bind:value={newProjectName}
+							placeholder="e.g. Production, Staging"
+							class="w-full px-3 py-2 text-sm bg-bg border border-border rounded-md text-text placeholder:text-text-muted/50 focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+							disabled={newProjectLoading}
+						/>
+					</div>
+
+					{#if newProjectError}
+						<p class="text-xs text-error">{newProjectError}</p>
+					{/if}
+
+					<div class="flex justify-end gap-2 pt-1">
+						<button
+							type="button"
+							onclick={() => showNewProjectModal = false}
+							class="px-3 py-1.5 text-xs text-text-secondary hover:text-text transition-colors cursor-pointer"
+							disabled={newProjectLoading}
+						>
+							Cancel
+						</button>
+						<button
+							type="submit"
+							class="px-3 py-1.5 text-xs bg-accent text-white rounded-md hover:bg-accent/90 transition-colors disabled:opacity-50 cursor-pointer"
+							disabled={newProjectLoading || !newProjectName.trim()}
+						>
+							{newProjectLoading ? 'Creating...' : 'Create Project'}
+						</button>
+					</div>
+				</form>
+			</div>
+		</div>
+	{/if}
 {/if}
