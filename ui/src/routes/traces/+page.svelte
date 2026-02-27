@@ -88,7 +88,9 @@ with client.trace("summarize-doc") as t:
 				getTraces(),
 				getSpans()
 			]);
-			traces = traceResult.items;
+			traces = traceResult.items.sort(
+				(a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
+			);
 
 			// Group spans by trace_id client-side
 			const allSpans: Span[] = spanResult.items;
