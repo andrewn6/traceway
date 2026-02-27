@@ -240,6 +240,33 @@ impl AppState {
             (StatusCode::INTERNAL_SERVER_ERROR, e)
         })
     }
+
+    /// Count spans across ALL projects in an org (for usage enforcement).
+    /// Loads all project stores that exist for this org, counts spans matching the filter in each.
+    pub async fn count_org_spans(&self, org_id: auth::OrgId, filter: &SpanFilter) -> u64 {
+        // In cloud mode, we need to check all project stores for this org.
+        // First get all projects from the auth store, then load their stores.
+        if let Some(auth_store) = self.auth_store.as_ref() {
+            if let Ok(projects) = auth_store.list_projects_for_org(org_id).await {
+                let mut total = 0u64;
+                for project in projects {
+                    if let Ok(store) = self.org_stores.get_for_project(org_id, project.id).await {
+                        let r = store.read().await;
+                        total += r.filter_spans(filter).len() as u64;
+                    }
+                }
+                return total;
+            }
+        }
+        // Fallback: just count in the cached stores (local mode or no auth store)
+        let stores = self.org_stores.cached_stores_for_org(org_id).await;
+        let mut total = 0u64;
+        for store in stores {
+            let r = store.read().await;
+            total += r.filter_spans(filter).len() as u64;
+        }
+        total
+    }
 }
 
 pub use org_store::SharedStore;
@@ -843,14 +870,15 @@ async fn create_span(
 ) -> Result<(StatusCode, Json<CreatedSpan>), (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::TracesWrite)?;
 
-    // Enforce span limit per plan (cloud mode only)
+    // Enforce span limit per plan (cloud mode only).
+    // Usage is counted across ALL projects in the org — creating a new project
+    // does not bypass the org-level plan limit.
     if !ctx.is_local_mode {
         if let Some(auth_store) = state.auth_store.as_ref() {
             if let Ok(Some(org)) = auth_store.get_org(ctx.org_id).await {
                 let limit = org.plan.spans_per_month();
-                let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
-                let r = store.read().await;
                 // Count spans created since the start of the current calendar month
+                // across ALL projects in the org
                 let now = Utc::now();
                 let month_start = now.date_naive()
                     .with_day(1)
@@ -862,8 +890,7 @@ async fn create_span(
                     since: Some(month_start_dt),
                     ..Default::default()
                 };
-                let current_count = r.filter_spans(&monthly_filter).len() as u64;
-                drop(r);
+                let current_count = state.count_org_spans(ctx.org_id, &monthly_filter).await;
                 if current_count >= limit {
                     return Err((StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({
                         "error": format!("Monthly span limit reached ({limit}). Upgrade your plan at /settings/billing.")

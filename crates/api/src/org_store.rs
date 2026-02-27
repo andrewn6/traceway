@@ -141,4 +141,19 @@ impl OrgStoreManager {
             }
         }
     }
+
+    /// List all currently-cached stores for a specific org (across all its projects).
+    /// Returns empty vec if no stores are cached for this org, or in single mode.
+    pub async fn cached_stores_for_org(&self, org_id: OrgId) -> Vec<SharedStore> {
+        match &self.mode {
+            StoreMode::Single(store) => vec![store.clone()],
+            StoreMode::PerProject { stores, .. } => {
+                let cache = stores.read().await;
+                cache.iter()
+                    .filter(|((oid, _), _)| *oid == org_id)
+                    .map(|(_, s)| s.clone())
+                    .collect()
+            }
+        }
+    }
 }
