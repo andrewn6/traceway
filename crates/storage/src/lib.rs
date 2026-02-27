@@ -198,6 +198,37 @@ impl SpanStore {
                     }
                 }
 
+                // Full-text search: case-insensitive contains on serialized input/output
+                if let Some(ref text) = filter.text_contains {
+                    let needle = text.to_lowercase();
+                    let in_input = span.input()
+                        .map(|v| serde_json::to_string(v).unwrap_or_default().to_lowercase().contains(&needle))
+                        .unwrap_or(false);
+                    let in_output = span.output()
+                        .map(|v| serde_json::to_string(v).unwrap_or_default().to_lowercase().contains(&needle))
+                        .unwrap_or(false);
+                    let in_name = span.name().to_lowercase().contains(&needle);
+                    if !in_input && !in_output && !in_name {
+                        return false;
+                    }
+                }
+
+                if let Some(ref text) = filter.input_contains {
+                    let needle = text.to_lowercase();
+                    let found = span.input()
+                        .map(|v| serde_json::to_string(v).unwrap_or_default().to_lowercase().contains(&needle))
+                        .unwrap_or(false);
+                    if !found { return false; }
+                }
+
+                if let Some(ref text) = filter.output_contains {
+                    let needle = text.to_lowercase();
+                    let found = span.output()
+                        .map(|v| serde_json::to_string(v).unwrap_or_default().to_lowercase().contains(&needle))
+                        .unwrap_or(false);
+                    if !found { return false; }
+                }
+
                 true
             })
             .collect();

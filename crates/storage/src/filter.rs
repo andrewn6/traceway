@@ -1,14 +1,14 @@
-use chrono::{DateTime, Utc};
-use trace::{DatasetId, TraceId};
 use base64::{engine::general_purpose::STANDARD, Engine};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use trace::{DatasetId, TraceId};
 
 use crate::StorageError;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SortOrder {
     Asc,
-    Desc
+    Desc,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -19,7 +19,9 @@ pub struct Pagination {
 }
 
 impl Default for SortOrder {
-    fn default() -> Self { SortOrder::Desc }
+    fn default() -> Self {
+        SortOrder::Desc
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +70,12 @@ pub struct SpanFilter {
     pub tokens_min: Option<u64>,
     /// Minimum cost in dollars (inclusive)
     pub cost_min: Option<f64>,
+    /// Full-text search across span input and output content (case-insensitive)
+    pub text_contains: Option<String>,
+    /// Full-text search within span input content only (case-insensitive)
+    pub input_contains: Option<String>,
+    /// Full-text search within span output content only (case-insensitive)
+    pub output_contains: Option<String>,
     /// Field to sort by: "started_at", "duration", "tokens", "cost", "name"
     pub sort_by: Option<String>,
     /// Sort direction: "asc" or "desc" (default: "desc")
