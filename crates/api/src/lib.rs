@@ -230,6 +230,9 @@ pub struct AppState {
     pub password_reset_email_rate_limiter: Arc<rate_limit::RateLimiter>,
     /// Rate limiter for password reset requests (per IP).
     pub password_reset_ip_rate_limiter: Arc<rate_limit::RateLimiter>,
+    /// Cached monthly span counts per org. Avoids O(projects * spans) scan on every create_span.
+    /// Format: OrgId -> (count, computed_at). Entries older than 60s are recomputed.
+    span_count_cache: Arc<std::sync::Mutex<std::collections::HashMap<auth::OrgId, (u64, Instant)>>>,
 }
 
 impl AppState {
@@ -249,8 +252,37 @@ impl AppState {
     }
 
     /// Count spans across ALL projects in an org (for usage enforcement).
-    /// Loads all project stores that exist for this org, counts spans matching the filter in each.
-    pub async fn count_org_spans(&self, org_id: auth::OrgId, filter: &SpanFilter) -> u64 {
+    ///
+    /// Uses a 60-second cache to avoid scanning all spans on every `create_span`.
+    /// The cache is per-org and stores (count, computed_at). On cache miss or expiry,
+    /// a full scan is performed and the result cached.
+    pub async fn count_org_spans_cached(&self, org_id: auth::OrgId, filter: &SpanFilter) -> u64 {
+        const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
+        // Check cache first
+        {
+            let cache = self.span_count_cache.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(&(count, computed_at)) = cache.get(&org_id) {
+                if computed_at.elapsed() < CACHE_TTL {
+                    return count;
+                }
+            }
+        }
+
+        // Cache miss or expired — do the full scan
+        let count = self.count_org_spans_uncached(org_id, filter).await;
+
+        // Store in cache
+        {
+            let mut cache = self.span_count_cache.lock().unwrap_or_else(|e| e.into_inner());
+            cache.insert(org_id, (count, Instant::now()));
+        }
+
+        count
+    }
+
+    /// Uncached full scan of spans across all projects in an org.
+    async fn count_org_spans_uncached(&self, org_id: auth::OrgId, filter: &SpanFilter) -> u64 {
         // In cloud mode, we need to check all project stores for this org.
         // First get all projects from the auth store, then load their stores.
         if let Some(auth_store) = self.auth_store.as_ref() {
@@ -374,6 +406,12 @@ pub struct SpanQueryParams {
     pub tokens_min: Option<u64>,
     /// Minimum cost in dollars (e.g. 0.01)
     pub cost_min: Option<f64>,
+    /// Full-text search across input and output content (case-insensitive)
+    pub text_contains: Option<String>,
+    /// Full-text search within input content only (case-insensitive)
+    pub input_contains: Option<String>,
+    /// Full-text search within output content only (case-insensitive)
+    pub output_contains: Option<String>,
     /// Sort field: "started_at", "duration", "tokens", "cost", "name"
     pub sort_by: Option<String>,
     /// Sort order: "asc" or "desc" (default: "desc")
@@ -828,6 +866,9 @@ async fn list_spans(
         duration_max: params.duration_max,
         tokens_min: params.tokens_min,
         cost_min: params.cost_min,
+        text_contains: params.text_contains,
+        input_contains: params.input_contains,
+        output_contains: params.output_contains,
         sort_by: params.sort_by,
         sort_order: params.sort_order,
     };
@@ -902,7 +943,7 @@ async fn create_span(
                     since: Some(month_start_dt),
                     ..Default::default()
                 };
-                let current_count = state.count_org_spans(ctx.org_id, &monthly_filter).await;
+                let current_count = state.count_org_spans_cached(ctx.org_id, &monthly_filter).await;
                 if current_count >= limit {
                     return Err((StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({
                         "error": format!("Monthly span limit reached ({limit}). Upgrade your plan at /settings/billing.")
@@ -3578,6 +3619,7 @@ fn build_router(
         login_rate_limiter,
         password_reset_email_rate_limiter,
         password_reset_ip_rate_limiter,
+        span_count_cache: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     // In cloud mode with a separate frontend origin, we need explicit origins
