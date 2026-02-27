@@ -24,6 +24,7 @@ class LlmCallKind:
     provider: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cost: float | None = None
     input_preview: str | None = None
     output_preview: str | None = None
 
@@ -48,6 +49,7 @@ def span_kind_from_dict(d: dict[str, Any]) -> SpanKind | None:
         return LlmCallKind(
             model=d["model"], provider=d.get("provider"),
             input_tokens=d.get("input_tokens"), output_tokens=d.get("output_tokens"),
+            cost=d.get("cost"),
             input_preview=d.get("input_preview"), output_preview=d.get("output_preview"),
         )
     if t == "custom":
@@ -71,6 +73,8 @@ def span_kind_to_dict(kind: SpanKind) -> dict[str, Any]:
             d["input_tokens"] = kind.input_tokens
         if kind.output_tokens is not None:
             d["output_tokens"] = kind.output_tokens
+        if kind.cost is not None:
+            d["cost"] = kind.cost
         return d
     if isinstance(kind, CustomKind):
         return {"type": "custom", "kind": kind.kind, "attributes": kind.attributes}

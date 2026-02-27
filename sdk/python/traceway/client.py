@@ -117,6 +117,7 @@ class TraceContext:
             if isinstance(ctx._output, dict):
                 input_tokens = ctx._output.get("input_tokens")
                 output_tokens = ctx._output.get("output_tokens")
+                cost = ctx._output.get("cost")
                 actual_model = ctx._output.get("model", model)
                 if input_tokens is not None or output_tokens is not None:
                     ctx._kind = LlmCallKind(
@@ -124,6 +125,7 @@ class TraceContext:
                         provider=provider,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
+                        cost=cost,  # pass through if user provided; backend estimates if None
                     )
 
 
