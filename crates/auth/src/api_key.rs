@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{OrgId, ProjectId, Scope};
@@ -13,8 +14,8 @@ pub struct ApiKey {
     pub org_id: OrgId,
     pub project_id: ProjectId,
     pub name: String,
-    pub key_prefix: String, // First 8 chars for identification: "tw_sk"
-    pub key_hash: String,   // bcrypt hash of full key
+    pub key_prefix: String, // First 16 chars for identification: "tw_sk_XXXXXXXXXX"
+    pub key_hash: String,   // SHA-256 hex hash of full key (or legacy bcrypt hash)
     pub scopes: Vec<Scope>,
     pub created_at: DateTime<Utc>,
     pub last_used_at: Option<DateTime<Utc>>,
@@ -31,6 +32,8 @@ pub struct GeneratedApiKey {
 
 const KEY_PREFIX: &str = "tw_sk_";
 const KEY_BYTES: usize = 24;
+/// SHA-256 hashes are 64-char hex strings; bcrypt hashes start with "$2b$"
+const BCRYPT_PREFIX: &str = "$2";
 
 /// Generate a new API key
 /// Returns the full key (show to user once) and metadata for storage
@@ -56,7 +59,7 @@ pub fn generate_api_key(
     let full_key = format!("{}{}", KEY_PREFIX, random_part);
     let key_prefix = full_key[..16].to_string(); // "tw_sk_" + first few chars
 
-    // Hash for storage
+    // Hash for storage — SHA-256 (sub-microsecond vs ~75ms for bcrypt)
     let key_hash = hash_api_key(&full_key);
 
     let now = Utc::now();
@@ -83,14 +86,40 @@ pub fn generate_api_key(
     (generated, stored)
 }
 
-/// Hash an API key for storage
+/// Hash an API key for storage using SHA-256.
+///
+/// API keys are high-entropy random strings (192 bits of randomness),
+/// so a fast hash is perfectly secure — no need for bcrypt's slow KDF.
 pub fn hash_api_key(key: &str) -> String {
-    bcrypt::hash(key, bcrypt::DEFAULT_COST).expect("bcrypt hash failed")
+    format!("{:x}", Sha256::digest(key.as_bytes()))
 }
 
-/// Verify an API key against its stored hash
+/// Verify an API key against its stored hash.
+///
+/// Supports both new SHA-256 hashes (64-char hex) and legacy bcrypt hashes
+/// (starting with "$2b$") for backward compatibility with keys created before
+/// the migration.
 pub fn verify_api_key(key: &str, hash: &str) -> bool {
-    bcrypt::verify(key, hash).unwrap_or(false)
+    if hash.starts_with(BCRYPT_PREFIX) {
+        // Legacy bcrypt hash — slow path (~75ms), only for old keys
+        bcrypt::verify(key, hash).unwrap_or(false)
+    } else {
+        // SHA-256 hash — fast path (<1us)
+        let computed = format!("{:x}", Sha256::digest(key.as_bytes()));
+        constant_time_eq(computed.as_bytes(), hash.as_bytes())
+    }
+}
+
+/// Constant-time comparison to prevent timing attacks.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 /// Check if a string looks like an API key
@@ -129,8 +158,31 @@ mod tests {
     }
 
     #[test]
+    fn test_sha256_hash_format() {
+        let hash = hash_api_key("tw_sk_test123");
+        // SHA-256 produces a 64-char hex string
+        assert_eq!(hash.len(), 64);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_legacy_bcrypt_compat() {
+        let key = "tw_sk_test_legacy_key_value";
+        let bcrypt_hash = bcrypt::hash(key, 4).unwrap(); // low cost for test speed
+        assert!(verify_api_key(key, &bcrypt_hash));
+        assert!(!verify_api_key("wrong", &bcrypt_hash));
+    }
+
+    #[test]
     fn test_extract_prefix() {
         let key = "tw_sk_abc123xyz789abcdef";
         assert_eq!(extract_prefix(key), Some("tw_sk_abc123xyz7"));
+    }
+
+    #[test]
+    fn test_constant_time_eq() {
+        assert!(constant_time_eq(b"hello", b"hello"));
+        assert!(!constant_time_eq(b"hello", b"world"));
+        assert!(!constant_time_eq(b"hello", b"hell"));
     }
 }
