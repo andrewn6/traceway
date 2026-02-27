@@ -266,7 +266,7 @@
 
 			<!-- Status footer -->
 			<div class="px-3 py-3 border-t border-border space-y-2">
-				{#if isCloudMode && projects.length > 1}
+				{#if isCloudMode && projects.length > 0}
 					<!-- Project switcher -->
 					<div class="relative">
 						<button
@@ -283,12 +283,14 @@
 						</button>
 
 						{#if projectDropdownOpen}
+							<!-- Backdrop -->
 							<!-- svelte-ignore a11y_no_static_element_interactions -->
 							<div
 								class="fixed inset-0 z-40"
 								onclick={() => projectDropdownOpen = false}
 								onkeydown={(e) => e.key === 'Escape' && (projectDropdownOpen = false)}
 							></div>
+							<!-- Dropdown opens upward from footer -->
 							<div class="absolute left-0 right-0 bottom-full mb-1 z-50 bg-bg-secondary border border-border rounded-md shadow-lg py-1 max-h-60 overflow-y-auto">
 								{#each projects as project}
 									<button
@@ -314,6 +316,10 @@
 						{authMe.org_id.slice(0, 8)} &middot; Sign out
 					</button>
 				{/if}
+				<div class="flex items-center gap-1.5 text-xs text-text-muted">
+					<span class="w-1.5 h-1.5 rounded-full {connected ? 'bg-success' : 'bg-text-muted'}"></span>
+					{connected ? 'connected' : 'connecting'}
+				</div>
 				<div class="text-xs text-text-muted font-mono">
 					{stats.trace_count} traces &middot; {stats.span_count} spans
 				</div>

@@ -28,11 +28,8 @@
 		type Datapoint,
 		type DatapointKind,
 		type QueueItem,
-		type QueueList,
 		type EvalRun,
-		type EvalRunListResponse,
 		type CaptureRule,
-		type CaptureRuleListResponse,
 		type EvalConfig,
 		type ScoringStrategy,
 		type CaptureFilters,
@@ -48,7 +45,7 @@
 
 	let dataset: DatasetWithCount | null = $state(null);
 	let datapoints: Datapoint[] = $state([]);
-	let queue: QueueList = $state({ items: [], counts: { pending: 0, claimed: 0, completed: 0 } });
+	let queueItems: QueueItem[] = $state([]);
 	let evalRuns: EvalRun[] = $state([]);
 	let captureRules: CaptureRule[] = $state([]);
 	let loading = $state(true);
@@ -172,7 +169,7 @@
 			evalFormConnectionId = '';
 			connectionModels = [];
 			const resp = await listEvalRuns(datasetId);
-			evalRuns = resp.runs;
+			evalRuns = resp.items;
 		} catch {
 			// error
 		}
@@ -257,7 +254,7 @@
 			ruleFormMinTokens = '';
 			ruleFormSampleRate = 1.0;
 			const resp = await listCaptureRules(datasetId);
-			captureRules = resp.rules;
+			captureRules = resp.items;
 		} catch {
 			// error
 		}
@@ -303,20 +300,20 @@
 	// ── Load ───────────────────────────────────────────────────────────
 	async function load() {
 		try {
-			const [ds, dp, q, er, cr, pc] = await Promise.all([
-				getDataset(datasetId),
-				getDatapoints(datasetId),
-				getQueue(datasetId),
-				listEvalRuns(datasetId).catch(() => ({ runs: [] as EvalRun[], count: 0 })),
-				listCaptureRules(datasetId).catch(() => ({ rules: [] as CaptureRule[], count: 0 })),
-				listProviderConnections().catch(() => ({ connections: [] as ProviderConnectionInfo[], count: 0 }))
-			]);
-			dataset = ds;
-			datapoints = dp.datapoints;
-			queue = q;
-			evalRuns = er.runs;
-			captureRules = cr.rules;
-			providerConnections = pc.connections;
+		const [ds, dp, q, er, cr, pc] = await Promise.all([
+			getDataset(datasetId),
+			getDatapoints(datasetId),
+			getQueue(datasetId),
+			listEvalRuns(datasetId).catch(() => ({ items: [] as EvalRun[], total: null, next_cursor: null, has_more: false })),
+			listCaptureRules(datasetId).catch(() => ({ items: [] as CaptureRule[], total: null, next_cursor: null, has_more: false })),
+			listProviderConnections().catch(() => ({ connections: [] as ProviderConnectionInfo[], count: 0 }))
+		]);
+		dataset = ds;
+		datapoints = dp.items;
+		queueItems = q.items;
+		evalRuns = er.items;
+		captureRules = cr.items;
+		providerConnections = pc.connections;
 		} catch {
 			// not found
 		}
@@ -330,14 +327,11 @@
 			if (event.type === 'datapoint_created' && event.datapoint.dataset_id === datasetId) {
 				datapoints = [...datapoints, event.datapoint];
 				if (dataset) dataset = { ...dataset, datapoint_count: dataset.datapoint_count + 1 };
-			} else if (event.type === 'queue_item_updated' && event.item.dataset_id === datasetId) {
-				queue = {
-					...queue,
-					items: queue.items.some((i) => i.id === event.item.id)
-						? queue.items.map((i) => (i.id === event.item.id ? event.item : i))
-						: [...queue.items, event.item]
-				};
-				getQueue(datasetId).then((q) => (queue = q)).catch(() => {});
+		} else if (event.type === 'queue_item_updated' && event.item.dataset_id === datasetId) {
+			queueItems = queueItems.some((i) => i.id === event.item.id)
+				? queueItems.map((i) => (i.id === event.item.id ? event.item : i))
+				: [...queueItems, event.item];
+			getQueue(datasetId).then((q) => (queueItems = q.items)).catch(() => {});
 			} else if (event.type === 'dataset_deleted' && event.dataset_id === datasetId) {
 				dataset = null;
 				datapoints = [];
@@ -349,7 +343,7 @@
 				evalRuns = evalRuns.map((r) => r.id === event.run.id ? event.run : r);
 			} else if (event.type === 'capture_rule_fired' && event.datapoint.dataset_id === datasetId) {
 				// Refresh rules to update captured_count
-				listCaptureRules(datasetId).then((resp) => (captureRules = resp.rules)).catch(() => {});
+				listCaptureRules(datasetId).then((resp) => (captureRules = resp.items)).catch(() => {});
 			}
 		});
 
@@ -389,7 +383,7 @@
 			await enqueueDatapoints(datasetId, [...selected]);
 			selected = new Set();
 			const q = await getQueue(datasetId);
-			queue = q;
+			queueItems = q.items;
 			activeTab = 'queue';
 		} catch {
 			// error
@@ -404,8 +398,8 @@
 		try {
 			importResult = await importFile(datasetId, file);
 			// Reload datapoints
-			const dp = await getDatapoints(datasetId);
-			datapoints = dp.datapoints;
+		const dp = await getDatapoints(datasetId);
+		datapoints = dp.items;
 			const ds = await getDataset(datasetId);
 			dataset = ds;
 		} catch (e) {
@@ -432,11 +426,8 @@
 	async function handleClaim(itemId: string) {
 		try {
 			const updated = await claimQueueItem(itemId, claimName);
-			queue = {
-				...queue,
-				items: queue.items.map((i) => (i.id === updated.id ? updated : i))
-			};
-			getQueue(datasetId).then((q) => (queue = q)).catch(() => {});
+			queueItems = queueItems.map((i) => (i.id === updated.id ? updated : i));
+			getQueue(datasetId).then((q) => (queueItems = q.items)).catch(() => {});
 		} catch {
 			// error
 		}
@@ -452,12 +443,9 @@
 		try {
 			const data = editedJson.trim() ? JSON.parse(editedJson) : undefined;
 			const updated = await submitQueueItem(editingItem.id, data);
-			queue = {
-				...queue,
-				items: queue.items.map((i) => (i.id === updated.id ? updated : i))
-			};
+			queueItems = queueItems.map((i) => (i.id === updated.id ? updated : i));
 			editingItem = null;
-			getQueue(datasetId).then((q) => (queue = q)).catch(() => {});
+			getQueue(datasetId).then((q) => (queueItems = q.items)).catch(() => {});
 		} catch {
 			// error
 		}
@@ -502,9 +490,9 @@
 	}
 
 	const queueItemsByStatus = $derived.by(() => {
-		const pending = queue.items.filter((i) => i.status === 'pending');
-		const claimed = queue.items.filter((i) => i.status === 'claimed');
-		const completed = queue.items.filter((i) => i.status === 'completed');
+		const pending = queueItems.filter((i) => i.status === 'pending');
+		const claimed = queueItems.filter((i) => i.status === 'claimed');
+		const completed = queueItems.filter((i) => i.status === 'completed');
 		return { pending, claimed, completed };
 	});
 
@@ -598,8 +586,8 @@
 				onclick={() => (activeTab = 'queue')}
 			>
 				Queue
-				{#if queue.counts.pending > 0}
-					<span class="ml-1 px-1.5 py-0.5 text-xs bg-warning/20 text-warning rounded">{queue.counts.pending}</span>
+				{#if queueItemsByStatus.pending.length > 0}
+					<span class="ml-1 px-1.5 py-0.5 text-xs bg-warning/20 text-warning rounded">{queueItemsByStatus.pending.length}</span>
 				{/if}
 			</button>
 			<button
@@ -790,15 +778,15 @@
 			<div class="space-y-4">
 				<!-- Counts -->
 				<div class="flex items-center gap-3 text-sm">
-					<span class="px-2 py-0.5 rounded text-xs border bg-warning/20 text-warning border-warning/30">
-						{queue.counts.pending} pending
-					</span>
-					<span class="px-2 py-0.5 rounded text-xs border bg-accent/20 text-accent border-accent/30">
-						{queue.counts.claimed} claimed
-					</span>
-					<span class="px-2 py-0.5 rounded text-xs border bg-success/20 text-success border-success/30">
-						{queue.counts.completed} completed
-					</span>
+				<span class="px-2 py-0.5 rounded text-xs border bg-warning/20 text-warning border-warning/30">
+					{queueItemsByStatus.pending.length} pending
+				</span>
+				<span class="px-2 py-0.5 rounded text-xs border bg-accent/20 text-accent border-accent/30">
+					{queueItemsByStatus.claimed.length} claimed
+				</span>
+				<span class="px-2 py-0.5 rounded text-xs border bg-success/20 text-success border-success/30">
+					{queueItemsByStatus.completed.length} completed
+				</span>
 					<div class="flex-1"></div>
 					<label for="claim-name" class="text-xs text-text-muted">Claim as:</label>
 					<input
@@ -907,7 +895,7 @@
 					</div>
 				{/if}
 
-				{#if queue.items.length === 0}
+				{#if queueItems.length === 0}
 					<div class="text-text-muted text-sm text-center py-8">
 						Queue is empty. Select datapoints and click "Enqueue" to start annotation.
 					</div>

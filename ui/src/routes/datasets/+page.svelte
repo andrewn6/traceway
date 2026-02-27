@@ -20,8 +20,8 @@
 
 	async function load() {
 		try {
-			const result = await getDatasets();
-			datasets = result.datasets;
+		const result = await getDatasets();
+		datasets = result.datasets;
 		} catch {
 			// API not available
 		}

@@ -395,7 +395,7 @@ export const updateDataset = (id: string, body: { name?: string; description?: s
 export const deleteDataset = (id: string) => del<unknown>(`/datasets/${id}`);
 
 export const getDatapoints = (datasetId: string) =>
-	get<DatapointList>(`/datasets/${datasetId}/datapoints`);
+	get<Page<Datapoint>>(`/datasets/${datasetId}/datapoints`);
 export const createDatapoint = (datasetId: string, kind: DatapointKind) =>
 	post<Datapoint>(`/datasets/${datasetId}/datapoints`, { kind });
 export const deleteDatapoint = (datasetId: string, dpId: string) =>
@@ -411,7 +411,7 @@ export function importFile(datasetId: string, file: File): Promise<{ imported: n
 }
 
 export const getQueue = (datasetId: string) =>
-	get<QueueList>(`/datasets/${datasetId}/queue`);
+	get<Page<QueueItem>>(`/datasets/${datasetId}/queue`);
 export const enqueueDatapoints = (datasetId: string, datapointIds: string[]) =>
 	post<unknown>(`/datasets/${datasetId}/queue`, { datapoint_ids: datapointIds });
 export const claimQueueItem = (itemId: string, claimedBy: string) =>
@@ -422,7 +422,7 @@ export const submitQueueItem = (itemId: string, editedData?: unknown) =>
 // ─── Eval Run Endpoints ──────────────────────────────────────────────
 
 export const listEvalRuns = (datasetId: string) =>
-	get<EvalRunListResponse>(`/datasets/${datasetId}/eval`);
+	get<Page<EvalRun>>(`/datasets/${datasetId}/eval`);
 
 export const createEvalRun = (datasetId: string, body: { name?: string; config: EvalConfig; scoring?: ScoringStrategy }) =>
 	post<EvalRun>(`/datasets/${datasetId}/eval`, body);
@@ -442,7 +442,7 @@ export const getComparison = (datasetId: string, runIds: string[]) =>
 // ─── Capture Rule Endpoints ──────────────────────────────────────────
 
 export const listCaptureRules = (datasetId: string) =>
-	get<CaptureRuleListResponse>(`/datasets/${datasetId}/rules`);
+	get<Page<CaptureRule>>(`/datasets/${datasetId}/rules`);
 
 export const createCaptureRule = (datasetId: string, body: { name: string; filters: CaptureFilters; sample_rate?: number }) =>
 	post<CaptureRule>(`/datasets/${datasetId}/rules`, body);
