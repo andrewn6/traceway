@@ -11,3 +11,4 @@ prds/
 build/
 
 __pycache__
+.superdesign

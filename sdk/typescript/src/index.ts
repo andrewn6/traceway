@@ -29,3 +29,8 @@ export type {
   QueueList,
 } from './types.js';
 export { statusKind, statusError } from './types.js';
+
+// Vercel AI SDK integration (requires @opentelemetry/* peer deps)
+export { initTraceway, TracewayExporter } from './ai/index.js';
+export type { InitTracewayConfig, InitTracewayResult } from './ai/index.js';
+export type { TracewayExporterConfig } from './ai/exporter.js';

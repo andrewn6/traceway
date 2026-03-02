@@ -1,7 +1,7 @@
 {
   "name": "traceway",
   "version": "0.1.0",
-  "description": "TypeScript SDK for Traceway daemon",
+  "description": "TypeScript SDK for Traceway — LLM observability",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,6 +9,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./ai": {
+      "import": "./dist/ai/index.js",
+      "types": "./dist/ai/index.d.ts"
     }
   },
   "files": [
@@ -19,7 +23,22 @@
     "dev": "tsc --watch"
   },
   "license": "MIT",
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.0.0",
+    "@opentelemetry/sdk-trace-base": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentelemetry/api": {
+      "optional": true
+    },
+    "@opentelemetry/sdk-trace-base": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-trace-base": "^1.30.0",
+    "@types/node": "^22.0.0",
     "typescript": "^5.9.3"
   }
 }
