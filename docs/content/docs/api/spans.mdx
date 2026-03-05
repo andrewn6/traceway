@@ -1,0 +1,130 @@
+---
+title: Spans
+description: REST API endpoints for managing spans.
+---
+
+## Create a span
+
+```
+POST /api/spans
+```
+
+```json
+{
+  "trace_id": "01J...",
+  "parent_id": null,
+  "name": "gpt-4o",
+  "kind": {
+    "type": "llm_call",
+    "model": "gpt-4o",
+    "provider": "openai"
+  },
+  "input": [
+    { "role": "user", "content": "What is 2+2?" }
+  ]
+}
+```
+
+`trace_id` and `name` are required. `kind` determines the span type. `parent_id` nests this span under another.
+
+Response:
+
+```json
+{
+  "id": "01J...",
+  "trace_id": "01J..."
+}
+```
+
+The span starts in `running` status.
+
+## Complete a span
+
+```
+POST /api/spans/:span_id/complete
+```
+
+```json
+{
+  "output": {
+    "text": "4",
+    "finish_reason": "stop"
+  },
+  "kind": {
+    "type": "llm_call",
+    "model": "gpt-4o",
+    "provider": "openai",
+    "input_tokens": 12,
+    "output_tokens": 1
+  }
+}
+```
+
+Both fields are optional. Passing `kind` updates the span kind (useful to fill in token counts after the LLM responds). Returns `200` on success. Returns `409` if the span is already completed or failed.
+
+## Fail a span
+
+```
+POST /api/spans/:span_id/fail
+```
+
+```json
+{
+  "error": "API returned HTTP 500"
+}
+```
+
+Marks the span as failed with the given error message. Returns `200`.
+
+## List spans
+
+```
+GET /api/spans
+```
+
+Supports extensive filtering via query parameters:
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `trace_id` | string | Filter to a specific trace |
+| `kind` | string | Filter by kind type (`llm_call`, `custom`, etc.) |
+| `model` | string | Filter by model name |
+| `provider` | string | Filter by provider |
+| `status` | string | `running`, `completed`, or `failed` |
+| `since` | ISO 8601 | Spans started after this time |
+| `until` | ISO 8601 | Spans started before this time |
+| `name_contains` | string | Substring match on span name |
+| `text_contains` | string | Full-text search across input and output |
+| `input_contains` | string | Search within input only |
+| `output_contains` | string | Search within output only |
+| `duration_min` | number | Minimum duration in ms |
+| `duration_max` | number | Maximum duration in ms |
+| `tokens_min` | number | Minimum total tokens |
+| `cost_min` | number | Minimum cost in dollars |
+| `sort_by` | string | `started_at`, `duration`, `tokens`, `cost`, `name` |
+| `sort_order` | string | `asc` or `desc` (default: `desc`) |
+| `limit` | number | Max results (default 50, max 1000) |
+| `cursor` | string | Pagination cursor |
+
+Example:
+
+```bash
+curl "https://api.traceway.ai/api/spans?model=gpt-4o&status=completed&sort_by=cost&sort_order=desc&limit=10" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+## Get a span
+
+```
+GET /api/spans/:span_id
+```
+
+Returns the full span object.
+
+## Delete a span
+
+```
+DELETE /api/spans/:span_id
+```
+
+Returns `200` on success, `404` if not found.

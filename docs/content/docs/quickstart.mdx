@@ -1,0 +1,141 @@
+---
+title: Quickstart
+description: Get traces flowing in under 5 minutes.
+---
+
+## Option A: Traceway Cloud
+
+1. Sign up at [platform.traceway.ai/signup](https://platform.traceway.ai/signup).
+2. Create a project. Copy the API key (starts with `tw_sk_`).
+3. Install the SDK:
+
+```bash
+npm install traceway
+```
+
+4. Record your first trace:
+
+```ts
+import { Traceway } from 'traceway';
+
+const tw = new Traceway({
+  url: 'https://api.traceway.ai',
+  apiKey: process.env.TRACEWAY_API_KEY,
+});
+
+await tw.trace('my-first-trace', async (ctx) => {
+  await ctx.span('step-1', async (span) => {
+    // your code here
+    span.setOutput({ result: 'done' });
+  });
+});
+```
+
+5. Open the dashboard. Your trace is there.
+
+## Option B: Run locally
+
+No account needed. Everything stays on your machine.
+
+```bash
+# Download and run the Traceway binary
+cargo install traceway
+traceway serve
+```
+
+This starts the API on `http://localhost:3000` with SQLite storage. No auth required in local mode.
+
+```ts
+import { Traceway } from 'traceway';
+
+const tw = new Traceway(); // defaults to http://localhost:3000, no key needed
+
+await tw.trace('local-test', async (ctx) => {
+  await ctx.llmCall('gpt-4o-mini', {
+    model: 'gpt-4o-mini',
+    input: [{ role: 'user', content: 'Say hello' }],
+  }, async (span) => {
+    const result = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: 'Say hello' }],
+      }),
+    }).then(r => r.json());
+
+    span.setOutput(result.choices[0].message);
+    return result;
+  });
+});
+```
+
+## Using the Vercel AI SDK
+
+If you use the [Vercel AI SDK](https://sdk.vercel.ai), Traceway instruments it automatically. No manual span creation needed.
+
+```bash
+npm install traceway @opentelemetry/api @opentelemetry/sdk-trace-base
+```
+
+```ts
+import { initTraceway } from 'traceway/ai';
+import { generateText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+const { tracer, shutdown } = initTraceway({
+  url: 'https://api.traceway.ai',
+  apiKey: process.env.TRACEWAY_API_KEY,
+});
+
+const result = await generateText({
+  model: openai('gpt-4o-mini'),
+  prompt: 'What is the capital of France?',
+  experimental_telemetry: { isEnabled: true, tracer },
+});
+
+console.log(result.text);
+
+// Flush pending spans before your process exits
+await shutdown();
+```
+
+Each `generateText` / `streamText` call becomes a trace. Each model invocation becomes a span with token counts and latency. Tool calls become child spans.
+
+See the full [Vercel AI SDK guide](/docs/sdk/vercel-ai) for details.
+
+## Using the proxy
+
+The proxy is an alternative to SDK instrumentation. Point your OpenAI (or any OpenAI-compatible) base URL at Traceway, and it records spans automatically.
+
+```bash
+traceway serve  # starts API on :3000, proxy on :3001
+```
+
+```ts
+import OpenAI from 'openai';
+
+const client = new OpenAI({
+  baseURL: 'http://localhost:3001/v1',  // proxy
+  apiKey: process.env.OPENAI_API_KEY,   // passed through to OpenAI
+});
+
+const completion = await client.chat.completions.create({
+  model: 'gpt-4o',
+  messages: [{ role: 'user', content: 'Hello' }],
+});
+```
+
+The proxy forwards the request to OpenAI, records the full request/response as a span, and returns the response unchanged. No code changes needed beyond swapping the base URL.
+
+## Environment variables
+
+The SDK reads these from the environment if not passed explicitly:
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `TRACEWAY_URL` | API base URL | `http://localhost:3000` |
+| `TRACEWAY_API_KEY` | API key (required for cloud) | none |

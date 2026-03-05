@@ -1,0 +1,216 @@
+---
+title: Type Reference
+description: TypeScript types exported by the traceway package.
+---
+
+All types are exported from the main `traceway` entry point:
+
+```ts
+import type { Span, Trace, SpanKind, Dataset, Datapoint } from 'traceway';
+```
+
+## Core types
+
+### `Span`
+
+```ts
+interface Span {
+  id: string;
+  trace_id: string;
+  parent_id: string | null;
+  name: string;
+  kind?: SpanKind;
+  input?: unknown;
+  output?: unknown;
+  started_at: string;          // ISO 8601
+  ended_at?: string | null;
+  status: SpanStatus;
+  metadata: SpanMetadata;
+}
+```
+
+### `SpanKind`
+
+A discriminated union on `type`:
+
+```ts
+type SpanKind =
+  | {
+      type: 'llm_call';
+      model: string;
+      provider?: string;
+      input_tokens?: number;
+      output_tokens?: number;
+      cost?: number;
+    }
+  | {
+      type: 'custom';
+      kind: string;
+      attributes: Record<string, unknown>;
+    }
+  | { type: 'fs_read'; path: string; bytes_read: number }
+  | { type: 'fs_write'; path: string; bytes_written: number };
+```
+
+### `SpanStatus`
+
+```ts
+type SpanStatus =
+  | 'running'
+  | 'completed'
+  | { failed: { error: string } };
+```
+
+Helper functions:
+
+```ts
+import { statusKind, statusError } from 'traceway';
+
+statusKind('completed');                         // 'completed'
+statusKind({ failed: { error: 'timeout' } });   // 'failed'
+statusError({ failed: { error: 'timeout' } });  // 'timeout'
+statusError('completed');                        // null
+```
+
+### `Trace`
+
+```ts
+interface Trace {
+  id: string;
+  name?: string;
+  tags?: string[];
+  started_at?: string;
+  ended_at?: string | null;
+}
+```
+
+## Dataset types
+
+### `Dataset`
+
+```ts
+interface Dataset {
+  id: string;
+  name: string;
+  description?: string | null;
+  datapoint_count: number;
+  created_at: string;
+  updated_at: string;
+}
+```
+
+### `Datapoint`
+
+```ts
+interface Datapoint {
+  id: string;
+  dataset_id: string;
+  kind: DatapointKind;
+  source: DatapointSource;
+  source_span_id?: string | null;
+  created_at: string;
+}
+```
+
+### `DatapointKind`
+
+```ts
+type DatapointKind =
+  | {
+      LlmConversation: {
+        messages: Message[];
+        expected?: string;
+        metadata?: Record<string, unknown>;
+      };
+    }
+  | {
+      Generic: {
+        input: unknown;
+        expected_output?: unknown;
+        actual_output?: unknown;
+        score?: number;
+        metadata?: Record<string, unknown>;
+      };
+    };
+```
+
+### `DatapointSource`
+
+```ts
+type DatapointSource = 'manual' | 'span_export' | 'file_upload';
+```
+
+### `Message`
+
+```ts
+interface Message {
+  role: string;
+  content: string;
+}
+```
+
+## Queue types
+
+### `QueueItem`
+
+```ts
+interface QueueItem {
+  id: string;
+  dataset_id: string;
+  datapoint_id: string;
+  status: 'pending' | 'claimed' | 'completed';
+  claimed_by?: string | null;
+  claimed_at?: string | null;
+  original_data?: unknown;
+  edited_data?: unknown;
+  created_at: string;
+}
+```
+
+## Collection types
+
+```ts
+interface TraceList   { traces: Trace[];         count: number; }
+interface SpanList    { spans: Span[];           count: number; }
+interface DatasetList { datasets: Dataset[];     count: number; }
+interface DatapointList { datapoints: Datapoint[]; count: number; }
+interface QueueList   { items: QueueItem[];      count: number; }
+interface Stats       { trace_count: number;     span_count: number; }
+```
+
+## Event types
+
+```ts
+type SpanEvent =
+  | { type: 'span_created'; span: Span }
+  | { type: 'span_completed'; span: Span }
+  | { type: 'span_failed'; span: Span }
+  | { type: 'span_deleted'; span_id: string }
+  | { type: 'trace_created'; trace: Trace }
+  | { type: 'trace_deleted'; trace_id: string }
+  | { type: 'dataset_created'; dataset: Dataset }
+  | { type: 'dataset_deleted'; dataset_id: string }
+  | { type: 'datapoint_created'; datapoint: Datapoint }
+  | { type: 'queue_item_updated'; item: QueueItem }
+  | { type: 'cleared' };
+```
+
+## Filter types
+
+### `SpanFilter`
+
+Used with `tw.getSpans(filter)`:
+
+```ts
+interface SpanFilter {
+  model?: string;
+  status?: string;
+  since?: string;        // ISO 8601
+  until?: string;
+  name_contains?: string;
+  kind?: string;
+  path?: string;
+  trace_id?: string;
+  provider?: string;
+}
+```

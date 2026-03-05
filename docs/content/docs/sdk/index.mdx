@@ -1,0 +1,71 @@
+---
+title: TypeScript SDK
+description: Install and configure the Traceway TypeScript SDK.
+---
+
+The `traceway` npm package gives you two ways to send data to Traceway:
+
+1. **`Traceway` client** — programmatic control over traces and spans. You decide when spans start and end.
+2. **`traceway/ai` subpath** — automatic instrumentation for the Vercel AI SDK via OpenTelemetry. No manual span management.
+
+## Install
+
+```bash
+npm install traceway
+```
+
+If you're using the Vercel AI SDK integration, also install the OTel peer deps:
+
+```bash
+npm install traceway @opentelemetry/api @opentelemetry/sdk-trace-base
+```
+
+## Configuration
+
+Both the client and the AI integration read from the same sources, in this order:
+
+1. Constructor options
+2. Environment variables
+
+| Option | Env var | Default |
+|--------|---------|---------|
+| `url` | `TRACEWAY_URL` | `http://localhost:3000` |
+| `apiKey` | `TRACEWAY_API_KEY` | none |
+
+```ts
+import { Traceway } from 'traceway';
+
+// Explicit config
+const tw = new Traceway({
+  url: 'https://api.traceway.ai',
+  apiKey: 'tw_sk_...',
+});
+
+// Or just set TRACEWAY_URL and TRACEWAY_API_KEY in your env
+const tw2 = new Traceway();
+```
+
+## Package exports
+
+The package has two entry points:
+
+| Import path | What you get |
+|-------------|-------------|
+| `traceway` | `Traceway` client class, all types |
+| `traceway/ai` | `initTraceway()`, `TracewayExporter`, mapper utilities |
+
+```ts
+// Main client
+import { Traceway } from 'traceway';
+
+// Vercel AI SDK integration
+import { initTraceway } from 'traceway/ai';
+```
+
+## Next steps
+
+<Cards>
+  <Card title="Client reference" href="/docs/sdk/client" />
+  <Card title="Vercel AI SDK" href="/docs/sdk/vercel-ai" />
+  <Card title="Type reference" href="/docs/sdk/types" />
+</Cards>

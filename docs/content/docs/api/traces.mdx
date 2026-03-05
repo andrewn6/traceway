@@ -1,0 +1,96 @@
+---
+title: Traces
+description: REST API endpoints for managing traces.
+---
+
+## Create a trace
+
+```
+POST /api/traces
+```
+
+```json
+{
+  "name": "answer-question",
+  "tags": ["production", "gpt-4o"]
+}
+```
+
+Both fields are optional. Response:
+
+```json
+{
+  "id": "01J...",
+  "name": "answer-question",
+  "tags": ["production", "gpt-4o"],
+  "started_at": "2024-06-15T12:00:00Z",
+  "ended_at": null
+}
+```
+
+## List traces
+
+```
+GET /api/traces
+```
+
+Query params: `limit` (default 50), `cursor` (opaque string from previous response).
+
+```json
+{
+  "traces": [
+    {
+      "id": "01J...",
+      "name": "answer-question",
+      "tags": ["production"],
+      "started_at": "2024-06-15T12:00:00Z",
+      "ended_at": "2024-06-15T12:00:02Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+## Get a trace
+
+```
+GET /api/traces/:trace_id
+```
+
+Returns all spans belonging to this trace:
+
+```json
+{
+  "spans": [ ... ],
+  "count": 3
+}
+```
+
+## Delete a trace
+
+```
+DELETE /api/traces/:trace_id
+```
+
+Deletes the trace and all its spans. Returns:
+
+```json
+{
+  "trace_id": "01J...",
+  "spans_deleted": 3
+}
+```
+
+## Clear all traces
+
+```
+DELETE /api/traces
+```
+
+Deletes everything. Returns:
+
+```json
+{
+  "message": "All traces cleared"
+}
+```

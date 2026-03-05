@@ -1,0 +1,186 @@
+---
+title: Vercel AI SDK
+description: Automatic instrumentation for the Vercel AI SDK. No manual span creation.
+---
+
+If you use the [Vercel AI SDK](https://sdk.vercel.ai), Traceway can instrument it automatically. Each `generateText` or `streamText` call becomes a trace. Each model invocation becomes a span with token counts, latency, and cost. Tool calls become child spans.
+
+This works through OpenTelemetry. The AI SDK emits OTel spans, and Traceway's exporter maps them to the Traceway API.
+
+## Install
+
+```bash
+npm install traceway ai @ai-sdk/openai @opentelemetry/api @opentelemetry/sdk-trace-base
+```
+
+The OpenTelemetry packages are peer dependencies. They're only loaded when you import `traceway/ai`.
+
+## Basic usage
+
+```ts
+import { initTraceway } from 'traceway/ai';
+import { generateText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+const { tracer, shutdown } = initTraceway({
+  url: 'https://api.traceway.ai',
+  apiKey: process.env.TRACEWAY_API_KEY,
+});
+
+const result = await generateText({
+  model: openai('gpt-4o-mini'),
+  prompt: 'What is the capital of France?',
+  experimental_telemetry: { isEnabled: true, tracer },
+});
+
+console.log(result.text); // "Paris"
+
+// Always call shutdown before your process exits
+await shutdown();
+```
+
+## What gets recorded
+
+For each AI SDK call, Traceway creates:
+
+| AI SDK operation | Traceway object | Details |
+|-----------------|----------------|---------|
+| `generateText()` / `streamText()` | Trace | Named after `functionId` or the operation type |
+| `doGenerate` / `doStream` (internal) | Span (`llm_call`) | Model, provider, input/output tokens, prompt messages, response text |
+| Tool call | Span (child of LLM span) | Tool name, arguments, result |
+
+Example trace structure for a `generateText` call with a tool:
+
+```
+weather-lookup (trace)
+  └── llm:gpt-4o-mini (llm_call span)
+        ├── input: [{ role: "user", content: "What's the weather?" }]
+        ├── output: { text: "It's 62F and foggy", tool_calls: [...] }
+        ├── input_tokens: 24
+        ├── output_tokens: 38
+        └── tool:getWeather (child span)
+              ├── input: { city: "San Francisco" }
+              └── output: { temperature: 62, condition: "foggy" }
+```
+
+## Naming traces
+
+Use `functionId` to give your traces readable names:
+
+```ts
+const result = await generateText({
+  model: openai('gpt-4o'),
+  prompt: 'Summarize this document...',
+  experimental_telemetry: {
+    isEnabled: true,
+    tracer,
+    functionId: 'summarize-document',  // becomes the trace name
+  },
+});
+```
+
+Without `functionId`, the trace is named `ai.generateText` or `ai.streamText`.
+
+## Streaming
+
+Works the same way. `streamText` produces the same trace/span structure:
+
+```ts
+import { streamText } from 'ai';
+
+const result = streamText({
+  model: openai('gpt-4o'),
+  prompt: 'Write a short story',
+  experimental_telemetry: { isEnabled: true, tracer },
+});
+
+for await (const chunk of result.textStream) {
+  process.stdout.write(chunk);
+}
+```
+
+The span includes streaming-specific metrics when available: `ms_to_first_chunk`, `ms_to_finish`, and `avg_completion_tokens_per_sec`.
+
+## Tool calls
+
+Tool calls are recorded automatically. No extra config needed.
+
+```ts
+const result = await generateText({
+  model: openai('gpt-4o'),
+  prompt: 'What is the weather in Tokyo?',
+  tools: {
+    getWeather: {
+      description: 'Get current weather for a city',
+      parameters: z.object({ city: z.string() }),
+      execute: async ({ city }) => {
+        return { city, temp: 72, condition: 'sunny' };
+      },
+    },
+  },
+  maxSteps: 3,
+  experimental_telemetry: { isEnabled: true, tracer },
+});
+```
+
+Each tool invocation becomes a child span with the tool name, input arguments, and return value.
+
+## Custom metadata
+
+Pass metadata through `experimental_telemetry.metadata`. It's recorded as span attributes:
+
+```ts
+experimental_telemetry: {
+  isEnabled: true,
+  tracer,
+  metadata: {
+    userId: 'user_123',
+    requestId: 'req_abc',
+    environment: 'production',
+  },
+},
+```
+
+## Configuration
+
+### `initTraceway(config?)`
+
+Returns `{ tracer, provider, flush, shutdown }`.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `url` | `string` | `TRACEWAY_URL` or `http://localhost:3000` | Traceway API URL |
+| `apiKey` | `string` | `TRACEWAY_API_KEY` | API key |
+| `debug` | `boolean` | `false` | Log export activity to console |
+| `serviceName` | `string` | `'traceway'` | OTel tracer name |
+| `maxExportBatchSize` | `number` | `64` | Spans per export batch |
+| `scheduledDelayMillis` | `number` | `1000` | Max ms before batch flush |
+
+### Returned object
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `tracer` | `Tracer` | Pass to `experimental_telemetry.tracer` |
+| `provider` | `BasicTracerProvider` | The OTel provider |
+| `flush()` | `() => Promise<void>` | Force-flush pending spans |
+| `shutdown()` | `() => Promise<void>` | Flush and clean up. Call before process exit. |
+
+## Using without `initTraceway`
+
+If you have an existing OTel setup, you can use `TracewayExporter` directly:
+
+```ts
+import { TracewayExporter } from 'traceway/ai';
+import { BasicTracerProvider, BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
+
+const exporter = new TracewayExporter({
+  url: 'https://api.traceway.ai',
+  apiKey: 'tw_sk_...',
+});
+
+const provider = new BasicTracerProvider();
+provider.addSpanProcessor(new BatchSpanProcessor(exporter));
+provider.register();
+```
+
+This is useful when you already have a `TracerProvider` configured and just want to add Traceway as an export destination.
