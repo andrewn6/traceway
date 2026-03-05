@@ -1,0 +1,124 @@
+---
+title: Comparing Runs
+description: Side-by-side comparison of eval runs to measure the impact of changes.
+---
+
+The comparison view lets you put two or more eval runs next to each other and see, for every datapoint, what each run produced and how it scored. This is how you measure whether a change actually improved things.
+
+## Running a comparison
+
+Compare runs on the same dataset:
+
+```bash
+curl "https://api.traceway.ai/api/datasets/${DATASET_ID}/compare?runs=${RUN_1},${RUN_2}" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+You can compare up to 4 runs at once. All runs must belong to the same dataset.
+
+The response includes:
+
+```json
+{
+  "dataset_id": "01J...",
+  "runs": [
+    {
+      "id": "01J...",
+      "name": "gpt-4o-mini baseline",
+      "scoring": "ExactMatch",
+      "avg_score": 0.76,
+      "total_cost": 0.042
+    },
+    {
+      "id": "01J...",
+      "name": "gpt-4o-mini v2 prompt",
+      "scoring": "ExactMatch",
+      "avg_score": 0.83,
+      "total_cost": 0.045
+    }
+  ],
+  "comparisons": [
+    {
+      "datapoint_id": "01J...",
+      "input": { "question": "What is the capital of France?" },
+      "expected": "Paris",
+      "results": [
+        { "run_id": "01J...", "output": "Paris", "score": 1.0, "latency_ms": 320 },
+        { "run_id": "01J...", "output": "Paris", "score": 1.0, "latency_ms": 290 }
+      ]
+    },
+    {
+      "datapoint_id": "01J...",
+      "input": { "question": "Explain quantum entanglement" },
+      "expected": "...",
+      "results": [
+        { "run_id": "01J...", "output": "...", "score": 0.0, "latency_ms": 1200 },
+        { "run_id": "01J...", "output": "...", "score": 1.0, "latency_ms": 980 }
+      ]
+    }
+  ]
+}
+```
+
+## What to compare
+
+### Model changes
+
+Run the same prompt and dataset with different models:
+
+```
+Run A: gpt-4o-mini, system prompt v1, temperature 0
+Run B: gpt-4o, system prompt v1, temperature 0
+```
+
+This tells you whether the more expensive model produces better results for your specific use case. If gpt-4o-mini scores 0.83 and gpt-4o scores 0.85, the 10x cost difference may not be worth it.
+
+### Prompt changes
+
+Run the same model and dataset with different prompts:
+
+```
+Run A: gpt-4o-mini, "Answer concisely."
+Run B: gpt-4o-mini, "Answer concisely. If unsure, say 'I don't know'."
+```
+
+Look at the datapoints where scores differ between runs. Those are the cases where the prompt change made a difference — for better or worse.
+
+### Temperature changes
+
+Run the same configuration multiple times at different temperatures:
+
+```
+Run A: gpt-4o-mini, temperature 0.0
+Run B: gpt-4o-mini, temperature 0.7
+```
+
+Temperature 0 is usually best for factual tasks. Higher temperatures may help with creative tasks but reduce consistency. The comparison shows you exactly which datapoints are affected.
+
+## Reading the comparison
+
+In the dashboard, the comparison view shows:
+
+**Header row** — Each run's name, average score, total cost, and average latency. Color-coded: green for the best score, red for the worst.
+
+**Datapoint rows** — For each datapoint, shows the input, expected output, and each run's actual output and score side by side. Rows where scores differ between runs are highlighted.
+
+**Filters** — You can filter to show only:
+- Datapoints where scores improved (Run B > Run A)
+- Datapoints where scores regressed (Run B < Run A)
+- Datapoints where scores are the same
+- Datapoints where any run failed
+
+This lets you quickly focus on what changed rather than reviewing every datapoint.
+
+## Practical tips
+
+**Start with a golden dataset.** Before you start comparing, build a dataset of at least 20-50 representative inputs with verified expected outputs. A noisy dataset produces noisy comparisons.
+
+**Use temperature 0.** For eval comparisons, set temperature to 0 so that differences between runs are due to your changes, not randomness.
+
+**Keep one variable at a time.** Change only the model, or only the prompt, or only the temperature between runs. Changing multiple things makes it hard to attribute improvements.
+
+**Watch for regressions.** A change that improves average score by 5% but causes 3 previously-correct answers to fail may not be worth it. Look at both the aggregate and the individual datapoints.
+
+**Iterate.** Run evals early and often. The cost is low (a few cents for 50 datapoints with gpt-4o-mini), and the feedback is immediate.

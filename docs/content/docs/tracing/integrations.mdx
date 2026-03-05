@@ -1,0 +1,204 @@
+---
+title: Integrations
+description: Three ways to send traces to Traceway — SDK, Vercel AI SDK, or proxy.
+---
+
+Traceway supports three integration methods. You can mix and match them in the same application.
+
+## TypeScript SDK (manual)
+
+The `Traceway` client gives you full control over when traces and spans start and end. You decide what to record.
+
+```bash
+npm install traceway
+```
+
+```ts
+import { Traceway } from 'traceway';
+
+const tw = new Traceway({
+  url: 'https://api.traceway.ai',
+  apiKey: process.env.TRACEWAY_API_KEY,
+});
+
+const result = await tw.trace('answer-question', async (ctx) => {
+  // Record a retrieval step
+  const docs = await ctx.span('retrieve-context', async (span) => {
+    const results = await searchVectorDB(query);
+    span.setOutput(results);
+    return results;
+  });
+
+  // Record an LLM call
+  const answer = await ctx.llmCall('generate', {
+    model: 'gpt-4o',
+    provider: 'openai',
+    input: [
+      { role: 'system', content: 'Answer using the provided context.' },
+      { role: 'user', content: query },
+    ],
+  }, async (span) => {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: 'Answer using the provided context.' },
+        { role: 'user', content: query },
+      ],
+    });
+    const text = response.choices[0].message.content;
+    span.setOutput({ text, finish_reason: response.choices[0].finish_reason });
+    return text;
+  });
+
+  return answer;
+});
+```
+
+This approach is best when:
+- You want to control exactly which steps are recorded
+- You need custom span kinds or attributes
+- You're using a provider not supported by the Vercel AI SDK
+- You want to record non-LLM steps (database queries, API calls, etc.)
+
+See the full [SDK reference](/docs/sdk/client) for all available methods.
+
+## Vercel AI SDK (automatic)
+
+If you use the [Vercel AI SDK](https://sdk.vercel.ai), Traceway instruments it through OpenTelemetry. Each `generateText` or `streamText` call becomes a trace, each model invocation becomes a span, and tool calls become child spans. No manual span creation needed.
+
+```bash
+npm install traceway @opentelemetry/api @opentelemetry/sdk-trace-base
+```
+
+```ts
+import { initTraceway } from 'traceway/ai';
+import { generateText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+const { tracer, shutdown } = initTraceway({
+  url: 'https://api.traceway.ai',
+  apiKey: process.env.TRACEWAY_API_KEY,
+});
+
+const result = await generateText({
+  model: openai('gpt-4o'),
+  prompt: 'Summarize this document...',
+  experimental_telemetry: {
+    isEnabled: true,
+    tracer,
+    functionId: 'summarize-document', // becomes the trace name
+  },
+});
+
+// Flush before process exit
+await shutdown();
+```
+
+What gets recorded automatically:
+
+| AI SDK operation | Traceway object |
+|-----------------|----------------|
+| `generateText()` / `streamText()` | Trace |
+| `doGenerate` / `doStream` (internal model call) | Span (`llm_call`) with model, provider, tokens, cost |
+| Tool call | Child span with tool name, arguments, result |
+
+This approach is best when:
+- You're already using the Vercel AI SDK
+- You want zero-effort instrumentation
+- You're okay with Traceway deciding what to record (it records everything)
+
+See the full [Vercel AI SDK guide](/docs/sdk/vercel-ai) for streaming, tool calls, custom metadata, and advanced configuration.
+
+## Proxy (zero-code)
+
+The proxy is a transparent HTTP reverse proxy that sits between your application and your LLM provider. Point your OpenAI (or any OpenAI-compatible) base URL at the proxy, and it records every request/response as a span.
+
+```bash
+traceway serve  # starts API on :3000, proxy on :3001
+```
+
+```ts
+import OpenAI from 'openai';
+
+const client = new OpenAI({
+  baseURL: 'http://localhost:3001/v1',  // proxy instead of api.openai.com
+  apiKey: process.env.OPENAI_API_KEY,   // passed through to OpenAI
+});
+
+// Use the client normally — the proxy records everything
+const completion = await client.chat.completions.create({
+  model: 'gpt-4o',
+  messages: [{ role: 'user', content: 'Hello' }],
+});
+```
+
+The proxy:
+1. Receives the request
+2. Auto-detects the provider (OpenAI, Anthropic, or Ollama) from the URL
+3. Creates a trace and span
+4. Forwards the request to the real provider
+5. Records the full response, extracts token counts, estimates cost
+6. Returns the response unchanged to your application
+
+This approach is best when:
+- You can't or don't want to modify your application code
+- You want to instrument an existing application without adding a dependency
+- You're using a language without a Traceway SDK
+
+See the full [Proxy documentation](/docs/tracing/proxy) for configuration and provider detection details.
+
+## Comparison
+
+| Feature | SDK (manual) | Vercel AI SDK | Proxy |
+|---------|-------------|---------------|-------|
+| Code changes required | Yes | Minimal | None (URL swap only) |
+| Custom span kinds | Yes | No | No |
+| Non-LLM spans | Yes | No | No |
+| Automatic token counting | No (you provide) | Yes | Yes |
+| Automatic cost estimation | No (you provide) | Yes | Yes |
+| Streaming support | Manual | Automatic | Automatic |
+| Tool call recording | Manual | Automatic | Automatic |
+| Works with any language | No (TypeScript only) | No (TypeScript only) | Yes |
+
+## Combining methods
+
+You can use multiple methods in the same application. For example, use the Vercel AI SDK integration for LLM calls and the manual SDK for custom spans:
+
+```ts
+import { Traceway } from 'traceway';
+import { initTraceway } from 'traceway/ai';
+import { generateText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+const tw = new Traceway();
+const { tracer } = initTraceway();
+
+// Manual trace with a mix of manual and auto-instrumented spans
+await tw.trace('complex-pipeline', async (ctx) => {
+  // Manual span for a custom step
+  const docs = await ctx.span('search-docs', async (span) => {
+    const results = await vectorSearch(query);
+    span.setOutput(results);
+    return results;
+  });
+
+  // Vercel AI SDK call within the same trace
+  const result = await generateText({
+    model: openai('gpt-4o'),
+    prompt: `Answer based on: ${docs}`,
+    experimental_telemetry: { isEnabled: true, tracer },
+  });
+});
+```
+
+## OTLP ingest
+
+Traceway also accepts traces via the OpenTelemetry Protocol (OTLP) at `POST /v1/traces`. This is the endpoint that the Vercel AI SDK integration uses internally. If you have an existing OTel setup, you can point it at Traceway:
+
+```
+POST https://api.traceway.ai/v1/traces
+Content-Type: application/json
+Authorization: Bearer tw_sk_...
+```
+
+The body is a standard OTLP JSON trace export. Traceway maps OTel spans to its own span model, extracting LLM-specific attributes (model, provider, tokens) from the AI SDK's attribute conventions.

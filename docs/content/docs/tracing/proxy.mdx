@@ -1,0 +1,162 @@
+---
+title: Proxy
+description: Transparent LLM proxy that records traces automatically. No SDK needed.
+---
+
+The Traceway proxy is a transparent HTTP reverse proxy that sits between your application and your LLM provider. It forwards requests unchanged, records the full request and response as spans, and returns the response to your application. No code changes needed beyond swapping the base URL.
+
+## Starting the proxy
+
+The proxy starts automatically alongside the API server:
+
+```bash
+traceway serve
+# API on :3000, Proxy on :3001
+```
+
+## Basic usage
+
+Point your LLM client's base URL at the proxy:
+
+```ts
+import OpenAI from 'openai';
+
+const client = new OpenAI({
+  baseURL: 'http://localhost:3001/v1',  // proxy
+  apiKey: process.env.OPENAI_API_KEY,   // passed through to the real provider
+});
+
+// Use the client normally
+const completion = await client.chat.completions.create({
+  model: 'gpt-4o',
+  messages: [{ role: 'user', content: 'Hello' }],
+});
+```
+
+The proxy:
+1. Receives the request from your application
+2. Creates a trace and an `llm_call` span in `running` status
+3. Forwards the request to the real provider (e.g., `api.openai.com`)
+4. Records the full response
+5. Extracts token counts from the response
+6. Estimates cost using the model pricing table
+7. Completes the span
+8. Returns the response unchanged to your application
+
+Your application sees the same response it would get from the provider directly. The proxy adds no modifications to the request or response.
+
+## Provider detection
+
+The proxy auto-detects which LLM provider to forward to based on the request URL and headers:
+
+| Provider | Detection | Forward URL |
+|----------|-----------|-------------|
+| OpenAI | Default (any request to `/v1/chat/completions`) | `https://api.openai.com` |
+| Anthropic | `X-API-Key` header present, or `/v1/messages` path | `https://api.anthropic.com` |
+| Ollama | `X-Ollama-Base` header, or configured Ollama URL | `http://localhost:11434` |
+
+For other OpenAI-compatible providers (Together, Groq, Fireworks, etc.), you can set the target URL via the `X-Forward-URL` header:
+
+```ts
+const client = new OpenAI({
+  baseURL: 'http://localhost:3001/v1',
+  apiKey: process.env.TOGETHER_API_KEY,
+  defaultHeaders: {
+    'X-Forward-URL': 'https://api.together.xyz',
+  },
+});
+```
+
+## What gets recorded
+
+For each request through the proxy, Traceway creates:
+
+- **One trace** — named after the model (e.g., `gpt-4o`)
+- **One `llm_call` span** — with the full request and response
+
+The span includes:
+
+| Field | Value |
+|-------|-------|
+| `name` | The model name from the request |
+| `kind.model` | The model identifier |
+| `kind.provider` | Auto-detected provider |
+| `kind.input_tokens` | Extracted from the response |
+| `kind.output_tokens` | Extracted from the response |
+| `kind.cost` | Estimated from the pricing table |
+| `input` | The full request body (messages, system prompt, tools, etc.) |
+| `output` | The full response body |
+
+### Token extraction
+
+Token counts are extracted differently per provider:
+
+- **OpenAI** — from `response.usage.prompt_tokens` and `response.usage.completion_tokens`
+- **Anthropic** — from `response.usage.input_tokens` and `response.usage.output_tokens`
+- **Ollama** — from `response.eval_count` and `response.prompt_eval_count`
+
+If token counts aren't available in the response (e.g., streaming without `stream_options.include_usage`), the fields are left empty.
+
+## Streaming
+
+The proxy supports streaming responses. For OpenAI-style streaming (`stream: true`), the proxy:
+
+1. Forwards the streaming response to your application in real-time (no buffering delay)
+2. Accumulates chunks in memory to build the full response
+3. After the stream ends, records the complete response as the span's output
+
+If you want token counts with streaming, include `stream_options: { include_usage: true }` in your OpenAI request. The proxy will extract tokens from the final usage chunk.
+
+```ts
+const stream = await client.chat.completions.create({
+  model: 'gpt-4o',
+  messages: [{ role: 'user', content: 'Write a poem' }],
+  stream: true,
+  stream_options: { include_usage: true },
+});
+
+for await (const chunk of stream) {
+  process.stdout.write(chunk.choices[0]?.delta?.content ?? '');
+}
+```
+
+## Capture modes
+
+The proxy supports three capture modes that control how much data is recorded:
+
+| Mode | Behavior |
+|------|----------|
+| `Full` | Records the complete request and response (default) |
+| `Preview(N)` | Records only the first N characters of input and output |
+| `Off` | Creates spans with metadata (model, tokens, cost) but no input/output |
+
+This is useful for production deployments where you want cost and latency tracking without storing potentially sensitive prompt content.
+
+## Authentication
+
+In cloud mode, the proxy requires authentication. Pass your Traceway API key as a query parameter or header:
+
+```ts
+const client = new OpenAI({
+  baseURL: 'https://api.traceway.ai:3001/v1?token=tw_sk_...',
+  apiKey: process.env.OPENAI_API_KEY,
+});
+```
+
+The proxy uses the Traceway API key for authentication and the provider's API key (from the `Authorization` or `X-API-Key` header) for the upstream request.
+
+## Error handling
+
+If the upstream provider returns an error (4xx or 5xx), the proxy:
+
+1. Records the error response as the span's output
+2. Fails the span with the error status code and message
+3. Returns the error response unchanged to your application
+
+If the proxy itself can't reach the upstream provider (DNS failure, timeout, connection refused), it returns a `502 Bad Gateway` response and fails the span with the connection error.
+
+## Limitations
+
+- The proxy currently runs on the same machine as the API server. It can't be deployed separately.
+- Each request through the proxy creates exactly one trace with one span. If your application makes multiple LLM calls in a pipeline, each will be a separate trace. For correlated traces, use the SDK instead.
+- The proxy doesn't support request modification (e.g., injecting system prompts or adding headers). It's purely transparent.

@@ -1,0 +1,101 @@
+---
+title: Introduction
+description: What evaluations are, the end-to-end workflow, and when to use them.
+---
+
+Evaluations measure how well your LLM application performs on a set of test cases. You take a dataset of input/output pairs, run each input through a model configuration, and score the results against expected outputs.
+
+This is how you answer questions like:
+- "Did switching from gpt-4o to gpt-4o-mini make our answers worse?"
+- "Does the new system prompt produce better responses?"
+- "What percentage of our test cases does this model get right?"
+
+## The workflow
+
+The evaluation workflow in Traceway follows five steps:
+
+### 1. Collect production data
+
+Your application sends traces to Traceway. Every LLM call, tool invocation, and custom step is recorded as a span with its full input and output.
+
+### 2. Build a dataset
+
+Browse your traces in the dashboard. When you find an interesting span — a good response, a bad one, an edge case — export it to a dataset. The span's input becomes the datapoint's input, and the output becomes the expected output.
+
+You can also import data from files (JSON, JSONL, CSV) or create datapoints manually via the API.
+
+### 3. Set up a provider connection
+
+Before running an eval, you need credentials for the model you want to test. Create a provider connection in the dashboard (Settings > Provider Connections) or via the API:
+
+```bash
+curl -X POST https://api.traceway.ai/api/provider-connections \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "openai-prod",
+    "provider": "openai",
+    "api_key": "sk-...",
+    "default_model": "gpt-4o-mini"
+  }'
+```
+
+Provider connections support OpenAI, Anthropic, and any OpenAI-compatible endpoint.
+
+### 4. Run an evaluation
+
+Start an eval run on your dataset. You specify the provider connection, model, optional system prompt, temperature, and scoring strategy.
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/eval" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "gpt-4o-mini baseline",
+    "config": {
+      "connection_id": "CONNECTION_ID",
+      "model": "gpt-4o-mini",
+      "system_prompt": "Answer concisely.",
+      "temperature": 0.0
+    },
+    "scoring": "ExactMatch"
+  }'
+```
+
+The eval runs asynchronously in the background. Traceway iterates through each datapoint, calls the model, scores the result, and emits progress events via SSE.
+
+### 5. Compare results
+
+Run the same dataset with different configurations — different models, prompts, or temperatures — and compare the results side by side. Traceway shows you the output and score for each datapoint across all runs.
+
+## When to use evaluations
+
+**Regression testing** — Before deploying a prompt change, run your golden dataset against the new prompt and compare with the previous run. If scores drop, the change isn't safe.
+
+**Model comparison** — Evaluating whether a cheaper model (e.g., gpt-4o-mini vs. gpt-4o) produces acceptable results for your use case.
+
+**Prompt iteration** — Testing multiple system prompt variations against the same dataset to find the best one.
+
+**Quality monitoring** — Running periodic evals against a growing dataset built from production capture rules to track quality over time.
+
+## Eval run lifecycle
+
+Each eval run has a status:
+
+| Status | Description |
+|--------|-------------|
+| `pending` | Created but not yet started |
+| `running` | Actively processing datapoints |
+| `completed` | All datapoints processed |
+| `failed` | An unrecoverable error occurred |
+| `cancelled` | Cancelled by the user |
+
+While a run is in `running` status, the `progress` and `total` fields tell you how many datapoints have been processed. The dashboard shows a live progress bar.
+
+## Next steps
+
+<Cards>
+  <Card title="Running Evaluations" href="/docs/evaluations/running-evaluations" />
+  <Card title="Scoring Strategies" href="/docs/evaluations/scoring-strategies" />
+  <Card title="Comparing Runs" href="/docs/evaluations/comparing-runs" />
+</Cards>

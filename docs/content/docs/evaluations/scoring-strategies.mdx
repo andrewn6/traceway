@@ -1,0 +1,111 @@
+---
+title: Scoring Strategies
+description: How Traceway scores eval results — ExactMatch, Contains, LlmJudge, and None.
+---
+
+When you start an eval run, you choose a scoring strategy. The strategy determines how Traceway compares the model's output to the expected output for each datapoint.
+
+## ExactMatch
+
+The model's output must exactly equal the expected output. Comparison is case-sensitive and whitespace-sensitive.
+
+```json
+{ "scoring": "ExactMatch" }
+```
+
+| Output | Expected | Score |
+|--------|----------|-------|
+| `"Paris"` | `"Paris"` | 1.0 |
+| `"paris"` | `"Paris"` | 0.0 |
+| `"Paris."` | `"Paris"` | 0.0 |
+| `"The capital of France is Paris"` | `"Paris"` | 0.0 |
+
+**Score values**: 1.0 (match) or 0.0 (no match). No partial scores.
+
+**Best for**: Short factual answers, classification tasks, structured outputs where you need exact precision.
+
+**Considerations**: This is strict. If the model adds a period, capitalizes differently, or includes any extra text, the score is 0. For most natural language tasks, `Contains` or `LlmJudge` is more appropriate.
+
+## Contains
+
+The model's output must contain the expected output as a substring. Case-insensitive.
+
+```json
+{ "scoring": "Contains" }
+```
+
+| Output | Expected | Score |
+|--------|----------|-------|
+| `"The capital of France is Paris."` | `"Paris"` | 1.0 |
+| `"paris is the capital"` | `"Paris"` | 1.0 |
+| `"The capital is London"` | `"Paris"` | 0.0 |
+| `"P a r i s"` | `"Paris"` | 0.0 |
+
+**Score values**: 1.0 (contains) or 0.0 (does not contain).
+
+**Best for**: Factual answers where the model might include additional context or explanation around the answer. Checking that a specific keyword or phrase appears in the output.
+
+**Considerations**: This can produce false positives if the expected string is a common word. For example, if the expected output is `"the"`, almost any response would score 1.0.
+
+## LlmJudge
+
+A second LLM call evaluates whether the model's output is correct. The judge receives the input, the expected output, and the actual output, and returns a score between 0.0 and 1.0.
+
+```json
+{ "scoring": "LlmJudge" }
+```
+
+Traceway sends the following prompt to the judge model (the same model and provider connection as the eval):
+
+```
+You are evaluating the quality of an AI response.
+
+Input: {input}
+Expected output: {expected}
+Actual output: {actual}
+
+Rate the actual output from 0.0 (completely wrong) to 1.0 (correct and complete).
+Return only the numeric score.
+```
+
+**Score values**: 0.0 to 1.0, continuous. The judge has discretion to give partial credit.
+
+**Best for**: Natural language tasks where there are many valid phrasings of the correct answer. Summarization, explanation, creative tasks, or any case where exact/substring matching is too rigid.
+
+**Considerations**: This doubles the number of LLM calls (one for the eval, one for judging). It also introduces subjectivity — the judge model's opinions may vary between runs, especially at non-zero temperatures. Set `temperature: 0.0` for maximum consistency.
+
+**Cost**: Each datapoint requires two model calls instead of one. For a dataset of 100 datapoints using gpt-4o-mini, expect roughly 2x the cost of a non-judged run.
+
+## None
+
+No automatic scoring. The model's output is recorded but not compared to anything.
+
+```json
+{ "scoring": "None" }
+```
+
+**Score values**: All results have a null score.
+
+**Best for**: Generating outputs for manual review. Comparing model behaviors qualitatively rather than quantitatively. Running the model to populate the review queue for human evaluation.
+
+## Choosing a strategy
+
+| Use case | Recommended strategy |
+|----------|---------------------|
+| Classification (yes/no, category labels) | `ExactMatch` |
+| Factual Q&A with short answers | `Contains` |
+| Summarization, explanation, creative writing | `LlmJudge` |
+| Generating data for human review | `None` |
+| Structured output (JSON, code) | `ExactMatch` or `Contains` on key fields |
+
+## Aggregate metrics
+
+After a run completes, Traceway computes aggregate metrics across all results:
+
+- **Average score** — mean of all non-null scores
+- **Pass rate** — percentage of results with score >= threshold (default 1.0 for ExactMatch/Contains, 0.5 for LlmJudge)
+- **Total cost** — sum of all result costs
+- **Average latency** — mean latency across all results
+- **Failure rate** — percentage of results with `failed` status (model API errors, not low scores)
+
+These aggregates are visible in the dashboard's eval results view and in the comparison view.

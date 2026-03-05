@@ -1,0 +1,183 @@
+---
+title: Running Evaluations
+description: How to start an eval run, configure the model, and check progress.
+---
+
+## Prerequisites
+
+Before starting an eval, you need:
+
+1. **A dataset** with at least one datapoint. See [Datasets](/docs/datasets) for how to create one.
+2. **A provider connection** — credentials for the model you want to evaluate.
+
+### Creating a provider connection
+
+Provider connections store the API credentials and default configuration for a model provider. Create one in the dashboard under Settings > Provider Connections, or via the API:
+
+```bash
+curl -X POST https://api.traceway.ai/api/provider-connections \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "openai-prod",
+    "provider": "openai",
+    "api_key": "sk-proj-...",
+    "base_url": "https://api.openai.com/v1",
+    "default_model": "gpt-4o-mini"
+  }'
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | A human-readable label |
+| `provider` | Yes | `openai`, `anthropic`, or `custom` |
+| `api_key` | Yes | The API key for this provider |
+| `base_url` | No | Override the API base URL (for custom OpenAI-compatible endpoints) |
+| `default_model` | No | Default model to use when not specified in the eval config |
+
+Provider connections are stored encrypted. The API key is never returned in API responses after creation.
+
+## Starting a run
+
+Start an eval run against a dataset:
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/eval" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "gpt-4o-mini v2 prompt",
+    "config": {
+      "connection_id": "01J...",
+      "model": "gpt-4o-mini",
+      "system_prompt": "You are a helpful assistant. Answer concisely and accurately.",
+      "temperature": 0.0
+    },
+    "scoring": "ExactMatch"
+  }'
+```
+
+### Configuration fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Name for this run (e.g., "gpt-4o-mini baseline") |
+| `config.connection_id` | string | Yes | ID of the provider connection to use |
+| `config.model` | string | Yes | Model identifier (e.g., `gpt-4o-mini`, `claude-3-haiku`) |
+| `config.system_prompt` | string | No | System prompt prepended to every datapoint |
+| `config.temperature` | number | No | Model temperature (0.0 to 2.0, default provider-specific) |
+| `scoring` | string | Yes | Scoring strategy: `ExactMatch`, `Contains`, `LlmJudge`, or `None` |
+
+### Using the SDK
+
+```ts
+// There isn't a direct SDK method for evals yet — use the REST API.
+// The SDK methods for datasets and datapoints are documented in the SDK reference.
+```
+
+## How the eval executes
+
+When you start a run, Traceway:
+
+1. Creates an eval run record with `pending` status.
+2. Loads all datapoints from the dataset.
+3. Transitions the run to `running` status.
+4. For each datapoint:
+   a. Constructs the prompt. For `LlmConversation` datapoints, uses the `messages` array. For `Generic` datapoints, sends the `input` as a user message.
+   b. If a `system_prompt` is configured, prepends it.
+   c. Calls the model via the provider connection's API.
+   d. Records the model's output.
+   e. Scores the output against the expected value using the configured scoring strategy.
+   f. Saves the result and increments the progress counter.
+   g. Emits an SSE event with the updated progress.
+5. After all datapoints are processed, transitions the run to `completed`.
+
+Each datapoint produces an `EvalResult`:
+
+```json
+{
+  "datapoint_id": "01J...",
+  "output": "Paris",
+  "expected": "Paris",
+  "score": 1.0,
+  "latency_ms": 340,
+  "tokens": 28,
+  "cost": 0.00004,
+  "status": "completed",
+  "error": null
+}
+```
+
+Individual datapoint results have their own status. A datapoint can fail (e.g., model API error) without failing the entire run. The run continues with the next datapoint.
+
+| Result status | Description |
+|---------------|-------------|
+| `pending` | Not yet processed |
+| `running` | Currently being processed |
+| `completed` | Model call and scoring succeeded |
+| `failed` | Model call or scoring failed (error message in `error` field) |
+
+## Checking progress
+
+Poll the run to check progress:
+
+```bash
+curl "https://api.traceway.ai/api/eval/${RUN_ID}" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+Response:
+
+```json
+{
+  "id": "01J...",
+  "dataset_id": "01J...",
+  "name": "gpt-4o-mini v2 prompt",
+  "status": "running",
+  "progress": 23,
+  "total": 42,
+  "config": { ... },
+  "scoring": "ExactMatch",
+  "result_items": [
+    {
+      "datapoint_id": "01J...",
+      "output": "Paris",
+      "score": 1.0,
+      "latency_ms": 340,
+      "status": "completed"
+    }
+  ],
+  "created_at": "2024-06-15T12:00:00Z"
+}
+```
+
+The `result_items` array grows as datapoints are processed. In the dashboard, this updates live via SSE.
+
+## Cancelling a run
+
+Cancel a running eval:
+
+```bash
+curl -X POST "https://api.traceway.ai/api/eval/${RUN_ID}/cancel" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+Cancellation is graceful — the currently-processing datapoint finishes, then the run stops. Already-completed results are preserved.
+
+## Deleting a run
+
+```bash
+curl -X DELETE "https://api.traceway.ai/api/eval/${RUN_ID}" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+This deletes the run and all its results.
+
+## Listing runs for a dataset
+
+```bash
+curl "https://api.traceway.ai/api/datasets/${DATASET_ID}/eval" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+Returns all eval runs for the dataset, ordered by creation time (newest first).

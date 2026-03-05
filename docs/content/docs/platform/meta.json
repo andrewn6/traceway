@@ -1,0 +1,9 @@
+{
+  "title": "Platform",
+  "pages": [
+    "index",
+    "viewing-traces",
+    "filtering",
+    "real-time-events"
+  ]
+}

@@ -1,0 +1,107 @@
+---
+title: Introduction
+description: What traces and spans are, how they relate, and why they matter for LLM observability.
+---
+
+## What is a trace?
+
+A trace represents one complete operation in your application. When a user asks a question, when your agent runs a task, when a batch job processes a document — each of these is a trace.
+
+A trace has:
+- **id** — a unique identifier (ULID format)
+- **name** — a human-readable label, like `answer-question` or `summarize-document`
+- **tags** — optional string tags for filtering, like `production`, `gpt-4o`, or `user:123`
+- **started_at** / **ended_at** — timestamps marking the trace's lifetime
+
+Traces are containers. They don't do work themselves — they organize the spans that do.
+
+```ts
+import { Traceway } from 'traceway';
+
+const tw = new Traceway();
+
+// Everything inside the callback is part of this trace
+const result = await tw.trace('answer-question', async (ctx) => {
+  // spans go here
+});
+```
+
+## What is a span?
+
+A span is a single unit of work inside a trace. The most common span is an LLM call, but a span can represent anything: a database query, a vector search, a tool invocation, a file read, or any custom step.
+
+Each span records:
+
+| Field | Description |
+|-------|-------------|
+| `id` | Unique identifier |
+| `trace_id` | Which trace this span belongs to |
+| `parent_id` | Optional. Creates parent-child relationships between spans |
+| `name` | Human-readable label (`gpt-4o`, `search-docs`, `parse-response`) |
+| `kind` | The type of work — see [Tracing Structure](/docs/tracing/structure) for details |
+| `input` | The data that went into this step (e.g., prompt messages) |
+| `output` | The data that came out (e.g., completion text) |
+| `status` | `running`, `completed`, or `failed` (with error message) |
+| `started_at` | When the span began |
+| `ended_at` | When the span finished (null while running) |
+| `metadata` | Computed fields: `duration_ms`, `total_tokens`, `estimated_cost` |
+
+## How traces and spans relate
+
+Spans belong to a trace, and spans can be nested under other spans. This creates a tree structure that mirrors your application's execution flow:
+
+```
+answer-question (trace)
+  ├── retrieve-context (custom span)
+  │     ├── embed-query (llm_call span)
+  │     └── vector-search (custom span)
+  ├── generate-answer (llm_call span)
+  │     └── get-weather (tool_call span, child of generate-answer)
+  └── format-response (custom span)
+```
+
+The tree makes it easy to see where time was spent, which calls failed, and how data flowed through your pipeline. In the dashboard, you can expand and collapse the tree, click into any span to see its full input/output, and filter across thousands of traces.
+
+## The span lifecycle
+
+Every span goes through the same lifecycle:
+
+1. **Created** — The span starts in `running` status. Traceway records the `started_at` timestamp and emits a `span_created` event.
+2. **Completed** — You call `completeSpan()` with the output. Traceway records `ended_at`, calculates `duration_ms`, estimates cost (for LLM calls), and emits `span_completed`.
+3. **Failed** — If something goes wrong, you call `failSpan()` with an error message. Traceway records the error and emits `span_failed`.
+
+A span cannot transition from `completed` to `failed` or vice versa. The API returns `409 Conflict` if you try.
+
+Using the high-level SDK, this is handled automatically:
+
+```ts
+await tw.trace('my-trace', async (ctx) => {
+  // If the callback resolves, the span is completed
+  // If it throws, the span is failed
+  await ctx.span('my-step', async (span) => {
+    const result = doSomething();
+    span.setOutput(result);
+    return result;
+  });
+});
+```
+
+## What gets recorded
+
+Traceway records the full input and output of every span. There is no sampling or truncation — you see exactly what was sent and received. For LLM calls, this means the complete prompt messages and the complete response.
+
+This is deliberate. When you're debugging a hallucination or an unexpected refusal, you need to see the exact prompt that was sent. Summaries and samples don't help.
+
+For production deployments where storage is a concern, you can control what gets recorded:
+
+- **Capture modes** on the proxy: `Off` (no input/output), `Preview` (first N characters), or `Full` (everything)
+- **Retention policies** per plan: Free keeps 7 days, Pro keeps 30, Team keeps 90
+- **Capture rules** with sample rates let you selectively save interesting spans
+
+## Next steps
+
+<Cards>
+  <Card title="Integrations" href="/docs/tracing/integrations" />
+  <Card title="Tracing Structure" href="/docs/tracing/structure" />
+  <Card title="Proxy" href="/docs/tracing/proxy" />
+</Cards>

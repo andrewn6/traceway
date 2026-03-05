@@ -1,0 +1,160 @@
+---
+title: Hosting Options
+description: Run Traceway locally, in Docker, or deploy to the cloud with Postgres and Turbopuffer.
+---
+
+Traceway runs as a single binary. How you deploy it depends on your needs.
+
+## Local development
+
+The fastest way to get started. No Docker, no cloud account, no authentication.
+
+```bash
+cargo install traceway
+traceway serve
+```
+
+This starts:
+- **API server** on `http://localhost:3000`
+- **Proxy** on `http://localhost:3001`
+
+Storage is SQLite (written to `./traceway.db` in the current directory). Auth is disabled entirely — anyone who can reach the port can read and write data. This is designed for local development only.
+
+```ts
+import { Traceway } from 'traceway';
+
+// No API key needed in local mode
+const tw = new Traceway();
+```
+
+### Changing the data directory
+
+By default, the SQLite database is created in the current working directory. To change this:
+
+```bash
+TRACEWAY_DATA_DIR=/path/to/data traceway serve
+```
+
+## Docker
+
+Run Traceway in a container with persistent storage:
+
+```bash
+docker run -p 3000:3000 -p 3001:3001 ghcr.io/blastgits/traceway:latest
+```
+
+For persistent data across container restarts, mount a volume:
+
+```yaml
+version: '3'
+services:
+  traceway:
+    image: ghcr.io/blastgits/traceway:latest
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    volumes:
+      - traceway-data:/data
+    environment:
+      - TRACEWAY_DATA_DIR=/data
+
+volumes:
+  traceway-data:
+```
+
+This runs in local mode (SQLite, no auth). To enable cloud mode in Docker, add the environment variables described below.
+
+## Cloud mode
+
+For production deployments, run with `--cloud` to enable authentication, multi-tenancy, and cloud storage:
+
+```bash
+traceway serve --cloud
+```
+
+Cloud mode changes the storage architecture:
+
+| Component | Local mode | Cloud mode |
+|-----------|-----------|------------|
+| Auth (users, orgs, API keys) | Disabled | Postgres |
+| Traces and spans | SQLite | Turbopuffer |
+| Datasets, datapoints, evals | SQLite | Turbopuffer |
+| Events | In-memory | Redis Pub/Sub |
+
+Each organization and project gets its own Turbopuffer namespace (`tw_{org}_{project}`), so data is fully isolated between tenants.
+
+### Required environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | Postgres connection string for auth data |
+| `TURBOPUFFER_API_KEY` | Turbopuffer API key for trace/span/dataset storage |
+| `JWT_SECRET` | Secret for signing session tokens (minimum 32 characters) |
+| `RESEND_API_KEY` | Resend API key for transactional emails (invites, password resets) |
+
+### Optional environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `POLAR_ACCESS_TOKEN` | Polar.sh token for billing integration |
+| `POLAR_WEBHOOK_SECRET` | Polar webhook HMAC secret for subscription events |
+| `REDIS_URL` | Redis URL for cross-instance event distribution (defaults to in-memory) |
+| `TRACEWAY_DATA_DIR` | Directory for any local data (defaults to current directory) |
+
+## Deploy to Railway
+
+Traceway is deployed on Railway at `api.traceway.ai`. To run your own instance:
+
+1. Create a new project on [Railway](https://railway.app).
+2. Add a **Postgres** database from the Railway marketplace.
+3. Deploy the Docker image `ghcr.io/blastgits/traceway:latest`.
+4. Set the required environment variables above. Railway provides `DATABASE_URL` automatically when you link the Postgres database.
+5. Set the start command to `traceway serve --cloud`.
+6. Expose port 3000. Railway handles TLS termination.
+
+### Health checks
+
+Configure Railway's health check to use:
+
+| Probe | Endpoint | Purpose |
+|-------|----------|---------|
+| Health | `GET /api/health` | Returns `{"status": "ok", "instance_id": "...", "uptime": ...}` |
+| Readiness | `GET /api/ready` | Returns 200 when the server can accept requests |
+| Liveness | `GET /api/live` | Returns 200 if the process is alive |
+
+### Multiple replicas
+
+Traceway supports running multiple replicas behind a load balancer. Each instance maintains an in-memory cache of data that is synced from the backend on startup. If you configure `REDIS_URL`, real-time events (SSE) are distributed across instances via Redis Pub/Sub. Without Redis, each instance only sees events from its own requests.
+
+## Plans and limits
+
+| Plan | Price | Spans/month | Members | Retention |
+|------|-------|-------------|---------|-----------|
+| Free | $0 | 10,000 | 1 | 7 days |
+| Pro | $20/user/mo | 1,000,000 | 5 | 30 days |
+| Team | $100/user/mo | 10,000,000 | 50 | 90 days |
+| Enterprise | Contact us | Unlimited | Unlimited | Custom |
+
+Span limits are enforced per-organization. When you hit the limit, new spans are rejected with `402 Payment Required`. Plan changes take effect immediately.
+
+## Building from source
+
+```bash
+git clone https://github.com/blastgits/traceway.git
+cd traceway
+cargo build --release -p api
+./target/release/traceway serve
+```
+
+The full workspace includes a FUSE filesystem crate that requires macFUSE on macOS. If you don't need that, build only the packages you need:
+
+```bash
+cargo build --release -p api -p proxy -p trace
+```
+
+### Ports
+
+| Service | Default port | Purpose |
+|---------|-------------|---------|
+| API | 3000 | REST API, SSE events, dashboard |
+| Proxy | 3001 | Transparent LLM proxy |

@@ -1,90 +1,73 @@
 ---
-title: Introduction
-description: Traceway is open-source observability for LLM applications. Record every call, see what went wrong, build test datasets from production data.
+title: Traceway
+description: Open-source observability for LLM applications. Record every call, debug failures, build test datasets from production data.
 ---
 
 Traceway records traces and spans from your LLM application, so you can see exactly what happened on every request: which model was called, what the input was, what came back, how long it took, and how much it cost.
 
-It runs as a single binary. You can self-host it locally with SQLite, or deploy it to the cloud with Turbopuffer and Postgres.
+It runs as a single Rust binary. You can self-host it locally with SQLite, or deploy it to the cloud with Turbopuffer and Postgres.
+
+## Why Traceway
+
+LLM applications are hard to debug. A single user request might chain multiple model calls, retrieve documents, invoke tools, and format the final response. When something goes wrong — a hallucination, a slow response, an unexpected refusal — you need to see the full picture.
+
+Traceway gives you that picture. Every step in your pipeline becomes a span, organized into a trace. You see the exact prompts sent, the exact completions returned, the token counts, the latency, and the cost. No sampling, no aggregation — every request, recorded in full.
 
 ## What you get
 
-- **Traces and spans** — Every LLM call, tool invocation, and custom step recorded as a structured span inside a trace.
-- **Datasets** — Collect input/output pairs from production spans. Use them for regression testing.
-- **Evaluations** — Run your dataset through a model and score the results (exact match, contains, or LLM-as-judge).
-- **Real-time SSE** — The dashboard updates live as spans come in. No polling.
-- **Cost tracking** — Token counts and estimated costs per span, rolled up per trace.
+### Traces and spans
 
-## Quickstart
+Every LLM call, tool invocation, retrieval step, and custom operation recorded as a structured span inside a trace. Spans form a tree, so you can see parent-child relationships between steps.
 
-Install the SDK:
+### Cost and latency tracking
 
-```bash
-npm install traceway
-```
+Token counts and estimated costs per span, rolled up per trace. Traceway ships with a pricing table covering 50+ models across OpenAI, Anthropic, and other providers. Latency is recorded per-span with millisecond precision.
 
-Create a trace and record a span:
+### Datasets
 
-```ts
-import { Traceway } from 'traceway';
+Collect input/output pairs from production spans into datasets. Use them as regression test suites. Supports two kinds of datapoints: generic key-value pairs and LLM conversation threads.
 
-const tw = new Traceway({
-  url: 'http://localhost:3000',    // or https://api.traceway.ai
-  apiKey: 'tw_sk_...',             // from your project settings
-});
+### Evaluations
 
-const result = await tw.trace('summarize-email', async (ctx) => {
-  return ctx.llmCall('gpt-4o', {
-    model: 'gpt-4o',
-    provider: 'openai',
-    input: { role: 'user', content: 'Summarize this email...' },
-  }, async (span) => {
-    const response = await callOpenAI(/* ... */);
-    span.setOutput(response);
-    return response;
-  });
-});
-```
+Run your dataset through a model configuration and score the results. Four scoring strategies: exact match, substring contains, LLM-as-judge, or no scoring (manual review). Compare multiple eval runs side-by-side to measure the impact of prompt or model changes.
 
-Or, if you're using the Vercel AI SDK, skip the manual instrumentation:
+### Capture rules
 
-```ts
-import { initTraceway } from 'traceway/ai';
-import { generateText } from 'ai';
-import { openai } from '@ai-sdk/openai';
+Automatically save spans to a dataset when they match a filter. Set rules like "save every gpt-4o span that costs more than $0.01" with configurable sample rates. This lets you build datasets from production traffic without manual effort.
 
-const { tracer } = initTraceway();
+### Review queue
 
-const result = await generateText({
-  model: openai('gpt-4o'),
-  prompt: 'Summarize this email...',
-  experimental_telemetry: { isEnabled: true, tracer },
-});
-```
+Human-in-the-loop workflow for labeling, correcting, and reviewing datapoints. Enqueue items, claim them, edit the data, and submit. Useful for building golden datasets and reviewing edge cases.
 
-Both approaches produce the same result in the dashboard: a trace with spans, token counts, latency, and cost.
+### Real-time events
+
+The dashboard updates live as spans come in via Server-Sent Events. No polling. You can also subscribe to events programmatically from your own code.
+
+### Proxy
+
+An optional transparent HTTP proxy that sits in front of your LLM provider. Point your OpenAI base URL at the proxy and it records spans automatically — no SDK integration needed.
 
 ## Architecture
 
 ```
 Your app  ──SDK──>  Traceway API  ──>  Storage (SQLite or Turbopuffer)
-                         │
-                    Dashboard UI
-                  (platform.traceway.ai)
+                        │
+                   Dashboard UI
+                 (platform.traceway.ai)
 ```
 
 - **API server** — Rust binary, runs on port 3000. Handles trace/span ingestion, dataset CRUD, eval execution, and real-time events.
 - **Proxy** — Optional. Sits in front of your LLM provider (port 3001) and automatically records spans. You point your OpenAI base URL at it instead of `api.openai.com`.
-- **Dashboard** — SvelteKit SPA. Shows traces, spans, datasets, eval results.
+- **Dashboard** — SvelteKit SPA at [platform.traceway.ai](https://platform.traceway.ai). Shows traces, spans, datasets, eval results, analytics, and settings.
 - **Storage** — SQLite for local dev, Turbopuffer for cloud. Auth data lives in Postgres (cloud only).
 
 ## Next steps
 
 <Cards>
-  <Card title="Quickstart" href="/docs/quickstart" />
+  <Card title="Getting Started" href="/docs/quickstart" />
+  <Card title="Tracing" href="/docs/tracing" />
   <Card title="TypeScript SDK" href="/docs/sdk" />
   <Card title="Vercel AI SDK" href="/docs/sdk/vercel-ai" />
   <Card title="REST API" href="/docs/api" />
-  <Card title="Self-Hosting" href="/docs/guides/self-hosting" />
-  <Card title="Concepts" href="/docs/concepts" />
+  <Card title="Hosting Options" href="/docs/hosting" />
 </Cards>

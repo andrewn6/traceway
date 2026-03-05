@@ -1,0 +1,9 @@
+{
+  "title": "Evaluations",
+  "pages": [
+    "index",
+    "running-evaluations",
+    "scoring-strategies",
+    "comparing-runs"
+  ]
+}
