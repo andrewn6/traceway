@@ -8,6 +8,7 @@ pub mod events;
 pub mod jobs;
 pub mod metrics;
 pub mod org_store;
+pub mod otlp;
 pub mod rate_limit;
 
 pub use org_store::OrgStoreManager;
@@ -3922,8 +3923,14 @@ fn build_router(
         .merge(protected)
         .merge(public);
 
+    // OTLP ingest routes — outside /api, with self-contained auth.
+    // OTel SDKs expect `POST /v1/traces` at the root.
+    let otlp = Router::new()
+        .route("/v1/traces", post(otlp::ingest_traces));
+
     let app = Router::new()
-        .nest("/api", api);
+        .nest("/api", api)
+        .merge(otlp);
 
     // In cloud mode, serve Scalar API docs at root; in local mode, serve embedded UI
     let app = if state.auth_config.local_mode {
