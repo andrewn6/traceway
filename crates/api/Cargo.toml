@@ -28,7 +28,7 @@ rust-embed.workspace = true
 mime_guess.workspace = true
 csv.workspace = true
 axum-extra.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = ["v4", "v5", "v7", "serde"] }
 toml.workspace = true
 async-trait.workspace = true
 thiserror.workspace = true
