@@ -375,14 +375,10 @@ impl<B: StorageBackend> PersistentStore<B> {
 
     // --- Span methods ---
 
-    pub async fn insert(&mut self, span: Span) -> SpanId {
+    pub async fn insert(&mut self, span: Span) -> Result<SpanId, StorageError> {
+        self.backend.save_span(&span).await?;
         let id = self.memory.insert(span);
-        if let Some(span) = self.memory.get(id) {
-            if let Err(e) = self.backend.save_span(span).await {
-                tracing::error!(%id, "failed to persist span insert: {}", e);
-            }
-        }
-        id
+        Ok(id)
     }
 
     pub fn get(&self, id: SpanId) -> Option<&Span> {
@@ -512,7 +508,7 @@ impl<B: StorageBackend> PersistentStore<B> {
         &mut self,
         id: SpanId,
         output: Option<serde_json::Value>,
-    ) -> Option<Span> {
+    ) -> Result<Option<Span>, StorageError> {
         // Try memory first, then fall back to backend
         let span = match self.memory.remove(id) {
             Some(s) => s,
@@ -522,20 +518,18 @@ impl<B: StorageBackend> PersistentStore<B> {
                         tracing::debug!(%id, "complete_span: loaded span from backend");
                         s
                     }
-                    _ => return None,
+                    _ => return Ok(None),
                 }
             }
         };
         if span.status().is_terminal() {
             self.memory.replace(span);
-            return None;
+            return Ok(None);
         }
         let completed = span.complete(output);
+        self.backend.save_span(&completed).await?;
         self.memory.replace(completed.clone());
-        if let Err(e) = self.backend.save_span(&completed).await {
-            tracing::error!(%id, "failed to persist span completion: {}", e);
-        }
-        Some(completed)
+        Ok(Some(completed))
     }
 
     /// Complete a span with an updated SpanKind (e.g. to populate token counts).
@@ -546,7 +540,7 @@ impl<B: StorageBackend> PersistentStore<B> {
         id: SpanId,
         kind: SpanKind,
         output: Option<serde_json::Value>,
-    ) -> Option<Span> {
+    ) -> Result<Option<Span>, StorageError> {
         let span = match self.memory.remove(id) {
             Some(s) => s,
             None => {
@@ -555,37 +549,39 @@ impl<B: StorageBackend> PersistentStore<B> {
                         tracing::debug!(%id, "complete_span_with_kind: loaded span from backend");
                         s
                     }
-                    _ => return None,
+                    _ => return Ok(None),
                 }
             }
         };
         if span.status().is_terminal() {
             self.memory.replace(span);
-            return None;
+            return Ok(None);
         }
         // Serialize the span to JSON, patch in the new kind, then deserialize back
-        let mut json = serde_json::to_value(&span).ok()?;
-        let kind_json = serde_json::to_value(&kind).ok()?;
-        json.as_object_mut()?.insert("kind".to_string(), kind_json);
-        json.as_object_mut()?
-            .insert("status".to_string(), serde_json::Value::String("completed".to_string()));
-        json.as_object_mut()?
-            .insert("ended_at".to_string(), serde_json::to_value(chrono::Utc::now()).ok()?);
-        if let Some(out) = &output {
-            json.as_object_mut()?
-                .insert("output".to_string(), out.clone());
-        }
-        let completed: Span = serde_json::from_value(json).ok()?;
+        let completed: Option<Span> = (|| {
+            let mut json = serde_json::to_value(&span).ok()?;
+            let kind_json = serde_json::to_value(&kind).ok()?;
+            let obj = json.as_object_mut()?;
+            obj.insert("kind".to_string(), kind_json);
+            obj.insert("status".to_string(), serde_json::Value::String("completed".to_string()));
+            obj.insert("ended_at".to_string(), serde_json::to_value(chrono::Utc::now()).ok()?);
+            if let Some(out) = &output {
+                obj.insert("output".to_string(), out.clone());
+            }
+            serde_json::from_value(json).ok()
+        })();
+        let Some(completed) = completed else {
+            self.memory.replace(span);
+            return Ok(None);
+        };
+        self.backend.save_span(&completed).await?;
         self.memory.replace(completed.clone());
-        if let Err(e) = self.backend.save_span(&completed).await {
-            tracing::error!(%id, "failed to persist span completion with kind: {}", e);
-        }
-        Some(completed)
+        Ok(Some(completed))
     }
 
     /// Fail a span (immutable transition: Running -> Failed).
     /// Falls back to the storage backend if the span is not in memory.
-    pub async fn fail_span(&mut self, id: SpanId, error: impl Into<String>) -> Option<Span> {
+    pub async fn fail_span(&mut self, id: SpanId, error: impl Into<String>) -> Result<Option<Span>, StorageError> {
         let span = match self.memory.remove(id) {
             Some(s) => s,
             None => {
@@ -594,48 +590,39 @@ impl<B: StorageBackend> PersistentStore<B> {
                         tracing::debug!(%id, "fail_span: loaded span from backend");
                         s
                     }
-                    _ => return None,
+                    _ => return Ok(None),
                 }
             }
         };
         if span.status().is_terminal() {
             self.memory.replace(span);
-            return None;
+            return Ok(None);
         }
         let failed = span.fail(error);
+        self.backend.save_span(&failed).await?;
         self.memory.replace(failed.clone());
-        if let Err(e) = self.backend.save_span(&failed).await {
-            tracing::error!(%id, "failed to persist span failure: {}", e);
-        }
-        Some(failed)
+        Ok(Some(failed))
     }
 
-    pub async fn delete_span(&mut self, id: SpanId) -> bool {
-        if self.memory.delete_span(id) {
-            if let Err(e) = self.backend.delete_span(id).await {
-                tracing::error!(%id, "failed to persist span deletion: {}", e);
-            }
-            true
-        } else {
-            false
-        }
+    pub async fn delete_span(&mut self, id: SpanId) -> Result<bool, StorageError> {
+        // Delete from backend first, then cache
+        self.backend.delete_span(id).await?;
+        self.memory.delete_span(id);
+        Ok(true)
     }
 
-    pub async fn delete_trace(&mut self, trace_id: TraceId) -> usize {
+    pub async fn delete_trace(&mut self, trace_id: TraceId) -> Result<usize, StorageError> {
+        // Delete from backend first, then cache
+        self.backend.delete_trace_spans(trace_id).await?;
+        self.backend.delete_trace(trace_id).await?;
         let count = self.memory.delete_trace(trace_id);
         self.trace_meta.remove(&trace_id);
-        if count > 0 {
-            if let Err(e) = self.backend.delete_trace_spans(trace_id).await {
-                tracing::error!(%trace_id, "failed to persist trace span deletion: {}", e);
-            }
-        }
-        let _ = self.backend.delete_trace(trace_id).await;
-        count
+        Ok(count)
     }
 
     /// Delete all spans started before the given cutoff time.
     /// Returns the number of spans deleted.
-    pub async fn delete_spans_before(&mut self, cutoff: chrono::DateTime<chrono::Utc>) -> usize {
+    pub async fn delete_spans_before(&mut self, cutoff: chrono::DateTime<chrono::Utc>) -> Result<usize, StorageError> {
         let expired_ids: Vec<SpanId> = self.memory
             .all_spans()
             .filter(|s| s.started_at() < cutoff)
@@ -643,11 +630,9 @@ impl<B: StorageBackend> PersistentStore<B> {
             .collect();
 
         let count = expired_ids.len();
-        for id in expired_ids {
-            self.memory.delete_span(id);
-            if let Err(e) = self.backend.delete_span(id).await {
-                tracing::error!(%id, "failed to persist span deletion during retention cleanup: {}", e);
-            }
+        for id in &expired_ids {
+            self.backend.delete_span(*id).await?;
+            self.memory.delete_span(*id);
         }
 
         // Also clean up traces that now have zero spans
@@ -656,17 +641,19 @@ impl<B: StorageBackend> PersistentStore<B> {
             .cloned()
             .collect();
         for tid in empty_traces {
+            self.backend.delete_trace(tid).await?;
             self.trace_meta.remove(&tid);
-            let _ = self.backend.delete_trace(tid).await;
         }
 
         if count > 0 {
             tracing::info!(count, "retention cleanup: deleted expired spans");
         }
-        count
+        Ok(count)
     }
 
-    pub async fn clear(&mut self) {
+    pub async fn clear(&mut self) -> Result<(), StorageError> {
+        // Clear backend first, then cache
+        self.backend.clear_spans().await?;
         self.memory.clear();
         self.trace_meta.clear();
         self.file_versions.clear();
@@ -677,18 +664,15 @@ impl<B: StorageBackend> PersistentStore<B> {
         self.eval_results.clear();
         self.capture_rules.clear();
         // Note: provider_connections are NOT cleared on "clear all data" — they are org settings, not trace data.
-        if let Err(e) = self.backend.clear_spans().await {
-            tracing::error!("failed to persist clear: {}", e);
-        }
+        Ok(())
     }
 
     // --- Trace methods ---
 
-    pub async fn save_trace(&mut self, trace: Trace) {
-        if let Err(e) = self.backend.save_trace(&trace).await {
-            tracing::error!("failed to persist trace: {}", e);
-        }
+    pub async fn save_trace(&mut self, trace: Trace) -> Result<(), StorageError> {
+        self.backend.save_trace(&trace).await?;
         self.trace_meta.insert(trace.id, trace);
+        Ok(())
     }
 
     pub fn get_trace(&self, id: TraceId) -> Option<&Trace> {
@@ -701,17 +685,15 @@ impl<B: StorageBackend> PersistentStore<B> {
 
     // --- File methods ---
 
-    pub async fn save_file_version(&mut self, version: FileVersion) {
-        if let Err(e) = self.backend.save_file_version(&version).await {
-            tracing::error!("failed to persist file version: {}", e);
-        }
+    pub async fn save_file_version(&mut self, version: FileVersion) -> Result<(), StorageError> {
+        self.backend.save_file_version(&version).await?;
         self.file_versions.push(version);
+        Ok(())
     }
 
-    pub async fn save_file_content(&self, hash: &str, content: &[u8]) {
-        if let Err(e) = self.backend.save_file_content(hash, content).await {
-            tracing::error!("failed to persist file content: {}", e);
-        }
+    pub async fn save_file_content(&self, hash: &str, content: &[u8]) -> Result<(), StorageError> {
+        self.backend.save_file_content(hash, content).await?;
+        Ok(())
     }
 
     pub async fn load_file_content(&self, hash: &str) -> Result<Vec<u8>, StorageError> {
@@ -751,11 +733,10 @@ impl<B: StorageBackend> PersistentStore<B> {
 
     // --- Dataset methods ---
 
-    pub async fn save_dataset(&mut self, dataset: Dataset) {
-        if let Err(e) = self.backend.save_dataset(&dataset).await {
-            tracing::error!("failed to persist dataset: {}", e);
-        }
+    pub async fn save_dataset(&mut self, dataset: Dataset) -> Result<(), StorageError> {
+        self.backend.save_dataset(&dataset).await?;
         self.datasets.insert(dataset.id, dataset);
+        Ok(())
     }
 
     pub fn get_dataset(&self, id: DatasetId) -> Option<&Dataset> {
@@ -782,63 +763,64 @@ impl<B: StorageBackend> PersistentStore<B> {
         self.datasets.values()
     }
 
-    pub async fn delete_dataset(&mut self, id: DatasetId) -> bool {
-        if self.datasets.remove(&id).is_some() {
-            // Remove associated datapoints from memory
-            let dp_ids: Vec<DatapointId> = self
-                .datapoints
-                .values()
-                .filter(|dp| dp.dataset_id == id)
-                .map(|dp| dp.id)
-                .collect();
-            for dp_id in &dp_ids {
-                self.datapoints.remove(dp_id);
-            }
-            // Remove associated queue items from memory
-            let qi_ids: Vec<QueueItemId> = self
-                .queue_items
-                .values()
-                .filter(|qi| qi.dataset_id == id)
-                .map(|qi| qi.id)
-                .collect();
-            for qi_id in &qi_ids {
-                self.queue_items.remove(qi_id);
-            }
-            // Remove associated eval runs and their results from memory
-            let run_ids: Vec<EvalRunId> = self
-                .eval_runs
-                .values()
-                .filter(|r| r.dataset_id == id)
-                .map(|r| r.id)
-                .collect();
-            for run_id in &run_ids {
-                self.eval_runs.remove(run_id);
-                let result_ids: Vec<EvalResultId> = self
-                    .eval_results
-                    .values()
-                    .filter(|r| r.run_id == *run_id)
-                    .map(|r| r.id)
-                    .collect();
-                for rid in result_ids {
-                    self.eval_results.remove(&rid);
-                }
-            }
-            // Remove associated capture rules from memory
-            let rule_ids: Vec<CaptureRuleId> = self
-                .capture_rules
-                .values()
-                .filter(|r| r.dataset_id == id)
-                .map(|r| r.id)
-                .collect();
-            for rule_id in &rule_ids {
-                self.capture_rules.remove(rule_id);
-            }
-            // Cascade delete handled by FK in SQLite, just delete the dataset
-            let _ = self.backend.delete_dataset(id).await;
-            true
-        } else {
-            false
+    pub async fn delete_dataset(&mut self, id: DatasetId) -> Result<bool, StorageError> {
+        if !self.datasets.contains_key(&id) {
+            return Ok(false);
         }
+        // Delete from backend first (cascade handled by FK in SQLite)
+        self.backend.delete_dataset(id).await?;
+        // Then clean up cache
+        self.datasets.remove(&id);
+        // Remove associated datapoints from memory
+        let dp_ids: Vec<DatapointId> = self
+            .datapoints
+            .values()
+            .filter(|dp| dp.dataset_id == id)
+            .map(|dp| dp.id)
+            .collect();
+        for dp_id in &dp_ids {
+            self.datapoints.remove(dp_id);
+        }
+        // Remove associated queue items from memory
+        let qi_ids: Vec<QueueItemId> = self
+            .queue_items
+            .values()
+            .filter(|qi| qi.dataset_id == id)
+            .map(|qi| qi.id)
+            .collect();
+        for qi_id in &qi_ids {
+            self.queue_items.remove(qi_id);
+        }
+        // Remove associated eval runs and their results from memory
+        let run_ids: Vec<EvalRunId> = self
+            .eval_runs
+            .values()
+            .filter(|r| r.dataset_id == id)
+            .map(|r| r.id)
+            .collect();
+        for run_id in &run_ids {
+            self.eval_runs.remove(run_id);
+            let result_ids: Vec<EvalResultId> = self
+                .eval_results
+                .values()
+                .filter(|r| r.run_id == *run_id)
+                .map(|r| r.id)
+                .collect();
+            for rid in result_ids {
+                self.eval_results.remove(&rid);
+            }
+        }
+        // Remove associated capture rules from memory
+        let rule_ids: Vec<CaptureRuleId> = self
+            .capture_rules
+            .values()
+            .filter(|r| r.dataset_id == id)
+            .map(|r| r.id)
+            .collect();
+        for rule_id in &rule_ids {
+            self.capture_rules.remove(rule_id);
+        }
+        Ok(true)
     }
 
     pub fn dataset_count(&self) -> usize {
@@ -847,11 +829,10 @@ impl<B: StorageBackend> PersistentStore<B> {
 
     // --- Datapoint methods ---
 
-    pub async fn save_datapoint(&mut self, dp: Datapoint) {
-        if let Err(e) = self.backend.save_datapoint(&dp).await {
-            tracing::error!("failed to persist datapoint: {}", e);
-        }
+    pub async fn save_datapoint(&mut self, dp: Datapoint) -> Result<(), StorageError> {
+        self.backend.save_datapoint(&dp).await?;
         self.datapoints.insert(dp.id, dp);
+        Ok(())
     }
 
     pub fn get_datapoint(&self, id: DatapointId) -> Option<&Datapoint> {
@@ -890,32 +871,32 @@ impl<B: StorageBackend> PersistentStore<B> {
             .count()
     }
 
-    pub async fn delete_datapoint(&mut self, id: DatapointId) -> bool {
-        if self.datapoints.remove(&id).is_some() {
-            // Remove queue items referencing this datapoint
-            let qi_ids: Vec<QueueItemId> = self
-                .queue_items
-                .values()
-                .filter(|qi| qi.datapoint_id == id)
-                .map(|qi| qi.id)
-                .collect();
-            for qi_id in &qi_ids {
-                self.queue_items.remove(qi_id);
-            }
-            let _ = self.backend.delete_datapoint(id).await;
-            true
-        } else {
-            false
+    pub async fn delete_datapoint(&mut self, id: DatapointId) -> Result<bool, StorageError> {
+        if !self.datapoints.contains_key(&id) {
+            return Ok(false);
         }
+        // Delete from backend first
+        self.backend.delete_datapoint(id).await?;
+        // Then clean up cache
+        self.datapoints.remove(&id);
+        let qi_ids: Vec<QueueItemId> = self
+            .queue_items
+            .values()
+            .filter(|qi| qi.datapoint_id == id)
+            .map(|qi| qi.id)
+            .collect();
+        for qi_id in &qi_ids {
+            self.queue_items.remove(qi_id);
+        }
+        Ok(true)
     }
 
     // --- Queue methods ---
 
-    pub async fn save_queue_item(&mut self, item: QueueItem) {
-        if let Err(e) = self.backend.save_queue_item(&item).await {
-            tracing::error!("failed to persist queue item: {}", e);
-        }
+    pub async fn save_queue_item(&mut self, item: QueueItem) -> Result<(), StorageError> {
+        self.backend.save_queue_item(&item).await?;
         self.queue_items.insert(item.id, item);
+        Ok(())
     }
 
     pub fn get_queue_item(&self, id: QueueItemId) -> Option<&QueueItem> {
@@ -937,45 +918,46 @@ impl<B: StorageBackend> PersistentStore<B> {
         &mut self,
         id: QueueItemId,
         claimed_by: impl Into<String>,
-    ) -> Option<QueueItem> {
-        let item = self.queue_items.remove(&id)?;
+    ) -> Result<Option<QueueItem>, StorageError> {
+        let item = match self.queue_items.remove(&id) {
+            Some(i) => i,
+            None => return Ok(None),
+        };
         if item.status != QueueItemStatus::Pending {
             self.queue_items.insert(id, item);
-            return None;
+            return Ok(None);
         }
         let claimed = item.claim(claimed_by);
-        if let Err(e) = self.backend.save_queue_item(&claimed).await {
-            tracing::error!("failed to persist queue item claim: {}", e);
-        }
+        self.backend.save_queue_item(&claimed).await?;
         self.queue_items.insert(id, claimed.clone());
-        Some(claimed)
+        Ok(Some(claimed))
     }
 
     pub async fn complete_queue_item(
         &mut self,
         id: QueueItemId,
         edited_data: Option<serde_json::Value>,
-    ) -> Option<QueueItem> {
-        let item = self.queue_items.remove(&id)?;
+    ) -> Result<Option<QueueItem>, StorageError> {
+        let item = match self.queue_items.remove(&id) {
+            Some(i) => i,
+            None => return Ok(None),
+        };
         if item.status != QueueItemStatus::Claimed {
             self.queue_items.insert(id, item);
-            return None;
+            return Ok(None);
         }
         let completed = item.complete(edited_data);
-        if let Err(e) = self.backend.save_queue_item(&completed).await {
-            tracing::error!("failed to persist queue item completion: {}", e);
-        }
+        self.backend.save_queue_item(&completed).await?;
         self.queue_items.insert(id, completed.clone());
-        Some(completed)
+        Ok(Some(completed))
     }
 
     // --- Eval Run methods ---
 
-    pub async fn save_eval_run(&mut self, run: EvalRun) {
-        if let Err(e) = self.backend.save_eval_run(&run).await {
-            tracing::error!("failed to persist eval run: {}", e);
-        }
+    pub async fn save_eval_run(&mut self, run: EvalRun) -> Result<(), StorageError> {
+        self.backend.save_eval_run(&run).await?;
         self.eval_runs.insert(run.id, run);
+        Ok(())
     }
 
     pub fn get_eval_run(&self, id: EvalRunId) -> Option<&EvalRun> {
@@ -989,33 +971,33 @@ impl<B: StorageBackend> PersistentStore<B> {
             .collect()
     }
 
-    pub async fn delete_eval_run(&mut self, id: EvalRunId) -> bool {
-        if self.eval_runs.remove(&id).is_some() {
-            // Remove associated results from memory
-            let result_ids: Vec<EvalResultId> = self
-                .eval_results
-                .values()
-                .filter(|r| r.run_id == id)
-                .map(|r| r.id)
-                .collect();
-            for rid in result_ids {
-                self.eval_results.remove(&rid);
-            }
-            let _ = self.backend.delete_eval_run_results(id).await;
-            let _ = self.backend.delete_eval_run(id).await;
-            true
-        } else {
-            false
+    pub async fn delete_eval_run(&mut self, id: EvalRunId) -> Result<bool, StorageError> {
+        if !self.eval_runs.contains_key(&id) {
+            return Ok(false);
         }
+        // Delete from backend first
+        self.backend.delete_eval_run_results(id).await?;
+        self.backend.delete_eval_run(id).await?;
+        // Then clean up cache
+        self.eval_runs.remove(&id);
+        let result_ids: Vec<EvalResultId> = self
+            .eval_results
+            .values()
+            .filter(|r| r.run_id == id)
+            .map(|r| r.id)
+            .collect();
+        for rid in result_ids {
+            self.eval_results.remove(&rid);
+        }
+        Ok(true)
     }
 
     // --- Eval Result methods ---
 
-    pub async fn save_eval_result(&mut self, result: EvalResult) {
-        if let Err(e) = self.backend.save_eval_result(&result).await {
-            tracing::error!("failed to persist eval result: {}", e);
-        }
+    pub async fn save_eval_result(&mut self, result: EvalResult) -> Result<(), StorageError> {
+        self.backend.save_eval_result(&result).await?;
         self.eval_results.insert(result.id, result);
+        Ok(())
     }
 
     pub fn get_eval_result(&self, id: EvalResultId) -> Option<&EvalResult> {
@@ -1031,11 +1013,10 @@ impl<B: StorageBackend> PersistentStore<B> {
 
     // --- Capture Rule methods ---
 
-    pub async fn save_capture_rule(&mut self, rule: CaptureRule) {
-        if let Err(e) = self.backend.save_capture_rule(&rule).await {
-            tracing::error!("failed to persist capture rule: {}", e);
-        }
+    pub async fn save_capture_rule(&mut self, rule: CaptureRule) -> Result<(), StorageError> {
+        self.backend.save_capture_rule(&rule).await?;
         self.capture_rules.insert(rule.id, rule);
+        Ok(())
     }
 
     pub fn get_capture_rule(&self, id: CaptureRuleId) -> Option<&CaptureRule> {
@@ -1056,22 +1037,21 @@ impl<B: StorageBackend> PersistentStore<B> {
             .collect()
     }
 
-    pub async fn delete_capture_rule(&mut self, id: CaptureRuleId) -> bool {
-        if self.capture_rules.remove(&id).is_some() {
-            let _ = self.backend.delete_capture_rule(id).await;
-            true
-        } else {
-            false
+    pub async fn delete_capture_rule(&mut self, id: CaptureRuleId) -> Result<bool, StorageError> {
+        if !self.capture_rules.contains_key(&id) {
+            return Ok(false);
         }
+        self.backend.delete_capture_rule(id).await?;
+        self.capture_rules.remove(&id);
+        Ok(true)
     }
 
     // --- Provider Connection operations ---
 
-    pub async fn save_provider_connection(&mut self, conn: ProviderConnection) {
-        if let Err(e) = self.backend.save_provider_connection(&conn).await {
-            tracing::error!("failed to persist provider connection: {}", e);
-        }
+    pub async fn save_provider_connection(&mut self, conn: ProviderConnection) -> Result<(), StorageError> {
+        self.backend.save_provider_connection(&conn).await?;
         self.provider_connections.insert(conn.id, conn);
+        Ok(())
     }
 
     pub fn get_provider_connection(&self, id: ProviderConnectionId) -> Option<&ProviderConnection> {
@@ -1082,12 +1062,12 @@ impl<B: StorageBackend> PersistentStore<B> {
         self.provider_connections.values().collect()
     }
 
-    pub async fn delete_provider_connection(&mut self, id: ProviderConnectionId) -> bool {
-        if self.provider_connections.remove(&id).is_some() {
-            let _ = self.backend.delete_provider_connection(id).await;
-            true
-        } else {
-            false
+    pub async fn delete_provider_connection(&mut self, id: ProviderConnectionId) -> Result<bool, StorageError> {
+        if !self.provider_connections.contains_key(&id) {
+            return Ok(false);
         }
+        self.backend.delete_provider_connection(id).await?;
+        self.provider_connections.remove(&id);
+        Ok(true)
     }
 }

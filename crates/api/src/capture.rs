@@ -4,11 +4,13 @@
 //! Matching rules (subject to sampling) create new datapoints in the target dataset.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
 use trace::{CaptureRule, Datapoint, DatapointKind, DatapointSource, Span};
 
+use crate::events::EventLog;
 use crate::org_store::SharedStore;
 use crate::SystemEvent;
 
@@ -21,6 +23,8 @@ pub async fn process_capture_rules(
     store: &SharedStore,
     span: &Span,
     events_tx: &broadcast::Sender<SystemEvent>,
+    event_log: &Arc<dyn EventLog>,
+    org_id: &str,
 ) {
     // Collect matching rules under a read lock
     let matching_rules: Vec<CaptureRule> = {
@@ -71,13 +75,18 @@ pub async fn process_capture_rules(
         // Save datapoint and update captured count
         {
             let mut w = store.write().await;
-            w.save_datapoint(dp.clone()).await;
+            if let Err(e) = w.save_datapoint(dp.clone()).await {
+                tracing::error!(rule_id = %rule.id, "capture: failed to save datapoint: {e}");
+                continue;
+            }
 
             // Increment the rule's captured_count
             if let Some(current_rule) = w.get_capture_rule(rule.id).cloned() {
                 let mut updated = current_rule;
                 updated.captured_count += 1;
-                w.save_capture_rule(updated).await;
+                if let Err(e) = w.save_capture_rule(updated).await {
+                    tracing::error!(rule_id = %rule.id, "capture: failed to update capture rule count: {e}");
+                }
             }
         }
 
@@ -89,13 +98,16 @@ pub async fn process_capture_rules(
             "capture rule fired, created datapoint"
         );
 
-        // Emit events
-        let _ = events_tx.send(SystemEvent::DatapointCreated {
-            datapoint: dp.clone(),
-        });
-        let _ = events_tx.send(SystemEvent::CaptureRuleFired {
-            rule_id: rule.id,
-            datapoint: dp,
-        });
+        // Emit events (broadcast + durable log)
+        let evt1 = SystemEvent::DatapointCreated { datapoint: dp.clone() };
+        let _ = events_tx.send(evt1.clone());
+        if let Err(e) = event_log.append(org_id, &evt1).await {
+            tracing::warn!("failed to log DatapointCreated event: {e}");
+        }
+        let evt2 = SystemEvent::CaptureRuleFired { rule_id: rule.id, datapoint: dp };
+        let _ = events_tx.send(evt2.clone());
+        if let Err(e) = event_log.append(org_id, &evt2).await {
+            tracing::warn!("failed to log CaptureRuleFired event: {e}");
+        }
     }
 }

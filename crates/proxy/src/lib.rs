@@ -85,12 +85,53 @@ fn extract_tokens(body: &Value, provider: Option<&str>) -> (Option<u64>, Option<
     }
 }
 
-/// Truncate a string for preview mode
+/// Truncate a string for preview mode (character-aware, safe for multi-byte UTF-8)
 fn preview_string(s: &str, max_chars: usize) -> String {
-    if s.len() <= max_chars {
-        s.to_string()
+    let mut chars = s.chars();
+    let truncated: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{}...", truncated)
     } else {
-        format!("{}...", &s[..max_chars])
+        truncated
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_string_ascii() {
+        assert_eq!(preview_string("hello world", 5), "hello...");
+        assert_eq!(preview_string("hello", 5), "hello");
+        assert_eq!(preview_string("hi", 10), "hi");
+    }
+
+    #[test]
+    fn preview_string_emoji() {
+        // "Hello 🌍 World" — 🌍 is 4 bytes but 1 char
+        assert_eq!(preview_string("Hello 🌍 World", 7), "Hello 🌍...");
+        assert_eq!(preview_string("Hello 🌍 World", 100), "Hello 🌍 World");
+        // Truncate right at the emoji
+        assert_eq!(preview_string("🌍🌍🌍", 2), "🌍🌍...");
+    }
+
+    #[test]
+    fn preview_string_cjk() {
+        // Each CJK char is 3 bytes
+        assert_eq!(preview_string("日本語テスト", 3), "日本語...");
+        assert_eq!(preview_string("日本語テスト", 6), "日本語テスト");
+    }
+
+    #[test]
+    fn preview_string_empty() {
+        assert_eq!(preview_string("", 10), "");
+        assert_eq!(preview_string("", 0), "");
+    }
+
+    #[test]
+    fn preview_string_zero_max() {
+        assert_eq!(preview_string("hello", 0), "...");
     }
 }
 
@@ -164,7 +205,9 @@ async fn proxy_handler(State(state): State<ProxyState>, req: Request<Body>) -> R
 
     {
         let mut store = state.store.write().await;
-        store.insert(span).await;
+        if let Err(e) = store.insert(span).await {
+            tracing::error!(%span_id, "failed to insert proxy span: {e}");
+        }
     }
 
     tracing::info!(%trace_id, %span_id, %span_name, %model, "proxying request");
@@ -231,13 +274,19 @@ async fn proxy_handler(State(state): State<ProxyState>, req: Request<Body>) -> R
                     {
                         let mut store = state.store.write().await;
                         if status.is_success() {
-                            store
+                            if let Err(e) = store
                                 .complete_span_with_kind(span_id, updated_kind, output_payload)
-                                .await;
+                                .await
+                            {
+                                tracing::error!(%span_id, "failed to complete proxy span: {e}");
+                            }
                         } else {
-                            store
+                            if let Err(e) = store
                                 .fail_span(span_id, format!("HTTP {}", status))
-                                .await;
+                                .await
+                            {
+                                tracing::error!(%span_id, "failed to fail proxy span: {e}");
+                            }
                         }
                     }
 
@@ -282,7 +331,9 @@ async fn proxy_handler(State(state): State<ProxyState>, req: Request<Body>) -> R
 
 async fn fail_span_helper(store: &SharedStore, span_id: trace::SpanId, error: &str) {
     let mut w = store.write().await;
-    w.fail_span(span_id, error).await;
+    if let Err(e) = w.fail_span(span_id, error).await {
+        tracing::error!(%span_id, "failed to record span failure: {e}");
+    }
     tracing::warn!(%span_id, %error, "span failed");
 }
 

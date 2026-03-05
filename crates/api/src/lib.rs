@@ -3,6 +3,7 @@ pub mod auth_keys;
 pub mod auth_routes;
 pub mod billing_routes;
 pub mod capture;
+pub mod event_log;
 pub mod events;
 pub mod jobs;
 pub mod metrics;
@@ -210,6 +211,8 @@ pub enum SystemEvent {
 pub struct AppState {
     pub org_stores: Arc<OrgStoreManager>,
     pub events_tx: broadcast::Sender<SystemEvent>,
+    /// Durable event log for SSE replay on reconnect.
+    pub event_log: Arc<dyn events::EventLog>,
     pub start_time: Instant,
     pub config: Arc<RwLock<serde_json::Value>>,
     pub config_path: Arc<String>,
@@ -236,6 +239,18 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Emit a system event: broadcast to live SSE subscribers AND append to durable log.
+    pub fn emit_event(&self, event: SystemEvent, org_id: &str) {
+        let _ = self.events_tx.send(event.clone());
+        let log = self.event_log.clone();
+        let org_id = org_id.to_string();
+        tokio::spawn(async move {
+            if let Err(e) = log.append(&org_id, &event).await {
+                tracing::warn!("failed to append event to log: {e}");
+            }
+        });
+    }
+
     /// Get the store for a given org. Returns `Err((StatusCode, String))` on failure.
     /// Prefer `store_for_project` in new code.
     pub async fn store_for_org(&self, org_id: auth::OrgId) -> Result<SharedStore, (StatusCode, String)> {
@@ -728,6 +743,24 @@ fn store_err_status(e: (StatusCode, String)) -> StatusCode {
     e.0
 }
 
+/// Convert a StorageError to a JSON error response (500).
+fn storage_err_json(e: storage::StorageError) -> (StatusCode, Json<serde_json::Value>) {
+    tracing::error!("storage error: {e}");
+    (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": format!("storage error: {e}") })))
+}
+
+/// Convert a StorageError to a plain StatusCode (500).
+fn storage_err_status(e: storage::StorageError) -> StatusCode {
+    tracing::error!("storage error: {e}");
+    StatusCode::INTERNAL_SERVER_ERROR
+}
+
+/// Convert a StorageError to a (StatusCode, String) error tuple.
+fn storage_err_string(e: storage::StorageError) -> (StatusCode, String) {
+    tracing::error!("storage error: {e}");
+    (StatusCode::INTERNAL_SERVER_ERROR, format!("storage error: {e}"))
+}
+
 // --- Trace handlers ---
 
 /// List all traces (paginated)
@@ -781,11 +814,9 @@ async fn create_trace(
     let trace = Trace::new(req.name).with_tags(req.tags);
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let mut w = store.write().await;
-    w.save_trace(trace.clone()).await;
+    w.save_trace(trace.clone()).await.map_err(storage_err_json)?;
     drop(w);
-    let _ = state
-        .events_tx
-        .send(SystemEvent::TraceCreated { trace: trace.clone() });
+    state.emit_event(SystemEvent::TraceCreated { trace: trace.clone() }, &ctx.org_id.to_string());
     Ok((StatusCode::CREATED, Json(trace)))
 }
 
@@ -968,10 +999,10 @@ async fn create_span(
 
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let mut w = store.write().await;
-    w.insert(span.clone()).await;
+    w.insert(span.clone()).await.map_err(storage_err_json)?;
     drop(w);
 
-    let _ = state.events_tx.send(SystemEvent::SpanCreated { span });
+    state.emit_event(SystemEvent::SpanCreated { span }, &ctx.org_id.to_string());
     tracing::debug!(%id, %trace_id, "span created");
     Ok((StatusCode::CREATED, Json(CreatedSpan { id, trace_id })))
 }
@@ -1028,17 +1059,26 @@ async fn complete_span(
     } else {
         w.complete_span(span_id, output).await
     };
+    let result = match result {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(%span_id, "storage error completing span: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    };
 
     if let Some(span) = result {
         drop(w);
-        let _ = state.events_tx.send(SystemEvent::SpanCompleted { span: span.clone() });
+        state.emit_event(SystemEvent::SpanCompleted { span: span.clone() }, &ctx.org_id.to_string());
         tracing::debug!(%span_id, "span completed");
 
         // Process auto-capture rules in the background
         let store_clone = store.clone();
         let events_tx = state.events_tx.clone();
+        let event_log = state.event_log.clone();
+        let org_id_str = ctx.org_id.to_string();
         tokio::spawn(async move {
-            capture::process_capture_rules(&store_clone, &span, &events_tx).await;
+            capture::process_capture_rules(&store_clone, &span, &events_tx, &event_log, &org_id_str).await;
         });
 
         StatusCode::OK
@@ -1086,9 +1126,16 @@ async fn fail_span(
         return StatusCode::NOT_FOUND;
     }
 
-    if let Some(span) = w.fail_span(span_id, req.error).await {
+    let result = match w.fail_span(span_id, req.error).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(%span_id, "storage error failing span: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    };
+    if let Some(span) = result {
         drop(w);
-        let _ = state.events_tx.send(SystemEvent::SpanFailed { span });
+        state.emit_event(SystemEvent::SpanFailed { span }, &ctx.org_id.to_string());
         tracing::debug!(%span_id, "span failed");
         StatusCode::OK
     } else {
@@ -1277,10 +1324,24 @@ async fn export_json(
 
 // --- SSE handler ---
 
-/// Server-sent events stream for real-time updates
+#[derive(Debug, Deserialize)]
+struct EventsQuery {
+    /// Replay events after this sequence number (alternative to Last-Event-ID header).
+    since: Option<u64>,
+}
+
+/// Server-sent events stream for real-time updates.
+///
+/// Supports reconnection with replay:
+/// - Pass `Last-Event-ID` header (set automatically by EventSource on reconnect)
+/// - Or pass `?since=<sequence>` query parameter
+///
+/// On reconnect, all events after the given sequence are replayed from the durable
+/// log, then the stream switches to live events seamlessly.
 #[utoipa::path(
     get,
     path = "/api/events",
+    params(("since" = Option<u64>, Query, description = "Replay events after this sequence")),
     responses(
         (status = 200, description = "SSE event stream"),
     ),
@@ -1290,15 +1351,66 @@ async fn export_json(
 async fn events(
     auth::Auth(_ctx): auth::Auth,
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Query(query): Query<EventsQuery>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    // Determine the replay point: Last-Event-ID header takes precedence over query param.
+    let last_id: Option<u64> = headers
+        .get("Last-Event-ID")
+        .or_else(|| headers.get("last-event-id"))
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .or(query.since);
+
+    // Subscribe to the broadcast BEFORE replaying history to avoid gaps.
     let rx = state.events_tx.subscribe();
-    let stream = BroadcastStream::new(rx).filter_map(|result| match result {
-        Ok(event) => {
-            let json = serde_json::to_string(&event).ok()?;
-            Some(Ok(Event::default().data(json)))
+    let event_log = state.event_log.clone();
+
+    let stream = async_stream::stream! {
+        let mut last_seq: u64 = 0;
+
+        // Phase 1: Replay historical events from the durable log.
+        if let Some(since) = last_id {
+            last_seq = since;
+            match event_log.read_after(since, 10_000).await {
+                Ok(stored_events) => {
+                    for stored in stored_events {
+                        last_seq = stored.sequence;
+                        if let Ok(json) = serde_json::to_string(&stored.event) {
+                            yield Ok(Event::default()
+                                .id(stored.sequence.to_string())
+                                .data(json));
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("failed to read event log for replay: {e}");
+                }
+            }
         }
-        Err(_) => None,
-    });
+
+        // Phase 2: Switch to live stream, deduplicating by sequence.
+        // We track the latest sequence from the log to skip duplicates from the
+        // broadcast (events that were both logged and broadcast while we were replaying).
+        let mut live_stream = BroadcastStream::new(rx);
+        while let Some(result) = live_stream.next().await {
+            if let Ok(event) = result {
+                // Get the latest sequence to use as the event ID for live events.
+                let seq = event_log.latest_sequence().await.unwrap_or(0);
+                // Skip events we already replayed.
+                if seq <= last_seq {
+                    continue;
+                }
+                last_seq = seq;
+                if let Ok(json) = serde_json::to_string(&event) {
+                    yield Ok(Event::default()
+                        .id(seq.to_string())
+                        .data(json));
+                }
+            }
+        }
+    };
+
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
@@ -1329,13 +1441,18 @@ async fn delete_span(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
     };
     let mut w = store.write().await;
-    if w.delete_span(span_id).await {
-        drop(w);
-        let _ = state.events_tx.send(SystemEvent::SpanDeleted { span_id });
-        tracing::debug!(%span_id, "span deleted");
-        StatusCode::OK
-    } else {
-        StatusCode::NOT_FOUND
+    match w.delete_span(span_id).await {
+        Ok(true) => {
+            drop(w);
+            state.emit_event(SystemEvent::SpanDeleted { span_id }, &ctx.org_id.to_string());
+            tracing::debug!(%span_id, "span deleted");
+            StatusCode::OK
+        }
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(e) => {
+            tracing::error!(%span_id, "storage error deleting span: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -1359,13 +1476,11 @@ async fn delete_trace(
     require_scope(&ctx, auth::Scope::TracesWrite).map_err(|_| StatusCode::FORBIDDEN)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
-    let spans_deleted = w.delete_trace(trace_id).await;
+    let spans_deleted = w.delete_trace(trace_id).await.map_err(storage_err_status)?;
     drop(w);
     if spans_deleted > 0 {
-        let _ = state
-            .events_tx
-            .send(SystemEvent::TraceDeleted { trace_id });
-        tracing::debug!(%trace_id, %spans_deleted, "trace deleted");
+        state.emit_event(SystemEvent::TraceDeleted { trace_id }, &ctx.org_id.to_string());
+        tracing::debug!(%trace_id, spans_deleted, "trace deleted");
         Ok(Json(DeletedTrace {
             trace_id,
             spans_deleted,
@@ -1392,9 +1507,9 @@ async fn clear_all_traces(
     require_scope(&ctx, auth::Scope::TracesWrite)?;
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let mut w = store.write().await;
-    w.clear().await;
+    w.clear().await.map_err(storage_err_json)?;
     drop(w);
-    let _ = state.events_tx.send(SystemEvent::Cleared);
+    state.emit_event(SystemEvent::Cleared, &ctx.org_id.to_string());
     tracing::debug!("all traces cleared");
     Ok(Json(ClearedAll {
         message: "All traces cleared".to_string(),
@@ -1568,11 +1683,9 @@ async fn create_dataset(
     let dataset = Dataset::new(req.name, req.description);
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let mut w = store.write().await;
-    w.save_dataset(dataset.clone()).await;
+    w.save_dataset(dataset.clone()).await.map_err(storage_err_json)?;
     drop(w);
-    let _ = state
-        .events_tx
-        .send(SystemEvent::DatasetCreated { dataset: dataset.clone() });
+    state.emit_event(SystemEvent::DatasetCreated { dataset: dataset.clone() }, &ctx.org_id.to_string());
     Ok((StatusCode::CREATED, Json(dataset)))
 }
 
@@ -1634,7 +1747,7 @@ async fn update_dataset(
         updated.description = Some(desc);
     }
     updated.updated_at = chrono::Utc::now();
-    w.save_dataset(updated.clone()).await;
+    w.save_dataset(updated.clone()).await.map_err(storage_err_status)?;
     let count = w.datapoint_count_for_dataset(dataset_id);
     Ok(Json(DatasetResponse {
         dataset: updated,
@@ -1667,14 +1780,17 @@ async fn delete_dataset_handler(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
     };
     let mut w = store.write().await;
-    if w.delete_dataset(dataset_id).await {
-        drop(w);
-        let _ = state
-            .events_tx
-            .send(SystemEvent::DatasetDeleted { dataset_id });
-        StatusCode::OK
-    } else {
-        StatusCode::NOT_FOUND
+    match w.delete_dataset(dataset_id).await {
+        Ok(true) => {
+            drop(w);
+            state.emit_event(SystemEvent::DatasetDeleted { dataset_id }, &ctx.org_id.to_string());
+            StatusCode::OK
+        }
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(e) => {
+            tracing::error!(%dataset_id, "storage error deleting dataset: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -1769,11 +1885,9 @@ async fn create_datapoint(
         return Err(StatusCode::NOT_FOUND);
     }
     let dp = Datapoint::new(dataset_id, req.kind, DatapointSource::Manual);
-    w.save_datapoint(dp.clone()).await;
+    w.save_datapoint(dp.clone()).await.map_err(storage_err_status)?;
     drop(w);
-    let _ = state
-        .events_tx
-        .send(SystemEvent::DatapointCreated { datapoint: dp.clone() });
+    state.emit_event(SystemEvent::DatapointCreated { datapoint: dp.clone() }, &ctx.org_id.to_string());
     Ok((StatusCode::CREATED, Json(dp)))
 }
 
@@ -1813,10 +1927,13 @@ async fn delete_datapoint_handler(
     } else {
         return StatusCode::NOT_FOUND;
     }
-    if w.delete_datapoint(dp_id).await {
-        StatusCode::OK
-    } else {
-        StatusCode::NOT_FOUND
+    match w.delete_datapoint(dp_id).await {
+        Ok(true) => StatusCode::OK,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(e) => {
+            tracing::error!("storage error deleting datapoint: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -1859,11 +1976,9 @@ async fn export_span_to_dataset(
 
     let dp = Datapoint::new(dataset_id, kind, DatapointSource::SpanExport)
         .with_source_span(req.span_id);
-    w.save_datapoint(dp.clone()).await;
+    w.save_datapoint(dp.clone()).await.map_err(storage_err_status)?;
     drop(w);
-    let _ = state
-        .events_tx
-        .send(SystemEvent::DatapointCreated { datapoint: dp.clone() });
+    state.emit_event(SystemEvent::DatapointCreated { datapoint: dp.clone() }, &ctx.org_id.to_string());
     Ok((StatusCode::CREATED, Json(dp)))
 }
 
@@ -2021,10 +2136,8 @@ async fn import_file(
         let mut w = store.write().await;
         for kind in kinds {
             let dp = Datapoint::new(dataset_id, kind, DatapointSource::FileUpload);
-            let _ = state
-                .events_tx
-                .send(SystemEvent::DatapointCreated { datapoint: dp.clone() });
-            w.save_datapoint(dp).await;
+            state.emit_event(SystemEvent::DatapointCreated { datapoint: dp.clone() }, &ctx.org_id.to_string());
+            w.save_datapoint(dp).await.map_err(storage_err_string)?;
             imported += 1;
         }
     }
@@ -2107,10 +2220,8 @@ async fn enqueue_datapoints(
             }
             let original_data = serde_json::to_value(&dp.kind).ok();
             let item = QueueItem::new(dataset_id, dp_id, original_data);
-            let _ = state
-                .events_tx
-                .send(SystemEvent::QueueItemUpdated { item: item.clone() });
-            w.save_queue_item(item).await;
+            state.emit_event(SystemEvent::QueueItemUpdated { item: item.clone() }, &ctx.org_id.to_string());
+            w.save_queue_item(item).await.map_err(storage_err_status)?;
             enqueued += 1;
         }
     }
@@ -2142,11 +2253,10 @@ async fn claim_queue_item(
     let item = w
         .claim_queue_item(item_id, req.claimed_by)
         .await
+        .map_err(storage_err_status)?
         .ok_or(StatusCode::CONFLICT)?;
     drop(w);
-    let _ = state
-        .events_tx
-        .send(SystemEvent::QueueItemUpdated { item: item.clone() });
+    state.emit_event(SystemEvent::QueueItemUpdated { item: item.clone() }, &ctx.org_id.to_string());
     Ok(Json(item))
 }
 
@@ -2192,18 +2302,17 @@ async fn submit_queue_item(
                 kind: new_kind,
                 ..dp
             };
-            w.save_datapoint(updated_dp).await;
+            w.save_datapoint(updated_dp).await.map_err(storage_err_status)?;
         }
     }
 
     let item = w
         .complete_queue_item(item_id, req.edited_data)
         .await
+        .map_err(storage_err_status)?
         .ok_or(StatusCode::CONFLICT)?;
     drop(w);
-    let _ = state
-        .events_tx
-        .send(SystemEvent::QueueItemUpdated { item: item.clone() });
+    state.emit_event(SystemEvent::QueueItemUpdated { item: item.clone() }, &ctx.org_id.to_string());
     Ok(Json(item))
 }
 
@@ -2298,17 +2407,13 @@ async fn export_span_and_enqueue(
     let original_data = serde_json::to_value(&dp.kind).ok();
 
     // Save datapoint
-    let _ = state
-        .events_tx
-        .send(SystemEvent::DatapointCreated { datapoint: dp.clone() });
-    w.save_datapoint(dp).await;
+    state.emit_event(SystemEvent::DatapointCreated { datapoint: dp.clone() }, &ctx.org_id.to_string());
+    w.save_datapoint(dp).await.map_err(storage_err_status)?;
 
     // Create and save queue item
     let item = QueueItem::new(dataset_id, dp_id, original_data);
-    let _ = state
-        .events_tx
-        .send(SystemEvent::QueueItemUpdated { item: item.clone() });
-    w.save_queue_item(item.clone()).await;
+    state.emit_event(SystemEvent::QueueItemUpdated { item: item.clone() }, &ctx.org_id.to_string());
+    w.save_queue_item(item.clone()).await.map_err(storage_err_status)?;
 
     Ok((StatusCode::CREATED, Json(item)))
 }
@@ -2422,18 +2527,20 @@ async fn create_eval_run(
     run.trace_id = Some(eval_trace.id);
 
     let mut w = store.write().await;
-    w.save_trace(eval_trace).await;
-    w.save_eval_run(run.clone()).await;
+    w.save_trace(eval_trace).await.map_err(storage_err_json)?;
+    w.save_eval_run(run.clone()).await.map_err(storage_err_json)?;
     drop(w);
 
-    let _ = state.events_tx.send(SystemEvent::EvalRunCreated { run: run.clone() });
+    state.emit_event(SystemEvent::EvalRunCreated { run: run.clone() }, &ctx.org_id.to_string());
 
     // Spawn the eval execution task
     let run_id = run.id;
     let events_tx = state.events_tx.clone();
+    let event_log = state.event_log.clone();
+    let org_id_str = ctx.org_id.to_string();
     let store_clone = store.clone();
     tokio::spawn(async move {
-        execute_eval_run(run_id, store_clone, events_tx).await;
+        execute_eval_run(run_id, store_clone, events_tx, event_log, org_id_str).await;
     });
 
     Ok((StatusCode::CREATED, Json(run)))
@@ -2467,10 +2574,13 @@ async fn delete_eval_run_handler(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
     };
     let mut w = store.write().await;
-    if w.delete_eval_run(run_id).await {
-        StatusCode::OK
-    } else {
-        StatusCode::NOT_FOUND
+    match w.delete_eval_run(run_id).await {
+        Ok(true) => StatusCode::OK,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(e) => {
+            tracing::error!(%run_id, "storage error deleting eval run: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -2490,9 +2600,9 @@ async fn cancel_eval_run(
     let mut updated = run;
     updated.status = EvalRunStatus::Cancelled;
     updated.completed_at = Some(chrono::Utc::now());
-    w.save_eval_run(updated.clone()).await;
+    w.save_eval_run(updated.clone()).await.map_err(storage_err_status)?;
     drop(w);
-    let _ = state.events_tx.send(SystemEvent::EvalRunCompleted { run: updated.clone() });
+    state.emit_event(SystemEvent::EvalRunCompleted { run: updated.clone() }, &ctx.org_id.to_string());
     Ok(Json(updated))
 }
 
@@ -2605,7 +2715,7 @@ async fn create_capture_rule(
         return Err(StatusCode::NOT_FOUND);
     }
     let rule = CaptureRule::new(dataset_id, req.name, req.filters, req.sample_rate);
-    w.save_capture_rule(rule.clone()).await;
+    w.save_capture_rule(rule.clone()).await.map_err(storage_err_status)?;
     Ok((StatusCode::CREATED, Json(rule)))
 }
 
@@ -2630,7 +2740,7 @@ async fn update_capture_rule(
     if let Some(sample_rate) = req.sample_rate {
         updated.sample_rate = sample_rate;
     }
-    w.save_capture_rule(updated.clone()).await;
+    w.save_capture_rule(updated.clone()).await.map_err(storage_err_status)?;
     Ok(Json(updated))
 }
 
@@ -2648,10 +2758,13 @@ async fn delete_capture_rule_handler(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
     };
     let mut w = store.write().await;
-    if w.delete_capture_rule(rule_id).await {
-        StatusCode::OK
-    } else {
-        StatusCode::NOT_FOUND
+    match w.delete_capture_rule(rule_id).await {
+        Ok(true) => StatusCode::OK,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(e) => {
+            tracing::error!(%rule_id, "storage error deleting capture rule: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -2667,7 +2780,7 @@ async fn toggle_capture_rule(
     let rule = w.get_capture_rule(rule_id).ok_or(StatusCode::NOT_FOUND)?.clone();
     let mut updated = rule;
     updated.enabled = !updated.enabled;
-    w.save_capture_rule(updated.clone()).await;
+    w.save_capture_rule(updated.clone()).await.map_err(storage_err_status)?;
     Ok(Json(updated))
 }
 
@@ -2698,7 +2811,7 @@ async fn create_provider_connection(
     conn.default_model = req.default_model;
     let info = conn.to_info();
     let mut w = store.write().await;
-    w.save_provider_connection(conn).await;
+    w.save_provider_connection(conn).await.map_err(storage_err_status)?;
     Ok((StatusCode::CREATED, Json(info)))
 }
 
@@ -2719,7 +2832,7 @@ async fn update_provider_connection(
     if let Some(default_model) = req.default_model { conn.default_model = Some(default_model); }
     conn.updated_at = chrono::Utc::now();
     let info = conn.to_info();
-    w.save_provider_connection(conn).await;
+    w.save_provider_connection(conn).await.map_err(storage_err_status)?;
     Ok(Json(info))
 }
 
@@ -2736,10 +2849,13 @@ async fn delete_provider_connection_handler(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
     };
     let mut w = store.write().await;
-    if w.delete_provider_connection(conn_id).await {
-        StatusCode::OK
-    } else {
-        StatusCode::NOT_FOUND
+    match w.delete_provider_connection(conn_id).await {
+        Ok(true) => StatusCode::OK,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(e) => {
+            tracing::error!(%conn_id, "storage error deleting provider connection: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -2840,6 +2956,8 @@ async fn execute_eval_run(
     run_id: EvalRunId,
     store: SharedStore,
     events_tx: broadcast::Sender<SystemEvent>,
+    event_log: Arc<dyn events::EventLog>,
+    org_id: String,
 ) {
     use std::time::Instant as StdInstant;
 
@@ -2862,9 +2980,18 @@ async fn execute_eval_run(
     run.results.total = datapoints.len();
     {
         let mut w = store.write().await;
-        w.save_eval_run(run.clone()).await;
+        if let Err(e) = w.save_eval_run(run.clone()).await {
+            tracing::error!(run_id = %run.id, "failed to persist eval run status: {e}");
+            return;
+        }
     }
-    let _ = events_tx.send(SystemEvent::EvalRunUpdated { run: run.clone() });
+    {
+        let evt = SystemEvent::EvalRunUpdated { run: run.clone() };
+        let _ = events_tx.send(evt.clone());
+        if let Err(e) = event_log.append(&org_id, &evt).await {
+            tracing::warn!("failed to log EvalRunUpdated event: {e}");
+        }
+    }
 
     // Resolve provider connection if referenced
     let provider_conn: Option<ProviderConnection> = if let Some(conn_id) = run.config.provider_connection_id {
@@ -3099,7 +3226,9 @@ async fn execute_eval_run(
         // Save the result
         {
             let mut w = store.write().await;
-            w.save_eval_result(eval_result).await;
+            if let Err(e) = w.save_eval_result(eval_result).await {
+                tracing::error!(%run_id, "failed to persist eval result: {e}");
+            }
 
             // Update run progress
             if let Some(current_run) = w.get_eval_run(run_id).cloned() {
@@ -3107,8 +3236,14 @@ async fn execute_eval_run(
                 updated.results.completed = completed;
                 updated.results.failed = failed;
                 updated.results.scores = compute_score_summary(&scores);
-                w.save_eval_run(updated.clone()).await;
-                let _ = events_tx.send(SystemEvent::EvalRunUpdated { run: updated });
+                if let Err(e) = w.save_eval_run(updated.clone()).await {
+                    tracing::error!(%run_id, "failed to persist eval run progress: {e}");
+                }
+                let evt = SystemEvent::EvalRunUpdated { run: updated };
+                let _ = events_tx.send(evt.clone());
+                if let Err(e) = event_log.append(&org_id, &evt).await {
+                    tracing::warn!("failed to log EvalRunUpdated event: {e}");
+                }
             }
         }
     }
@@ -3129,8 +3264,14 @@ async fn execute_eval_run(
             final_run.results.completed = completed;
             final_run.results.failed = failed;
             final_run.results.scores = compute_score_summary(&scores);
-            w.save_eval_run(final_run.clone()).await;
-            let _ = events_tx.send(SystemEvent::EvalRunCompleted { run: final_run });
+            if let Err(e) = w.save_eval_run(final_run.clone()).await {
+                tracing::error!(%run_id, "failed to persist final eval run: {e}");
+            }
+            let evt = SystemEvent::EvalRunCompleted { run: final_run };
+            let _ = events_tx.send(evt.clone());
+            if let Err(e) = event_log.append(&org_id, &evt).await {
+                tracing::warn!("failed to log EvalRunCompleted event: {e}");
+            }
         }
     }
 }
@@ -3574,6 +3715,34 @@ fn build_router(
     polar_access_token: Option<String>,
 ) -> Router {
     let (events_tx, _) = broadcast::channel(256);
+
+    // Create durable event log. In local mode, use SQLite alongside the config.
+    // In cloud mode, fall back to NoopEventLog (events are ephemeral via Redis Pub/Sub).
+    let event_log: Arc<dyn events::EventLog> = if auth_config.local_mode {
+        // Derive event log path from config path (same directory)
+        let log_path = if config_path.is_empty() {
+            std::path::PathBuf::from("data/event_log.db")
+        } else {
+            let p = std::path::Path::new(&config_path);
+            p.parent().unwrap_or(std::path::Path::new("data")).join("event_log.db")
+        };
+        match event_log::SqliteEventLog::open(&log_path) {
+            Ok(log) => {
+                tracing::info!(path = %log_path.display(), "opened SQLite event log");
+                let log = Arc::new(log);
+                // Spawn background trimmer — retain events for 24 hours
+                event_log::spawn_event_log_trimmer(log.clone(), std::time::Duration::from_secs(86400));
+                log
+            }
+            Err(e) => {
+                tracing::warn!("failed to open event log at {}: {e}, using noop", log_path.display());
+                Arc::new(events::NoopEventLog)
+            }
+        }
+    } else {
+        Arc::new(events::NoopEventLog)
+    };
+
     let api_key_lookup = api_key_lookup.unwrap_or_else(|| {
         Arc::new(auth_keys::NoopApiKeyLookup) as Arc<dyn auth::ApiKeyLookup>
     });
@@ -3605,6 +3774,7 @@ fn build_router(
     let state = AppState {
         org_stores,
         events_tx,
+        event_log,
         start_time,
         config: Arc::new(RwLock::new(config)),
         config_path: Arc::new(config_path),
@@ -3804,11 +3974,16 @@ pub async fn run_retention_cleanup(
 
             let cutoff = Utc::now() - Duration::days(retention_days as i64);
             let mut w = store.write().await;
-            let deleted = w.delete_spans_before(cutoff).await;
-            drop(w);
-            if deleted > 0 {
-                tracing::info!(%org_id, deleted, retention_days, "retention cleanup: cleaned org");
+            match w.delete_spans_before(cutoff).await {
+                Ok(deleted) if deleted > 0 => {
+                    tracing::info!(%org_id, deleted, retention_days, "retention cleanup: cleaned org");
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!(%org_id, "retention cleanup: storage error: {e}");
+                }
             }
+            drop(w);
         }
 
         tracing::debug!("retention cleanup: sweep complete");

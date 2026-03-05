@@ -166,6 +166,18 @@ const MIGRATIONS: &[&str] = &[
         data TEXT NOT NULL
     );
     "#,
+    // v5: durable event log for SSE replay
+    r#"
+    CREATE TABLE IF NOT EXISTS event_log (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type TEXT NOT NULL,
+        event_data TEXT NOT NULL,
+        org_id TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_event_log_org_seq ON event_log(org_id, sequence);
+    CREATE INDEX IF NOT EXISTS idx_event_log_created ON event_log(created_at);
+    "#,
 ];
 
 fn run_migrations(conn: &Connection) -> Result<(), StorageError> {

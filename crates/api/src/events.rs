@@ -4,12 +4,69 @@
 //! implementations for real-time event distribution across multiple server instances.
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::broadcast;
-use tracing::{debug, error, info, warn};
+use tracing::info;
 
 use crate::SystemEvent;
+
+// --- Durable Event Log ---
+
+/// A stored event with sequence number and metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredEvent {
+    pub sequence: u64,
+    pub event: SystemEvent,
+    pub timestamp: DateTime<Utc>,
+    pub org_id: String,
+}
+
+/// Error type for event log operations.
+#[derive(Debug, thiserror::Error)]
+pub enum EventLogError {
+    #[error("storage error: {0}")]
+    Storage(String),
+    #[error("serialization error: {0}")]
+    Serialization(String),
+}
+
+/// Durable event log for persisting and replaying SSE events.
+#[async_trait]
+pub trait EventLog: Send + Sync + 'static {
+    /// Append an event to the log. Returns the assigned sequence number.
+    async fn append(&self, org_id: &str, event: &SystemEvent) -> Result<u64, EventLogError>;
+
+    /// Read events with sequence > `after_sequence`, up to `limit`.
+    async fn read_after(&self, after_sequence: u64, limit: usize) -> Result<Vec<StoredEvent>, EventLogError>;
+
+    /// Delete events older than `max_age`.
+    async fn trim(&self, max_age: Duration) -> Result<usize, EventLogError>;
+
+    /// Get the latest sequence number (0 if empty).
+    async fn latest_sequence(&self) -> Result<u64, EventLogError>;
+}
+
+/// No-op event log that discards all events (used when no durable log is configured).
+pub struct NoopEventLog;
+
+#[async_trait]
+impl EventLog for NoopEventLog {
+    async fn append(&self, _org_id: &str, _event: &SystemEvent) -> Result<u64, EventLogError> {
+        Ok(0)
+    }
+    async fn read_after(&self, _after_sequence: u64, _limit: usize) -> Result<Vec<StoredEvent>, EventLogError> {
+        Ok(vec![])
+    }
+    async fn trim(&self, _max_age: Duration) -> Result<usize, EventLogError> {
+        Ok(0)
+    }
+    async fn latest_sequence(&self) -> Result<u64, EventLogError> {
+        Ok(0)
+    }
+}
 
 /// Event bus trait for publishing and subscribing to system events
 #[async_trait]
