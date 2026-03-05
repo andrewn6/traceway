@@ -196,6 +196,38 @@ pub struct Span {
     output: Option<serde_json::Value>,
 }
 
+impl Span {
+    /// Create a span with all fields pre-set. Used by OTLP ingest where IDs,
+    /// timestamps, and status arrive already determined by the sender.
+    pub fn from_parts(
+        id: SpanId,
+        trace_id: TraceId,
+        org_id: Option<OrgId>,
+        parent_id: Option<SpanId>,
+        name: String,
+        kind: SpanKind,
+        status: SpanStatus,
+        started_at: DateTime<Utc>,
+        ended_at: Option<DateTime<Utc>>,
+        input: Option<serde_json::Value>,
+        output: Option<serde_json::Value>,
+    ) -> Self {
+        Self {
+            id,
+            trace_id,
+            org_id,
+            parent_id,
+            name,
+            kind,
+            status,
+            started_at,
+            ended_at,
+            input,
+            output,
+        }
+    }
+}
+
 // Read-only accessors
 impl Span {
     pub fn id(&self) -> SpanId {
