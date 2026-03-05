@@ -493,16 +493,63 @@ export const clearAll = () => del<unknown>('/traces');
 
 // ─── SSE ─────────────────────────────────────────────────────────────
 
+/**
+ * Subscribe to server-sent events with automatic reconnection and replay.
+ *
+ * On disconnect, reconnects after a brief delay and replays missed events
+ * using the `?since=<lastEventId>` query parameter. The server returns
+ * `id:` fields on each SSE frame, which are tracked to enable replay.
+ */
 export function subscribeEvents(callback: (event: SpanEvent) => void): () => void {
-	const es = new EventSource(`${API_BASE}/events`);
-	es.onmessage = (e) => {
-		try {
-			callback(JSON.parse(e.data));
-		} catch {
-			// ignore parse errors
+	let lastEventId: string | undefined;
+	let es: EventSource | null = null;
+	let closed = false;
+	let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+	function connect() {
+		if (closed) return;
+
+		const url = lastEventId
+			? `${API_BASE}/events?since=${lastEventId}`
+			: `${API_BASE}/events`;
+
+		es = new EventSource(url);
+
+		es.onmessage = (e: MessageEvent) => {
+			// Track the last event ID for replay on reconnect
+			if (e.lastEventId) {
+				lastEventId = e.lastEventId;
+			}
+			try {
+				callback(JSON.parse(e.data));
+			} catch {
+				// ignore parse errors
+			}
+		};
+
+		es.onerror = () => {
+			// EventSource auto-reconnects, but we manage it manually for
+			// more control over timing and the ?since= query param.
+			if (es) {
+				es.close();
+				es = null;
+			}
+			if (!closed) {
+				reconnectTimer = setTimeout(connect, 2000);
+			}
+		};
+	}
+
+	connect();
+
+	return () => {
+		closed = true;
+		if (reconnectTimer) clearTimeout(reconnectTimer);
+		if (es) {
+			es.close();
+			es = null;
 		}
 	};
-	return () => es.close();
 }
 
 // ─── Span Helpers ────────────────────────────────────────────────────
