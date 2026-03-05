@@ -1,0 +1,83 @@
+---
+title: Viewing Traces
+description: How to navigate the trace list, inspect span trees, and understand trace details.
+---
+
+## The traces page
+
+The Traces page (`/traces`) shows all traces in the current project, ordered by most recent first. Each row shows:
+
+- **Name** — The trace name (e.g., `answer-question`, `summarize-document`)
+- **Span count** — Number of spans in the trace
+- **Duration** — Total time from first span start to last span end
+- **Cost** — Sum of estimated costs across all spans
+- **Tokens** — Total input + output tokens
+- **Status** — Green if all spans completed, red if any span failed, yellow if any span is still running
+- **Time** — When the trace was created (relative, like "2 minutes ago")
+
+Click a trace row to navigate to its detail view.
+
+## Trace detail
+
+The trace detail page (`/traces/:id`) shows the span tree for a single trace. The layout has two panels:
+
+### Left panel: span tree
+
+A collapsible tree view of all spans in the trace, showing the parent-child hierarchy. Each span shows:
+
+- **Name** — The span name
+- **Kind** — Icon or label indicating the kind (`llm_call`, `custom`, etc.)
+- **Duration** — A horizontal bar showing relative duration
+- **Status** — Color-coded: green (completed), red (failed), yellow (running)
+- **Cost** — Estimated cost (for `llm_call` spans)
+
+Click a span to select it and show its details in the right panel.
+
+### Right panel: span details
+
+When a span is selected, the right panel shows:
+
+- **Overview** — Name, kind, status, duration, timestamps
+- **Input** — The full input data as formatted JSON. For LLM calls, this is typically the message array.
+- **Output** — The full output data as formatted JSON. For LLM calls, this is the response text or structured output.
+- **Kind details** — For `llm_call` spans: model, provider, input tokens, output tokens, cost. For `custom` spans: kind string and attributes.
+- **Error** — If the span failed, the error message is shown prominently.
+- **Actions** — "Export to Dataset" button to save this span's data as a datapoint.
+
+### Timeline view
+
+The span tree includes a timeline visualization showing when each span started and ended relative to the trace. This makes it easy to see:
+
+- Which spans ran in parallel vs. sequentially
+- Where the most time was spent
+- Gaps between spans (time spent in your application code, not in traced steps)
+
+## Deleting traces
+
+From the traces list, you can delete individual traces or clear all traces. Deleting a trace also deletes all its spans.
+
+From the API:
+
+```bash
+# Delete a single trace
+curl -X DELETE "https://api.traceway.ai/api/traces/${TRACE_ID}" \
+  -H "Authorization: Bearer tw_sk_..."
+
+# Delete all traces
+curl -X DELETE "https://api.traceway.ai/api/traces" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+Deletion is immediate and irreversible.
+
+## Data export
+
+Export all data (traces, spans, datasets, datapoints) as a JSON file:
+
+```bash
+curl "https://api.traceway.ai/api/export/json" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -o traceway-export.json
+```
+
+This is useful for backups or migrating data between Traceway instances.

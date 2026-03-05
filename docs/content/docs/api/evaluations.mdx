@@ -1,0 +1,160 @@
+---
+title: Evaluations
+description: REST API endpoints for running evaluations, checking results, comparing runs.
+---
+
+## Start an eval run
+
+```
+POST /api/datasets/:id/eval
+```
+
+```json
+{
+  "name": "gpt-4o-mini baseline",
+  "config": {
+    "connection_id": "01J...",
+    "model": "gpt-4o-mini",
+    "system_prompt": "You are a helpful assistant.",
+    "temperature": 0.0
+  },
+  "scoring": "ExactMatch"
+}
+```
+
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `name` | Yes | string | Name for this run |
+| `config.connection_id` | Yes | string | Provider connection ID |
+| `config.model` | Yes | string | Model identifier |
+| `config.system_prompt` | No | string | System prompt prepended to every datapoint |
+| `config.temperature` | No | number | Temperature (0.0 to 2.0) |
+| `scoring` | Yes | string | `ExactMatch`, `Contains`, `LlmJudge`, or `None` |
+
+The eval runs asynchronously. The response returns immediately with the run metadata:
+
+```json
+{
+  "id": "01J...",
+  "dataset_id": "01J...",
+  "name": "gpt-4o-mini baseline",
+  "status": "pending",
+  "progress": 0,
+  "total": 42,
+  "config": { ... },
+  "scoring": "ExactMatch",
+  "result_items": [],
+  "created_at": "2024-06-15T12:00:00Z"
+}
+```
+
+## List eval runs
+
+```
+GET /api/datasets/:id/eval
+```
+
+Returns all eval runs for the dataset, ordered by creation time (newest first).
+
+## Get eval results
+
+```
+GET /api/eval/:run_id
+```
+
+Returns the run metadata plus all result items:
+
+```json
+{
+  "id": "01J...",
+  "dataset_id": "01J...",
+  "name": "gpt-4o-mini baseline",
+  "status": "completed",
+  "progress": 42,
+  "total": 42,
+  "config": { ... },
+  "scoring": "ExactMatch",
+  "result_items": [
+    {
+      "datapoint_id": "01J...",
+      "output": "Paris",
+      "expected": "Paris",
+      "score": 1.0,
+      "latency_ms": 340,
+      "tokens": 28,
+      "cost": 0.00004,
+      "status": "completed",
+      "error": null
+    }
+  ],
+  "created_at": "2024-06-15T12:00:00Z"
+}
+```
+
+### Run status values
+
+| Status | Description |
+|--------|-------------|
+| `pending` | Created but not started |
+| `running` | Processing datapoints |
+| `completed` | All datapoints processed |
+| `failed` | Unrecoverable error |
+| `cancelled` | Cancelled by user |
+
+### Result item status values
+
+| Status | Description |
+|--------|-------------|
+| `pending` | Not yet processed |
+| `running` | Currently processing |
+| `completed` | Model call and scoring succeeded |
+| `failed` | Model call or scoring failed |
+
+## Compare eval runs
+
+```
+GET /api/datasets/:id/compare?runs=run_id_1,run_id_2
+```
+
+Compare up to 4 runs side by side. All runs must belong to the same dataset.
+
+Returns:
+
+```json
+{
+  "dataset_id": "01J...",
+  "runs": [
+    { "id": "01J...", "name": "baseline", "avg_score": 0.76, "total_cost": 0.042 },
+    { "id": "01J...", "name": "v2 prompt", "avg_score": 0.83, "total_cost": 0.045 }
+  ],
+  "comparisons": [
+    {
+      "datapoint_id": "01J...",
+      "input": { ... },
+      "expected": "Paris",
+      "results": [
+        { "run_id": "01J...", "output": "Paris", "score": 1.0, "latency_ms": 320 },
+        { "run_id": "01J...", "output": "Paris", "score": 1.0, "latency_ms": 290 }
+      ]
+    }
+  ]
+}
+```
+
+## Cancel an eval run
+
+```
+POST /api/eval/:run_id/cancel
+```
+
+Gracefully cancels a running eval. The current datapoint finishes, then the run stops. Already-completed results are preserved.
+
+Returns `200` on success. Returns `400` if the run is not in `running` status.
+
+## Delete an eval run
+
+```
+DELETE /api/eval/:run_id
+```
+
+Deletes the run and all its results. Returns `200` on success, `404` if not found.

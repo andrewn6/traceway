@@ -1,0 +1,100 @@
+---
+title: Events
+description: REST API for the Server-Sent Events stream and event types.
+---
+
+## SSE endpoint
+
+```
+GET /api/events
+```
+
+Opens a Server-Sent Events connection. The server pushes events as they happen.
+
+### Authentication
+
+| Mode | Method |
+|------|--------|
+| Local | No auth required |
+| Cloud | `?token=<jwt_or_api_key>` query parameter |
+
+### Example
+
+```bash
+curl -N "https://api.traceway.ai/api/events?token=tw_sk_..." \
+  -H "Accept: text/event-stream"
+```
+
+Each event is formatted as:
+
+```
+id: 42
+event: message
+data: {"type":"span_completed","span":{...}}
+
+```
+
+### Reconnection
+
+Pass `Last-Event-ID` header or `?since=<sequence>` query parameter to replay missed events:
+
+```bash
+curl -N "https://api.traceway.ai/api/events?token=tw_sk_...&since=42" \
+  -H "Accept: text/event-stream"
+```
+
+All events with sequence > 42 are replayed, then the stream continues with live events.
+
+## Event types
+
+### Spans
+
+| Type | Payload |
+|------|---------|
+| `span_created` | `{ span: Span }` |
+| `span_completed` | `{ span: Span }` |
+| `span_failed` | `{ span: Span }` |
+| `span_deleted` | `{ span_id: string }` |
+
+### Traces
+
+| Type | Payload |
+|------|---------|
+| `trace_created` | `{ trace: Trace }` |
+| `trace_deleted` | `{ trace_id: string }` |
+
+### Datasets
+
+| Type | Payload |
+|------|---------|
+| `dataset_created` | `{ dataset: Dataset }` |
+| `dataset_deleted` | `{ dataset_id: string }` |
+| `datapoint_created` | `{ datapoint: Datapoint }` |
+
+### Queue
+
+| Type | Payload |
+|------|---------|
+| `queue_item_updated` | `{ item: QueueItem }` |
+
+### Evaluations
+
+| Type | Payload |
+|------|---------|
+| `eval_started` | `{ run_id, dataset_id }` |
+| `eval_progress` | `{ run_id, progress, total }` |
+| `eval_completed` | `{ run_id }` |
+| `eval_failed` | `{ run_id, error }` |
+| `eval_cancelled` | `{ run_id }` |
+
+### Capture rules
+
+| Type | Payload |
+|------|---------|
+| `capture_triggered` | `{ rule_id, span_id, datapoint_id }` |
+
+### Other
+
+| Type | Payload |
+|------|---------|
+| `cleared` | `{}` |

@@ -1,0 +1,145 @@
+---
+title: Capture Rules
+description: Automatically save production spans to datasets based on filters and sample rates.
+---
+
+Capture rules let you build datasets from production traffic without manual effort. Define a filter — "model is gpt-4o", "cost exceeds $0.01", "name contains summarize" — and Traceway automatically creates a datapoint in the target dataset whenever a matching span completes.
+
+## How capture rules work
+
+1. A span completes (transitions from `running` to `completed`).
+2. Traceway evaluates all capture rules for the dataset in a background task.
+3. For each rule, it checks whether the span matches all filter conditions (AND logic).
+4. If the span matches and the random sample passes (based on `sample_rate`), a new datapoint is created in the target dataset.
+5. The datapoint's `source` is set to `span_export` and `source_span_id` links to the original span.
+
+Capture rules are evaluated asynchronously — they don't slow down the span completion response.
+
+## Creating a capture rule
+
+### Via the dashboard
+
+In the Datasets tab, open a dataset and go to the "Capture Rules" tab. Click "Add Rule" and configure:
+
+- **Name** — A label for the rule (e.g., "expensive-gpt4-calls")
+- **Filters** — One or more conditions that spans must match
+- **Sample rate** — What percentage of matching spans to capture (0.0 to 1.0)
+
+### Via the API
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/capture-rules" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "expensive-gpt4-calls",
+    "filters": {
+      "model": "gpt-4o",
+      "min_cost": 0.01
+    },
+    "sample_rate": 0.1
+  }'
+```
+
+## Available filters
+
+All filters are combined with AND logic — a span must match every specified filter.
+
+| Filter | Type | Description |
+|--------|------|-------------|
+| `model` | string | Exact match on the span's model name |
+| `provider` | string | Exact match on the provider |
+| `name_contains` | string | Substring match on the span name |
+| `min_cost` | number | Minimum cost in USD |
+| `min_tokens` | number | Minimum total tokens (input + output) |
+| `kind` | string | Span kind type (`llm_call`, `custom`, etc.) |
+| `status` | string | Span status (`completed`, `failed`) |
+
+### Filter examples
+
+**All gpt-4o calls:**
+```json
+{ "model": "gpt-4o" }
+```
+
+**Expensive Anthropic calls:**
+```json
+{ "provider": "anthropic", "min_cost": 0.05 }
+```
+
+**Failed spans with "summarize" in the name:**
+```json
+{ "name_contains": "summarize", "status": "failed" }
+```
+
+**High-token LLM calls:**
+```json
+{ "kind": "llm_call", "min_tokens": 1000 }
+```
+
+## Sample rate
+
+The `sample_rate` field controls what fraction of matching spans are captured. It must be between 0.0 (capture nothing) and 1.0 (capture everything).
+
+| Sample rate | Behavior |
+|-------------|----------|
+| `1.0` | Every matching span is captured |
+| `0.1` | Roughly 10% of matching spans are captured |
+| `0.01` | Roughly 1% of matching spans are captured |
+| `0.0` | The rule is effectively disabled |
+
+Sampling is per-span, using a random number generator. Over many spans, the actual capture rate converges to the configured rate, but small sample sizes may vary.
+
+### When to use sampling
+
+- **High-volume production traffic** — If you're processing thousands of LLM calls per hour, capturing all of them would produce an unwieldy dataset. Use `0.01` to `0.1` to get a representative sample.
+- **Targeted debugging** — When investigating a specific issue, set `sample_rate: 1.0` with a narrow filter (e.g., `model: "gpt-4o", min_cost: 0.10`) to capture every expensive call.
+- **Cost monitoring** — Capture a small sample of all calls to track costs over time without storing everything.
+
+## Managing capture rules
+
+### List rules for a dataset
+
+```bash
+curl "https://api.traceway.ai/api/datasets/${DATASET_ID}/capture-rules" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+### Update a rule
+
+```bash
+curl -X PUT "https://api.traceway.ai/api/datasets/${DATASET_ID}/capture-rules/${RULE_ID}" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "expensive-gpt4-calls-updated",
+    "filters": { "model": "gpt-4o", "min_cost": 0.05 },
+    "sample_rate": 0.2
+  }'
+```
+
+### Delete a rule
+
+```bash
+curl -X DELETE "https://api.traceway.ai/api/datasets/${DATASET_ID}/capture-rules/${RULE_ID}" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+Deleting a capture rule does not delete any datapoints that were already captured by it.
+
+## Multiple rules per dataset
+
+A dataset can have multiple capture rules. Each rule is evaluated independently. If a span matches multiple rules, it creates one datapoint per matching rule.
+
+For example, you might have:
+- Rule 1: Capture all failed spans (`status: "failed"`, `sample_rate: 1.0`)
+- Rule 2: Capture a sample of expensive calls (`min_cost: 0.05`, `sample_rate: 0.1`)
+
+A failed span that costs $0.10 would match both rules and create two datapoints.
+
+## Practical tips
+
+- **Start with narrow filters and high sample rates.** You can always broaden the filter or reduce the rate later. It's easier to have too much data than too little.
+- **Use separate datasets for separate purposes.** Don't mix "all failed spans" with "curated golden set" in the same dataset. Create a "failures" dataset with capture rules and a separate "golden-set" dataset with hand-picked examples.
+- **Review captured data regularly.** Capture rules are automatic, so they may capture noise. Periodically review the dataset and delete low-quality datapoints.
+- **Combine with the review queue.** Set up a capture rule, then enqueue the captured datapoints for human review. This creates a pipeline: production span -> capture -> review -> golden dataset.

@@ -1,0 +1,159 @@
+---
+title: Filtering & Search
+description: The query DSL, span filter parameters, and search capabilities.
+---
+
+Traceway provides powerful filtering for both the dashboard and the API. You can filter spans by model, provider, status, time range, cost, token count, and more.
+
+## Dashboard search bar
+
+The search bar on the Traces and Spans pages supports a query DSL with `key:value` syntax. You can type filters directly:
+
+```
+model:gpt-4o status:completed cost:>0.01
+```
+
+Multiple filters are combined with AND logic — a span must match all filters to appear in the results.
+
+### Supported query syntax
+
+| Syntax | Example | Description |
+|--------|---------|-------------|
+| `key:value` | `model:gpt-4o` | Exact match |
+| `key:>value` | `cost:>0.01` | Greater than |
+| `key:<value` | `duration:<500` | Less than |
+| `key:"quoted value"` | `name:"my span"` | Exact match with spaces |
+| `text search` | `summarize` | Full-text search across span names, inputs, and outputs |
+
+### Available filter keys
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `model` | string | Model name (`gpt-4o`, `claude-3-haiku`, etc.) |
+| `provider` | string | Provider name (`openai`, `anthropic`, etc.) |
+| `status` | string | `running`, `completed`, or `failed` |
+| `kind` | string | Span kind (`llm_call`, `custom`, `fs_read`, `fs_write`) |
+| `name` | string | Substring match on span name |
+| `trace` | string | Filter to a specific trace ID |
+| `cost` | number | Estimated cost in USD (supports `>`, `<`, `>=`, `<=`) |
+| `tokens` | number | Total tokens (supports `>`, `<`, `>=`, `<=`) |
+| `duration` | number | Duration in milliseconds (supports `>`, `<`, `>=`, `<=`) |
+| `since` | date | Spans started after this time |
+| `until` | date | Spans started before this time |
+
+### Date syntax
+
+The `since` and `until` keys accept:
+- **ISO 8601** — `since:2024-06-15T12:00:00Z`
+- **Relative time** — `since:1h` (last hour), `since:24h` (last day), `since:7d` (last week)
+
+### Examples
+
+Find all expensive gpt-4o calls in the last 24 hours:
+```
+model:gpt-4o cost:>0.05 since:24h
+```
+
+Find failed spans from Anthropic:
+```
+provider:anthropic status:failed
+```
+
+Find slow LLM calls (over 5 seconds):
+```
+kind:llm_call duration:>5000
+```
+
+Search for spans mentioning "error" in their input or output:
+```
+error
+```
+
+## API filter parameters
+
+The `GET /api/spans` endpoint accepts all filters as query parameters:
+
+```bash
+curl "https://api.traceway.ai/api/spans?\
+model=gpt-4o&\
+status=completed&\
+cost_min=0.01&\
+since=2024-06-15T00:00:00Z&\
+sort_by=cost&\
+sort_order=desc&\
+limit=20" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+### Full parameter reference
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `trace_id` | string | Filter to a specific trace |
+| `kind` | string | Filter by kind type (`llm_call`, `custom`, etc.) |
+| `model` | string | Filter by model name |
+| `provider` | string | Filter by provider |
+| `status` | string | `running`, `completed`, or `failed` |
+| `since` | ISO 8601 | Spans started after this time |
+| `until` | ISO 8601 | Spans started before this time |
+| `name_contains` | string | Substring match on span name |
+| `text_contains` | string | Full-text search across input and output |
+| `input_contains` | string | Search within input only |
+| `output_contains` | string | Search within output only |
+| `duration_min` | number | Minimum duration in ms |
+| `duration_max` | number | Maximum duration in ms |
+| `tokens_min` | number | Minimum total tokens (input + output) |
+| `cost_min` | number | Minimum cost in USD |
+| `sort_by` | string | Sort field: `started_at`, `duration`, `tokens`, `cost`, `name` |
+| `sort_order` | string | `asc` or `desc` (default: `desc`) |
+| `limit` | number | Max results (default 50, max 1000) |
+| `cursor` | string | Pagination cursor from previous response |
+
+### Pagination
+
+The API uses cursor-based pagination. Each response includes a `cursor` field (if there are more results). Pass it as `?cursor=...` in the next request to get the next page.
+
+```bash
+# First page
+curl "https://api.traceway.ai/api/spans?limit=50" -H "..."
+
+# Response includes: { "spans": [...], "count": 50, "cursor": "abc123" }
+
+# Next page
+curl "https://api.traceway.ai/api/spans?limit=50&cursor=abc123" -H "..."
+```
+
+## Trace filters
+
+The `GET /api/traces` endpoint supports simpler filtering:
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `limit` | number | Max results (default 50) |
+| `cursor` | string | Pagination cursor |
+
+Trace-level filtering is less granular than span filtering. To find traces that contain specific spans, filter spans first and then group by `trace_id`.
+
+## Analytics
+
+The Analytics page (`/analytics`) provides aggregate views of your data:
+
+- **Cost over time** — Line chart of total cost per day/hour
+- **Latency distribution** — Histogram of span durations
+- **Model usage** — Breakdown of calls by model
+- **Token usage** — Total tokens consumed over time
+- **Error rate** — Percentage of failed spans over time
+
+Analytics are computed from the underlying span data using the same filter parameters. You can narrow the analytics view by time range, model, or provider.
+
+```bash
+# Analytics summary
+curl "https://api.traceway.ai/api/analytics/summary" \
+  -H "Authorization: Bearer tw_sk_..."
+
+# Detailed analytics with filters
+curl -X POST "https://api.traceway.ai/api/analytics" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"since": "2024-06-01T00:00:00Z", "group_by": "day"}'
+```

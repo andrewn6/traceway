@@ -1,0 +1,105 @@
+---
+title: Queue
+description: REST API endpoints for the human review queue — enqueue, claim, submit.
+---
+
+## Enqueue datapoints
+
+```
+POST /api/datasets/:id/queue
+```
+
+Add datapoints to the review queue:
+
+```json
+{
+  "datapoint_ids": ["01J...", "01J...", "01J..."]
+}
+```
+
+Creates a queue item for each datapoint ID. Items start in `pending` status.
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "id": "01J...",
+      "dataset_id": "01J...",
+      "datapoint_id": "01J...",
+      "status": "pending",
+      "claimed_by": null,
+      "claimed_at": null,
+      "original_data": { ... },
+      "edited_data": null,
+      "created_at": "2024-06-15T12:00:00Z"
+    }
+  ],
+  "count": 3
+}
+```
+
+## List queue items
+
+```
+GET /api/datasets/:id/queue
+```
+
+Returns all queue items for the dataset:
+
+```json
+{
+  "items": [
+    {
+      "id": "01J...",
+      "dataset_id": "01J...",
+      "datapoint_id": "01J...",
+      "status": "pending",
+      "claimed_by": null,
+      "claimed_at": null,
+      "original_data": { ... },
+      "edited_data": null,
+      "created_at": "2024-06-15T12:00:00Z"
+    }
+  ],
+  "count": 10
+}
+```
+
+## Claim a queue item
+
+```
+POST /api/queue/:item_id/claim
+```
+
+```json
+{
+  "claimed_by": "reviewer@example.com"
+}
+```
+
+Locks the item for the specified reviewer. No one else can claim it while it's locked.
+
+Returns the updated queue item with `status: "claimed"`, `claimed_by`, and `claimed_at` set.
+
+Returns `409 Conflict` if the item is already claimed by someone else.
+
+## Submit a reviewed item
+
+```
+POST /api/queue/:item_id/submit
+```
+
+```json
+{
+  "edited_data": {
+    "corrected_output": "The actual correct answer is...",
+    "notes": "Original output was missing context"
+  }
+}
+```
+
+The `edited_data` field accepts any JSON. It's stored alongside the `original_data` so you can compare what changed.
+
+Returns the updated queue item with `status: "completed"` and `edited_data` set.

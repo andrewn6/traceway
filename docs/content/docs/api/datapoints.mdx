@@ -1,0 +1,161 @@
+---
+title: Datapoints
+description: REST API endpoints for creating, listing, importing, exporting, and deleting datapoints.
+---
+
+## Create a datapoint
+
+```
+POST /api/datasets/:id/datapoints
+```
+
+Create a Generic datapoint:
+
+```json
+{
+  "kind": {
+    "Generic": {
+      "input": { "question": "What is the capital of France?" },
+      "expected_output": { "answer": "Paris" },
+      "metadata": { "difficulty": "easy" }
+    }
+  }
+}
+```
+
+Create an LlmConversation datapoint:
+
+```json
+{
+  "kind": {
+    "LlmConversation": {
+      "messages": [
+        { "role": "system", "content": "You are a geography expert." },
+        { "role": "user", "content": "What is the capital of France?" }
+      ],
+      "expected": "Paris"
+    }
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "id": "01J...",
+  "dataset_id": "01J...",
+  "kind": { "Generic": { ... } },
+  "source": "manual",
+  "source_span_id": null,
+  "created_at": "2024-06-15T12:00:00Z"
+}
+```
+
+## Export a span to a dataset
+
+```
+POST /api/datasets/:id/export-span
+```
+
+```json
+{
+  "span_id": "01J..."
+}
+```
+
+Creates a datapoint from the span's input and output. If the span's input is an array of chat messages, creates an `LlmConversation` datapoint. Otherwise, creates a `Generic` datapoint.
+
+The datapoint's `source` is set to `span_export` and `source_span_id` links to the original span.
+
+## Import from a file
+
+```
+POST /api/datasets/:id/import
+Content-Type: multipart/form-data
+```
+
+Upload a CSV, JSON, or JSONL file. Each row/object becomes a datapoint.
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/import" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -F "file=@testcases.jsonl"
+```
+
+**JSONL format** (one object per line):
+
+```jsonl
+{"input": {"question": "What is 2+2?"}, "expected_output": {"answer": "4"}}
+{"input": {"question": "Capital of Japan?"}, "expected_output": {"answer": "Tokyo"}}
+```
+
+**JSON format** (array of objects):
+
+```json
+[
+  {"input": {"question": "What is 2+2?"}, "expected_output": {"answer": "4"}},
+  {"input": {"question": "Capital of Japan?"}, "expected_output": {"answer": "Tokyo"}}
+]
+```
+
+**CSV format** (columns map to fields):
+
+```csv
+input,expected_output
+"What is 2+2?","4"
+"Capital of Japan?","Tokyo"
+```
+
+To import LlmConversation datapoints, include a `messages` field:
+
+```jsonl
+{"messages": [{"role": "user", "content": "What is 2+2?"}], "expected": "4"}
+```
+
+Response:
+
+```json
+{
+  "imported": 150,
+  "dataset_id": "01J..."
+}
+```
+
+## List datapoints
+
+```
+GET /api/datasets/:id/datapoints
+```
+
+```json
+{
+  "datapoints": [
+    {
+      "id": "01J...",
+      "dataset_id": "01J...",
+      "kind": { "Generic": { ... } },
+      "source": "manual",
+      "source_span_id": null,
+      "created_at": "2024-06-15T12:00:00Z"
+    }
+  ],
+  "count": 42
+}
+```
+
+## Get a datapoint
+
+```
+GET /api/datasets/:id/datapoints/:dp_id
+```
+
+Returns the full datapoint object.
+
+## Delete a datapoint
+
+```
+DELETE /api/datasets/:id/datapoints/:dp_id
+```
+
+Returns `200` on success, `404` if not found.
