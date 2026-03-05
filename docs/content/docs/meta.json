@@ -1,0 +1,15 @@
+{
+  "title": "Docs",
+  "pages": [
+    "index",
+    "---Quickstart---",
+    "quickstart",
+    "concepts",
+    "---SDK---",
+    "sdk/...",
+    "---Guides---",
+    "guides/...",
+    "---API Reference---",
+    "api/..."
+  ]
+}

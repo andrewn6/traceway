@@ -1,0 +1,74 @@
+---
+title: REST API
+description: HTTP endpoints for the Traceway API. Base URL is your Traceway instance (e.g. https://api.traceway.ai).
+---
+
+All endpoints are under `/api`. Authenticated endpoints require a `Bearer` token in the `Authorization` header — either a session JWT or an API key (`tw_sk_...`).
+
+```bash
+curl https://api.traceway.ai/api/traces \
+  -H "Authorization: Bearer tw_sk_your_key_here"
+```
+
+In local mode (no `--cloud` flag), auth is skipped entirely.
+
+## Authentication
+
+| Method | Header / Cookie |
+|--------|----------------|
+| API key | `Authorization: Bearer tw_sk_...` |
+| Session JWT | `Authorization: Bearer <jwt>` or `Cookie: session=<jwt>` |
+| SSE (browser) | `?token=<jwt>` query parameter |
+
+## Endpoints overview
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| **Traces** | | | |
+| `GET` | `/api/traces` | Read | List traces |
+| `POST` | `/api/traces` | Write | Create a trace |
+| `GET` | `/api/traces/:id` | Read | Get all spans in a trace |
+| `DELETE` | `/api/traces/:id` | Write | Delete a trace and its spans |
+| `DELETE` | `/api/traces` | Write | Delete all traces |
+| **Spans** | | | |
+| `GET` | `/api/spans` | Read | List/filter spans |
+| `POST` | `/api/spans` | Write | Create a span |
+| `GET` | `/api/spans/:id` | Read | Get a span |
+| `DELETE` | `/api/spans/:id` | Write | Delete a span |
+| `POST` | `/api/spans/:id/complete` | Write | Complete a span |
+| `POST` | `/api/spans/:id/fail` | Write | Fail a span |
+| **Datasets** | | | |
+| `GET` | `/api/datasets` | Read | List datasets |
+| `POST` | `/api/datasets` | Write | Create a dataset |
+| `GET` | `/api/datasets/:id` | Read | Get a dataset |
+| `PUT` | `/api/datasets/:id` | Write | Update a dataset |
+| `DELETE` | `/api/datasets/:id` | Write | Delete a dataset |
+| **Datapoints** | | | |
+| `GET` | `/api/datasets/:id/datapoints` | Read | List datapoints |
+| `POST` | `/api/datasets/:id/datapoints` | Write | Create a datapoint |
+| `GET` | `/api/datasets/:id/datapoints/:dp_id` | Read | Get a datapoint |
+| `DELETE` | `/api/datasets/:id/datapoints/:dp_id` | Write | Delete a datapoint |
+| `POST` | `/api/datasets/:id/export-span` | Write | Export a span as a datapoint |
+| `POST` | `/api/datasets/:id/import` | Write | Import from CSV/JSON/JSONL |
+| **Queue** | | | |
+| `GET` | `/api/datasets/:id/queue` | Read | List queue items |
+| `POST` | `/api/datasets/:id/queue` | Write | Enqueue datapoints |
+| `POST` | `/api/queue/:item_id/claim` | Write | Claim a queue item |
+| `POST` | `/api/queue/:item_id/submit` | Write | Submit a reviewed item |
+| **Evals** | | | |
+| `GET` | `/api/datasets/:id/eval` | Read | List eval runs |
+| `POST` | `/api/datasets/:id/eval` | Write | Start an eval run |
+| `GET` | `/api/eval/:run_id` | Read | Get eval run + results |
+| `DELETE` | `/api/eval/:run_id` | Write | Delete an eval run |
+| `POST` | `/api/eval/:run_id/cancel` | Write | Cancel a running eval |
+| **Analytics** | | | |
+| `POST` | `/api/analytics` | Read | Query analytics |
+| `GET` | `/api/analytics/summary` | Read | Summary stats |
+| **Other** | | | |
+| `GET` | `/api/events` | Read | SSE event stream |
+| `GET` | `/api/stats` | Read | Trace/span counts |
+| `GET` | `/api/export/json` | Read | Export all data |
+| `GET` | `/api/health` | None | Health check |
+| `GET` | `/api/openapi.json` | None | OpenAPI spec |
+
+See the individual endpoint pages for request/response details, or fetch the OpenAPI spec at `/api/openapi.json`.

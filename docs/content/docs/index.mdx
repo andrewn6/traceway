@@ -1,0 +1,90 @@
+---
+title: Introduction
+description: Traceway is open-source observability for LLM applications. Record every call, see what went wrong, build test datasets from production data.
+---
+
+Traceway records traces and spans from your LLM application, so you can see exactly what happened on every request: which model was called, what the input was, what came back, how long it took, and how much it cost.
+
+It runs as a single binary. You can self-host it locally with SQLite, or deploy it to the cloud with Turbopuffer and Postgres.
+
+## What you get
+
+- **Traces and spans** — Every LLM call, tool invocation, and custom step recorded as a structured span inside a trace.
+- **Datasets** — Collect input/output pairs from production spans. Use them for regression testing.
+- **Evaluations** — Run your dataset through a model and score the results (exact match, contains, or LLM-as-judge).
+- **Real-time SSE** — The dashboard updates live as spans come in. No polling.
+- **Cost tracking** — Token counts and estimated costs per span, rolled up per trace.
+
+## Quickstart
+
+Install the SDK:
+
+```bash
+npm install traceway
+```
+
+Create a trace and record a span:
+
+```ts
+import { Traceway } from 'traceway';
+
+const tw = new Traceway({
+  url: 'http://localhost:3000',    // or https://api.traceway.ai
+  apiKey: 'tw_sk_...',             // from your project settings
+});
+
+const result = await tw.trace('summarize-email', async (ctx) => {
+  return ctx.llmCall('gpt-4o', {
+    model: 'gpt-4o',
+    provider: 'openai',
+    input: { role: 'user', content: 'Summarize this email...' },
+  }, async (span) => {
+    const response = await callOpenAI(/* ... */);
+    span.setOutput(response);
+    return response;
+  });
+});
+```
+
+Or, if you're using the Vercel AI SDK, skip the manual instrumentation:
+
+```ts
+import { initTraceway } from 'traceway/ai';
+import { generateText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+
+const { tracer } = initTraceway();
+
+const result = await generateText({
+  model: openai('gpt-4o'),
+  prompt: 'Summarize this email...',
+  experimental_telemetry: { isEnabled: true, tracer },
+});
+```
+
+Both approaches produce the same result in the dashboard: a trace with spans, token counts, latency, and cost.
+
+## Architecture
+
+```
+Your app  ──SDK──>  Traceway API  ──>  Storage (SQLite or Turbopuffer)
+                         │
+                    Dashboard UI
+                  (platform.traceway.ai)
+```
+
+- **API server** — Rust binary, runs on port 3000. Handles trace/span ingestion, dataset CRUD, eval execution, and real-time events.
+- **Proxy** — Optional. Sits in front of your LLM provider (port 3001) and automatically records spans. You point your OpenAI base URL at it instead of `api.openai.com`.
+- **Dashboard** — SvelteKit SPA. Shows traces, spans, datasets, eval results.
+- **Storage** — SQLite for local dev, Turbopuffer for cloud. Auth data lives in Postgres (cloud only).
+
+## Next steps
+
+<Cards>
+  <Card title="Quickstart" href="/docs/quickstart" />
+  <Card title="TypeScript SDK" href="/docs/sdk" />
+  <Card title="Vercel AI SDK" href="/docs/sdk/vercel-ai" />
+  <Card title="REST API" href="/docs/api" />
+  <Card title="Self-Hosting" href="/docs/guides/self-hosting" />
+  <Card title="Concepts" href="/docs/concepts" />
+</Cards>

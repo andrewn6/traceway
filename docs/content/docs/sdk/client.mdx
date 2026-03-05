@@ -1,0 +1,200 @@
+---
+title: Client Reference
+description: The Traceway class and its methods.
+---
+
+The `Traceway` class is a typed HTTP client for the Traceway REST API. It handles traces, spans, datasets, datapoints, queue items, and real-time events.
+
+## Constructor
+
+```ts
+import { Traceway } from 'traceway';
+
+const tw = new Traceway({
+  url: 'https://api.traceway.ai',  // default: TRACEWAY_URL or http://localhost:3000
+  apiKey: 'tw_sk_...',              // default: TRACEWAY_API_KEY env var
+});
+```
+
+## Tracing
+
+### `tw.trace(name, fn)`
+
+Creates a trace and runs `fn` inside it. Spans created inside `fn` are automatically associated with this trace. Returns whatever `fn` returns.
+
+```ts
+const answer = await tw.trace('answer-question', async (ctx) => {
+  const docs = await ctx.span('retrieve', async (span) => {
+    const results = await searchDocs(query);
+    span.setOutput(results);
+    return results;
+  });
+
+  const reply = await ctx.llmCall('generate', {
+    model: 'gpt-4o',
+    provider: 'openai',
+    input: { query, docs },
+  }, async (span) => {
+    const text = await callLLM(query, docs);
+    span.setOutput({ text });
+    return text;
+  });
+
+  return reply;
+});
+```
+
+### `ctx.span(name, fn, opts?)`
+
+Creates a child span inside a trace context. The span is automatically completed when `fn` resolves, or failed if `fn` throws.
+
+```ts
+await ctx.span('parse-input', async (span) => {
+  const parsed = JSON.parse(raw);
+  span.setOutput(parsed);
+  return parsed;
+}, {
+  kind: { type: 'custom', kind: 'parser', attributes: { format: 'json' } },
+  input: raw,
+});
+```
+
+### `ctx.llmCall(name, opts, fn)`
+
+Convenience for creating an `llm_call` span. Sets the kind automatically.
+
+```ts
+await ctx.llmCall('summarize', {
+  model: 'gpt-4o-mini',
+  provider: 'openai',
+  input: messages,
+}, async (span) => {
+  const result = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages });
+  span.setOutput(result.choices[0].message);
+  return result;
+});
+```
+
+## Low-level methods
+
+If you need more control than `tw.trace()` provides, you can manage traces and spans directly.
+
+### Traces
+
+```ts
+// Create a trace
+const trace = await tw.createTrace('my-trace');
+
+// List traces
+const { traces, count } = await tw.getTraces();
+
+// Get all spans in a trace
+const { spans } = await tw.getTrace(traceId);
+
+// Delete a trace and its spans
+await tw.deleteTrace(traceId);
+
+// Delete all data
+await tw.clearAll();
+```
+
+### Spans
+
+```ts
+// Start a span
+const { id, trace_id } = await tw.startSpan({
+  traceId: trace.id,
+  name: 'gpt-4o',
+  kind: { type: 'llm_call', model: 'gpt-4o', provider: 'openai' },
+  input: [{ role: 'user', content: 'Hello' }],
+});
+
+// Complete a span with output
+await tw.completeSpan(id, { text: 'Hi there!', finish_reason: 'stop' });
+
+// Fail a span
+await tw.failSpan(id, 'API returned 500');
+
+// List spans with filters
+const { spans } = await tw.getSpans({
+  model: 'gpt-4o',
+  status: 'completed',
+  since: '2024-01-01T00:00:00Z',
+});
+```
+
+## Datasets
+
+```ts
+// Create a dataset
+const ds = await tw.createDataset('golden-set', 'Curated test cases');
+
+// List datasets
+const { datasets } = await tw.listDatasets();
+
+// Add a datapoint
+const dp = await tw.createDatapoint(ds.id, {
+  Generic: {
+    input: { question: 'What is 2+2?' },
+    expected_output: { answer: '4' },
+  },
+});
+
+// Export a span to a dataset
+const dp2 = await tw.exportSpanToDataset(ds.id, spanId);
+
+// List datapoints
+const { datapoints } = await tw.listDatapoints(ds.id);
+
+// Delete
+await tw.deleteDatapoint(ds.id, dp.id);
+await tw.deleteDataset(ds.id);
+```
+
+## Queue
+
+```ts
+// Enqueue datapoints for review
+await tw.enqueueDatapoints(datasetId, [dp1.id, dp2.id]);
+
+// List queue
+const { items } = await tw.listQueue(datasetId);
+
+// Claim and review
+const claimed = await tw.claimQueueItem(items[0].id, 'reviewer@example.com');
+const submitted = await tw.submitQueueItem(claimed.id, { corrected: 'output' });
+```
+
+## Real-time events
+
+```ts
+const unsubscribe = tw.subscribe((event) => {
+  switch (event.type) {
+    case 'span_created':
+      console.log('New span:', event.span.name);
+      break;
+    case 'span_completed':
+      console.log('Completed:', event.span.id);
+      break;
+    case 'span_failed':
+      console.log('Failed:', event.span.id);
+      break;
+  }
+});
+
+// Stop listening
+unsubscribe();
+```
+
+## Other
+
+```ts
+// Health check
+const health = await tw.getHealth();
+
+// Stats
+const { trace_count, span_count } = await tw.getStats();
+
+// Export all data as JSON
+const data = await tw.exportJson();
+```

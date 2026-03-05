@@ -1,0 +1,123 @@
+---
+title: Concepts
+description: Traces, spans, datasets, evaluations — what they are and how they relate.
+---
+
+## Traces
+
+A trace represents one logical operation in your application. For example: "user asked a question and the app answered it." A trace has a name, optional tags, and a start/end time.
+
+```ts
+const trace = await tw.createTrace('answer-question');
+```
+
+Traces contain spans. A trace with no spans is just a timestamp.
+
+## Spans
+
+A span is a single unit of work inside a trace. The most common span type is an LLM call, but a span can be anything: a database query, an API call, a tool invocation.
+
+Each span has:
+
+- **name** — what the step is called (`gpt-4o`, `search-docs`, `parse-response`)
+- **kind** — the type of work. One of:
+  - `llm_call` — a call to a language model. Includes `model`, `provider`, `input_tokens`, `output_tokens`, and estimated `cost`.
+  - `custom` — anything else. Has a `kind` string and arbitrary `attributes`.
+  - `fs_read` / `fs_write` — file system operations (used by the proxy).
+- **input** — the data that went into this step (e.g., the prompt messages)
+- **output** — the data that came out (e.g., the completion text)
+- **status** — `running`, `completed`, or `failed` (with an error message)
+- **parent_id** — optional. Creates a tree structure within a trace.
+
+```ts
+const { id } = await tw.startSpan({
+  traceId: trace.id,
+  name: 'gpt-4o',
+  kind: { type: 'llm_call', model: 'gpt-4o', provider: 'openai' },
+  input: [{ role: 'user', content: 'Hello' }],
+});
+
+// ... do the actual work ...
+
+await tw.completeSpan(id, { text: 'Hi there!' });
+```
+
+Spans form a tree. A trace might look like:
+
+```
+answer-question (trace)
+  ├── retrieve-context (custom span)
+  ├── gpt-4o (llm_call span)
+  │     └── get-weather (tool_call span)
+  └── format-response (custom span)
+```
+
+## Datasets
+
+A dataset is a collection of input/output pairs, called **datapoints**. You build datasets in two ways:
+
+1. **Manual** — create datapoints by hand in the dashboard or via the API.
+2. **From production** — export a span's input/output as a datapoint. This is the main workflow: see something interesting in a trace, save it to a dataset.
+
+Datapoints have a `kind`:
+
+- **Generic** — `{ input, expected_output, actual_output, score, metadata }`
+- **LlmConversation** — `{ messages: Message[], expected?: string }`
+
+Datasets are the input to evaluations.
+
+## Evaluations
+
+An evaluation runs every datapoint in a dataset through a model configuration and scores the results.
+
+You configure:
+
+- **Provider connection** — which model to use (OpenAI, Anthropic, or any OpenAI-compatible endpoint)
+- **Model** — e.g. `gpt-4o-mini`
+- **System prompt** — optional, prepended to every datapoint
+- **Scoring strategy**:
+  - `ExactMatch` — output must exactly match `expected_output`
+  - `Contains` — output must contain `expected_output` as a substring
+  - `LlmJudge` — a second LLM call judges whether the output is correct
+  - `None` — no automatic scoring, just record the outputs
+
+The result is a score per datapoint, plus aggregate metrics. You can compare multiple eval runs side-by-side to see how a model change or prompt tweak affected quality.
+
+## Capture rules
+
+Capture rules automatically save spans to a dataset when they match a filter. For example: "save every span where model is `gpt-4o` and cost > $0.01 to the `expensive-calls` dataset."
+
+Filters can match on:
+- Model name
+- Provider
+- Span name (substring match)
+- Minimum cost
+- Minimum token count
+
+Each rule has a **sample rate** (0.0 to 1.0) so you can capture a percentage of matching spans instead of all of them.
+
+## Queue
+
+The review queue is for human-in-the-loop workflows. Enqueue datapoints from a dataset, then claim and review them one at a time. Each queue item tracks who claimed it and whether it's been submitted.
+
+This is useful for:
+- Labeling training data
+- Reviewing edge cases flagged by capture rules
+- Building golden datasets for evals
+
+## Real-time events (SSE)
+
+The API streams events over Server-Sent Events at `GET /api/events`. The dashboard uses this to update live. You can subscribe from your own code:
+
+```ts
+const unsubscribe = tw.subscribe((event) => {
+  if (event.type === 'span_completed') {
+    console.log(`Span ${event.span.id} completed`);
+  }
+});
+
+// later:
+unsubscribe();
+```
+
+Event types: `span_created`, `span_completed`, `span_failed`, `trace_created`, `trace_deleted`, `dataset_created`, `datapoint_created`, `queue_item_updated`, `cleared`.
