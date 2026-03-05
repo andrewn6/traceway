@@ -1,0 +1,149 @@
+---
+title: Introduction
+description: Human-in-the-loop review queue for labeling, correcting, and curating datapoints.
+---
+
+The review queue is a human-in-the-loop workflow built into Traceway. You enqueue datapoints from a dataset, reviewers claim items one at a time, inspect the data, optionally edit it, and submit. This is how you build high-quality golden datasets from noisy production data.
+
+## When to use the queue
+
+**Building golden datasets** — You've set up capture rules that automatically save production spans to a dataset. Now you need a human to verify the data is correct before using it for evaluations.
+
+**Labeling training data** — You have raw input/output pairs and need someone to verify or correct the expected output.
+
+**Reviewing edge cases** — Your capture rules catch spans with high cost, failures, or unusual patterns. A reviewer looks at each one and decides whether to keep, edit, or discard it.
+
+**Quality assurance** — After running an eval with `scoring: "None"`, enqueue the results for human review and scoring.
+
+## Queue item lifecycle
+
+Each queue item goes through three states:
+
+```
+pending  →  claimed  →  completed
+```
+
+| Status | Description |
+|--------|-------------|
+| `pending` | Waiting for a reviewer. Anyone can claim it. |
+| `claimed` | Locked by a specific reviewer. No one else can claim it. |
+| `completed` | The reviewer has submitted their review. The item is done. |
+
+### Queue item structure
+
+```json
+{
+  "id": "01J...",
+  "dataset_id": "01J...",
+  "datapoint_id": "01J...",
+  "status": "claimed",
+  "claimed_by": "reviewer@example.com",
+  "claimed_at": "2024-06-15T14:30:00Z",
+  "original_data": { ... },
+  "edited_data": null,
+  "created_at": "2024-06-15T12:00:00Z"
+}
+```
+
+## The review workflow
+
+### 1. Enqueue datapoints
+
+Select which datapoints need review and add them to the queue:
+
+```ts
+await tw.enqueueDatapoints(datasetId, [dp1.id, dp2.id, dp3.id]);
+```
+
+Or via the API:
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/queue" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"datapoint_ids": ["01J...", "01J...", "01J..."]}'
+```
+
+In the dashboard, select datapoints from the list and click "Send to Review."
+
+### 2. Claim an item
+
+A reviewer claims the next available item. Claiming locks the item so no one else can work on it simultaneously.
+
+```ts
+const claimed = await tw.claimQueueItem(itemId, 'reviewer@example.com');
+```
+
+```bash
+curl -X POST "https://api.traceway.ai/api/queue/${ITEM_ID}/claim" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"claimed_by": "reviewer@example.com"}'
+```
+
+If the item is already claimed by someone else, the API returns `409 Conflict`. The reviewer should try the next item.
+
+### 3. Review and submit
+
+The reviewer inspects the datapoint's input and output, makes corrections if needed, and submits:
+
+```ts
+const submitted = await tw.submitQueueItem(claimed.id, {
+  corrected_output: 'The actual correct answer is...',
+  notes: 'Original output was missing context about X',
+});
+```
+
+```bash
+curl -X POST "https://api.traceway.ai/api/queue/${ITEM_ID}/submit" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "edited_data": {
+      "corrected_output": "The actual correct answer is...",
+      "notes": "Original output was missing context"
+    }
+  }'
+```
+
+The `edited_data` field accepts any JSON. It's stored alongside the `original_data` so you can see what changed.
+
+### 4. List the queue
+
+View all items in the queue, optionally filtered by status:
+
+```ts
+const { items } = await tw.listQueue(datasetId);
+```
+
+```bash
+curl "https://api.traceway.ai/api/datasets/${DATASET_ID}/queue" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+## Dashboard workflow
+
+In the dashboard, the Review tab on a dataset shows the queue:
+
+1. A list of pending items with their datapoint content previewed.
+2. Click "Claim" to lock an item.
+3. The item opens in a review pane showing the original input, output, and expected output.
+4. Edit the fields as needed.
+5. Click "Submit" to complete the review, or "Skip" to release the claim (returns to `pending`).
+
+## Combining with capture rules
+
+A common pattern is to automate the pipeline from production to review:
+
+1. **Capture rule** — Automatically save spans matching a filter to a dataset (e.g., all failed calls, or expensive calls).
+2. **Enqueue** — Periodically or automatically enqueue new datapoints for review.
+3. **Review** — Human reviewers claim, inspect, and correct items.
+4. **Golden dataset** — Move reviewed and verified datapoints to a separate golden dataset for use in evaluations.
+
+This creates a continuous feedback loop: production data flows into the review pipeline, reviewers curate it, and the curated data feeds back into evaluations that measure quality.
+
+## Practical tips
+
+- **Use the `claimed_by` field consistently.** Use email addresses or user IDs so you can track who reviewed what.
+- **Don't let the queue grow unbounded.** If capture rules are adding items faster than reviewers can process them, reduce the capture sample rate.
+- **Review in batches.** It's more efficient to review 20-50 items in one sitting than to trickle through them.

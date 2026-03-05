@@ -1,0 +1,155 @@
+---
+title: Real-time Events
+description: Server-Sent Events (SSE) for live updates — event types, subscriptions, and reconnection.
+---
+
+Traceway streams events to connected clients via Server-Sent Events (SSE). The dashboard uses this to update live as spans come in — no polling needed. You can also subscribe to events from your own code.
+
+## SSE endpoint
+
+```
+GET /api/events
+```
+
+In cloud mode, authenticate with a token query parameter:
+
+```
+GET /api/events?token=<jwt_or_api_key>
+```
+
+The connection stays open and Traceway pushes events as they happen.
+
+## Event types
+
+| Event type | Payload | Description |
+|------------|---------|-------------|
+| `span_created` | `{ span: Span }` | A new span was created (in `running` status) |
+| `span_completed` | `{ span: Span }` | A span was completed |
+| `span_failed` | `{ span: Span }` | A span failed |
+| `span_deleted` | `{ span_id: string }` | A span was deleted |
+| `trace_created` | `{ trace: Trace }` | A new trace was created |
+| `trace_deleted` | `{ trace_id: string }` | A trace was deleted |
+| `dataset_created` | `{ dataset: Dataset }` | A new dataset was created |
+| `dataset_deleted` | `{ dataset_id: string }` | A dataset was deleted |
+| `datapoint_created` | `{ datapoint: Datapoint }` | A new datapoint was created |
+| `queue_item_updated` | `{ item: QueueItem }` | A queue item was claimed or submitted |
+| `cleared` | `{}` | All data was cleared |
+
+Additional event types for eval runs:
+
+| Event type | Payload | Description |
+|------------|---------|-------------|
+| `eval_started` | `{ run_id, dataset_id }` | An eval run started |
+| `eval_progress` | `{ run_id, progress, total }` | An eval run made progress |
+| `eval_completed` | `{ run_id }` | An eval run finished |
+| `eval_failed` | `{ run_id, error }` | An eval run failed |
+| `eval_cancelled` | `{ run_id }` | An eval run was cancelled |
+| `capture_triggered` | `{ rule_id, span_id, datapoint_id }` | A capture rule matched and created a datapoint |
+
+## Subscribing from code
+
+### Using the SDK
+
+```ts
+import { Traceway } from 'traceway';
+
+const tw = new Traceway({
+  url: 'https://api.traceway.ai',
+  apiKey: 'tw_sk_...',
+});
+
+const unsubscribe = tw.subscribe((event) => {
+  switch (event.type) {
+    case 'span_created':
+      console.log(`New span: ${event.span.name} (${event.span.id})`);
+      break;
+    case 'span_completed':
+      console.log(`Completed: ${event.span.name}, took ${event.span.metadata.duration_ms}ms`);
+      break;
+    case 'span_failed':
+      console.log(`Failed: ${event.span.name}: ${event.span.status.failed.error}`);
+      break;
+    case 'trace_created':
+      console.log(`New trace: ${event.trace.name}`);
+      break;
+  }
+});
+
+// Later, stop listening:
+unsubscribe();
+```
+
+### Using EventSource directly
+
+If you're not using the TypeScript SDK, connect to the SSE endpoint directly:
+
+```ts
+const eventSource = new EventSource(
+  'https://api.traceway.ai/api/events?token=tw_sk_...'
+);
+
+eventSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log(data.type, data);
+};
+
+eventSource.onerror = (error) => {
+  console.error('SSE connection error:', error);
+};
+```
+
+### Using curl
+
+```bash
+curl -N "https://api.traceway.ai/api/events?token=tw_sk_..." \
+  -H "Accept: text/event-stream"
+```
+
+Each event is formatted as:
+
+```
+id: 42
+event: message
+data: {"type":"span_completed","span":{...}}
+```
+
+## Reconnection
+
+SSE supports automatic reconnection. If the connection drops, the browser's `EventSource` will reconnect automatically.
+
+### Sequence-based replay
+
+Each event has a numeric `id` (sequence number). When you reconnect, the browser sends `Last-Event-ID` in the request headers. Traceway replays all events since that sequence number, so you don't miss anything during the disconnection.
+
+You can also request replay manually:
+
+```
+GET /api/events?since=42
+```
+
+This returns all events with sequence number > 42, then continues with live events.
+
+### Event log retention
+
+In local mode, events are stored in a SQLite event log with 24-hour retention. Events older than 24 hours are pruned automatically.
+
+In cloud mode with Redis configured, events are distributed across instances via Redis Pub/Sub. The durable log is still SQLite-backed per instance, so replay is only available from the instance you're connected to.
+
+## Multi-instance behavior
+
+When running multiple Traceway replicas behind a load balancer:
+
+- **Without Redis** — Each instance only sees events from requests it handled. If a span is created on instance A, clients connected to instance B won't receive the event.
+- **With Redis** (`REDIS_URL` configured) — Events are published to Redis Pub/Sub and distributed to all instances. All connected clients see all events regardless of which instance handled the request.
+
+For production deployments with multiple replicas, configure `REDIS_URL` to ensure consistent real-time updates across all dashboard connections.
+
+## Use cases
+
+**Live monitoring** — Display a live feed of traces and spans as they flow through your application. Useful for demos, debugging, and observing production behavior.
+
+**Alerting** — Subscribe to `span_failed` events and trigger alerts when spans fail. Check the error message for specific patterns.
+
+**Custom dashboards** — Build your own dashboards that consume Traceway events. Use the SSE stream to update metrics, charts, or status boards in real time.
+
+**Pipeline orchestration** — Wait for a specific span to complete before triggering the next step in a pipeline. Subscribe to `span_completed` events and filter by trace ID.

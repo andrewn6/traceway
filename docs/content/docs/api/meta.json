@@ -4,6 +4,11 @@
     "index",
     "traces",
     "spans",
-    "datasets"
+    "datasets",
+    "datapoints",
+    "queue",
+    "evaluations",
+    "events",
+    "analytics"
   ]
 }

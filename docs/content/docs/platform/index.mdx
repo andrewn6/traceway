@@ -1,0 +1,52 @@
+---
+title: Introduction
+description: The Traceway dashboard — traces, spans, datasets, evals, analytics, and settings.
+---
+
+The Traceway dashboard is a SvelteKit web application at [platform.traceway.ai](https://platform.traceway.ai). When running locally, it's served from the API server at `http://localhost:3000`.
+
+The dashboard provides a visual interface for everything you can do with the API: viewing traces, inspecting spans, managing datasets, running evaluations, reviewing queue items, and configuring settings.
+
+## Pages
+
+| Page | Path | Description |
+|------|------|-------------|
+| Overview | `/` | Summary stats: trace count, span count, recent activity |
+| Traces | `/traces` | List of all traces with search and filtering |
+| Trace detail | `/traces/:id` | Span tree for a single trace |
+| Spans | `/spans` | List of all spans with advanced filtering |
+| Analytics | `/analytics` | Charts and aggregates: cost over time, latency distribution, model usage |
+| Datasets | `/datasets` | List of all datasets |
+| Dataset detail | `/datasets/:id` | Datapoints, capture rules, queue, and eval runs for a dataset |
+| Eval results | `/datasets/:id/eval/:run_id` | Results for a specific eval run |
+| Eval comparison | `/datasets/:id/compare` | Side-by-side comparison of eval runs |
+| Review | `/datasets/:id/review` | Queue review interface |
+| Settings | `/settings` | Project settings, API keys, provider connections, team members |
+
+## Authentication
+
+In cloud mode, the dashboard requires login. You can sign up at [platform.traceway.ai/signup](https://platform.traceway.ai/signup) or accept an invite from a team member.
+
+Authentication methods:
+- **Email/password** — Standard registration and login
+- **Session cookies** — JWT stored as an HTTP-only cookie
+- **API keys** — For programmatic access (not used in the dashboard)
+
+In local mode (`traceway serve` without `--cloud`), authentication is disabled. The dashboard is open to anyone who can reach the port.
+
+## Organizations and projects
+
+In cloud mode, data is organized into:
+
+- **Organizations** — The top-level container. Each org has its own billing, members, and data isolation.
+- **Projects** — Within an organization. Each project has its own traces, spans, datasets, and API keys.
+
+You select a project from the sidebar. All data on the page is scoped to the current project.
+
+## Next steps
+
+<Cards>
+  <Card title="Viewing Traces" href="/docs/platform/viewing-traces" />
+  <Card title="Filtering & Search" href="/docs/platform/filtering" />
+  <Card title="Real-time Events" href="/docs/platform/real-time-events" />
+</Cards>

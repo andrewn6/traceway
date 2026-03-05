@@ -1,11 +1,9 @@
 ---
-title: Datasets & Datapoints
-description: REST API endpoints for datasets, datapoints, queue, and evaluations.
+title: Datasets
+description: REST API endpoints for creating, listing, updating, and deleting datasets.
 ---
 
-## Datasets
-
-### Create a dataset
+## Create a dataset
 
 ```
 POST /api/datasets
@@ -18,13 +16,31 @@ POST /api/datasets
 }
 ```
 
-### List datasets
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `name` | Yes | string | Dataset name |
+| `description` | No | string | Optional description |
+
+Response:
+
+```json
+{
+  "id": "01J...",
+  "name": "golden-set",
+  "description": "Curated test cases for the Q&A pipeline",
+  "datapoint_count": 0,
+  "created_at": "2024-06-15T12:00:00Z",
+  "updated_at": "2024-06-15T12:00:00Z"
+}
+```
+
+## List datasets
 
 ```
 GET /api/datasets
 ```
 
-Returns datasets with their datapoint counts:
+Returns all datasets with their datapoint counts:
 
 ```json
 {
@@ -42,7 +58,15 @@ Returns datasets with their datapoint counts:
 }
 ```
 
-### Update a dataset
+## Get a dataset
+
+```
+GET /api/datasets/:id
+```
+
+Returns the dataset metadata (same shape as the object in the list response).
+
+## Update a dataset
 
 ```
 PUT /api/datasets/:id
@@ -55,207 +79,14 @@ PUT /api/datasets/:id
 }
 ```
 
-### Delete a dataset
+Both fields are optional. Only provided fields are updated.
+
+## Delete a dataset
 
 ```
 DELETE /api/datasets/:id
 ```
 
-## Datapoints
+Deletes the dataset and all its datapoints, queue items, capture rules, and eval runs. This is irreversible.
 
-### Create a datapoint
-
-```
-POST /api/datasets/:id/datapoints
-```
-
-```json
-{
-  "kind": {
-    "Generic": {
-      "input": { "question": "What is the capital of France?" },
-      "expected_output": { "answer": "Paris" }
-    }
-  }
-}
-```
-
-Or for conversation-style datapoints:
-
-```json
-{
-  "kind": {
-    "LlmConversation": {
-      "messages": [
-        { "role": "user", "content": "What is 2+2?" }
-      ],
-      "expected": "4"
-    }
-  }
-}
-```
-
-### Export a span to a dataset
-
-```
-POST /api/datasets/:id/export-span
-```
-
-```json
-{
-  "span_id": "01J..."
-}
-```
-
-Creates a datapoint from the span's input/output.
-
-### Import from file
-
-```
-POST /api/datasets/:id/import
-Content-Type: multipart/form-data
-```
-
-Upload a CSV, JSON, or JSONL file. Each row/object becomes a datapoint.
-
-**JSON format**: An array of objects with `input`, `expected_output`, and optionally `messages`.
-
-**JSONL format**: One JSON object per line.
-
-**CSV format**: Columns are mapped to datapoint fields.
-
-Returns:
-
-```json
-{
-  "imported": 150,
-  "dataset_id": "01J..."
-}
-```
-
-### List datapoints
-
-```
-GET /api/datasets/:id/datapoints
-```
-
-### Delete a datapoint
-
-```
-DELETE /api/datasets/:id/datapoints/:dp_id
-```
-
-## Queue
-
-### Enqueue datapoints
-
-```
-POST /api/datasets/:id/queue
-```
-
-```json
-{
-  "datapoint_ids": ["01J...", "01J..."]
-}
-```
-
-### Claim a queue item
-
-```
-POST /api/queue/:item_id/claim
-```
-
-```json
-{
-  "claimed_by": "reviewer@example.com"
-}
-```
-
-Returns `409` if already claimed.
-
-### Submit a reviewed item
-
-```
-POST /api/queue/:item_id/submit
-```
-
-```json
-{
-  "edited_data": {
-    "corrected_output": "The actual answer is..."
-  }
-}
-```
-
-## Evaluations
-
-### Start an eval run
-
-```
-POST /api/datasets/:id/eval
-```
-
-```json
-{
-  "name": "gpt-4o-mini baseline",
-  "config": {
-    "connection_id": "01J...",
-    "model": "gpt-4o-mini",
-    "system_prompt": "You are a helpful assistant.",
-    "temperature": 0.0
-  },
-  "scoring": "ExactMatch"
-}
-```
-
-Scoring options: `ExactMatch`, `Contains`, `LlmJudge`, `None`.
-
-The eval runs asynchronously. Poll `GET /api/eval/:run_id` to check progress.
-
-### Get eval results
-
-```
-GET /api/eval/:run_id
-```
-
-Returns the run metadata plus all result items:
-
-```json
-{
-  "id": "01J...",
-  "dataset_id": "01J...",
-  "name": "gpt-4o-mini baseline",
-  "status": "completed",
-  "progress": 42,
-  "total": 42,
-  "result_items": [
-    {
-      "datapoint_id": "01J...",
-      "output": "Paris",
-      "score": 1.0,
-      "latency_ms": 340,
-      "status": "completed"
-    }
-  ]
-}
-```
-
-### Compare eval runs
-
-```
-GET /api/datasets/:id/compare?runs=run_id_1,run_id_2
-```
-
-Returns a side-by-side comparison of outputs and scores for each datapoint across multiple runs.
-
-### Cancel an eval run
-
-```
-POST /api/eval/:run_id/cancel
-```
-
-### Delete an eval run
-
-```
-DELETE /api/eval/:run_id
-```
+Returns `200` on success, `404` if not found.

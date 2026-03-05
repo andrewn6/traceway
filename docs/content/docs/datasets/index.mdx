@@ -1,0 +1,142 @@
+---
+title: Introduction
+description: What datasets and datapoints are, their types, and how they fit into the Traceway workflow.
+---
+
+A dataset is a named collection of input/output pairs, called **datapoints**. Datasets serve two purposes in Traceway:
+
+1. **Regression testing** — Run evaluations against a dataset to measure model quality and detect regressions when you change prompts or models.
+2. **Data collection** — Build curated sets of examples from production traffic for fine-tuning, analysis, or review.
+
+## Dataset structure
+
+A dataset has:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique identifier |
+| `name` | string | Human-readable name (e.g., "qa-golden-set") |
+| `description` | string | Optional description |
+| `datapoint_count` | number | Number of datapoints in the dataset |
+| `created_at` | string | ISO 8601 timestamp |
+| `updated_at` | string | ISO 8601 timestamp |
+
+## Datapoint kinds
+
+Each datapoint has a `kind` that determines its schema. There are two kinds:
+
+### Generic
+
+A flexible format for any type of input/output pair.
+
+```json
+{
+  "kind": {
+    "Generic": {
+      "input": { "question": "What is the capital of France?" },
+      "expected_output": { "answer": "Paris" },
+      "actual_output": null,
+      "score": null,
+      "metadata": { "source": "geography-quiz", "difficulty": "easy" }
+    }
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `input` | any JSON | The input to the task |
+| `expected_output` | any JSON | The expected/correct output |
+| `actual_output` | any JSON | Optional. The model's actual output (populated by evals) |
+| `score` | number | Optional. 0.0 to 1.0 score (populated by evals) |
+| `metadata` | object | Optional. Arbitrary key-value pairs |
+
+Use Generic datapoints when your inputs and outputs don't follow a chat message format, or when you need the flexibility of arbitrary JSON.
+
+### LlmConversation
+
+A structured format specifically for chat-style LLM interactions.
+
+```json
+{
+  "kind": {
+    "LlmConversation": {
+      "messages": [
+        { "role": "system", "content": "You are a geography expert." },
+        { "role": "user", "content": "What is the capital of France?" }
+      ],
+      "expected": "Paris",
+      "metadata": { "topic": "geography" }
+    }
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `messages` | Message[] | Array of `{ role, content }` message objects |
+| `expected` | string | Optional. The expected response text |
+| `metadata` | object | Optional. Arbitrary key-value pairs |
+
+Use LlmConversation datapoints when your data is naturally chat-formatted. Evaluations send the `messages` array directly to the model, making setup simpler.
+
+## Datapoint sources
+
+Each datapoint tracks how it was created:
+
+| Source | Description |
+|--------|-------------|
+| `manual` | Created via the API or dashboard |
+| `span_export` | Exported from a production span |
+| `file_upload` | Imported from a CSV/JSON/JSONL file |
+
+For `span_export` datapoints, the `source_span_id` field links back to the original span, so you can trace a datapoint to the production request that inspired it.
+
+## Creating a dataset
+
+### Via the SDK
+
+```ts
+import { Traceway } from 'traceway';
+
+const tw = new Traceway();
+
+const dataset = await tw.createDataset('qa-golden-set', 'Curated Q&A test cases');
+console.log(dataset.id); // "01J..."
+```
+
+### Via the API
+
+```bash
+curl -X POST https://api.traceway.ai/api/datasets \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"name": "qa-golden-set", "description": "Curated Q&A test cases"}'
+```
+
+### Via the dashboard
+
+In the Datasets tab, click "New Dataset", enter a name and optional description.
+
+## Managing datasets
+
+```ts
+// List all datasets
+const { datasets } = await tw.listDatasets();
+
+// Update a dataset's name or description
+// (use the REST API: PUT /api/datasets/:id)
+
+// Delete a dataset and all its datapoints
+await tw.deleteDataset(dataset.id);
+```
+
+Deleting a dataset also deletes all its datapoints, queue items, and eval runs. This is irreversible.
+
+## Next steps
+
+<Cards>
+  <Card title="Adding Data" href="/docs/datasets/adding-data" />
+  <Card title="Capture Rules" href="/docs/datasets/capture-rules" />
+  <Card title="Running Evaluations" href="/docs/evaluations/running-evaluations" />
+</Cards>

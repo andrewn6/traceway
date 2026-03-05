@@ -1,0 +1,183 @@
+---
+title: Adding Data
+description: Four ways to populate a dataset — manual creation, span export, file import, and capture rules.
+---
+
+There are four ways to add datapoints to a dataset.
+
+## Manual creation
+
+Create datapoints directly via the SDK or API. Useful for hand-crafted test cases.
+
+### Generic datapoints
+
+```ts
+const dp = await tw.createDatapoint(dataset.id, {
+  Generic: {
+    input: { question: 'What is the capital of France?' },
+    expected_output: { answer: 'Paris' },
+  },
+});
+```
+
+### LlmConversation datapoints
+
+```ts
+const dp = await tw.createDatapoint(dataset.id, {
+  LlmConversation: {
+    messages: [
+      { role: 'system', content: 'You are a geography expert.' },
+      { role: 'user', content: 'What is the capital of France?' },
+    ],
+    expected: 'Paris',
+  },
+});
+```
+
+### Via the API
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/datapoints" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "kind": {
+      "Generic": {
+        "input": { "question": "What is the capital of France?" },
+        "expected_output": { "answer": "Paris" }
+      }
+    }
+  }'
+```
+
+## Export from a span
+
+The most common workflow: you see an interesting span in production — a good response, a bad one, an edge case — and export it to a dataset. The span's input becomes the datapoint's input, and the output becomes the expected output.
+
+### Via the SDK
+
+```ts
+const dp = await tw.exportSpanToDataset(dataset.id, spanId);
+```
+
+### Via the API
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/export-span" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"span_id": "01J..."}'
+```
+
+### Via the dashboard
+
+Click any span in the trace view, then click "Export to Dataset" and select the target dataset.
+
+### How the mapping works
+
+When you export a span:
+
+1. If the span's input is an array of message objects (detected by looking for `role` and `content` fields), Traceway creates an `LlmConversation` datapoint with those messages.
+2. Otherwise, Traceway creates a `Generic` datapoint with the span's `input` and `output` fields.
+
+The datapoint's `source` is set to `span_export` and `source_span_id` links back to the original span.
+
+## Import from a file
+
+Upload a CSV, JSON, or JSONL file to bulk-import datapoints.
+
+### JSONL (recommended for large datasets)
+
+One JSON object per line. Each object should have at least an `input` field:
+
+```jsonl
+{"input": {"question": "What is 2+2?"}, "expected_output": {"answer": "4"}}
+{"input": {"question": "Capital of Japan?"}, "expected_output": {"answer": "Tokyo"}}
+{"input": {"question": "Largest ocean?"}, "expected_output": {"answer": "Pacific"}}
+```
+
+### JSON
+
+An array of objects:
+
+```json
+[
+  {"input": {"question": "What is 2+2?"}, "expected_output": {"answer": "4"}},
+  {"input": {"question": "Capital of Japan?"}, "expected_output": {"answer": "Tokyo"}}
+]
+```
+
+### CSV
+
+Column names map to datapoint fields. At minimum, include an `input` column:
+
+```csv
+input,expected_output
+"What is 2+2?","4"
+"Capital of Japan?","Tokyo"
+```
+
+### Upload via curl
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/import" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -F "file=@testcases.jsonl"
+```
+
+Response:
+
+```json
+{
+  "imported": 150,
+  "dataset_id": "01J..."
+}
+```
+
+All imported datapoints have `source: "file_upload"` and `kind: Generic`.
+
+### Conversation format in files
+
+To import LlmConversation datapoints, include a `messages` field:
+
+```jsonl
+{"messages": [{"role": "user", "content": "What is 2+2?"}], "expected": "4"}
+{"messages": [{"role": "system", "content": "Be concise"}, {"role": "user", "content": "Capital?"}], "expected": "Paris"}
+```
+
+## Capture rules (automatic)
+
+Capture rules automatically export spans to a dataset when they match a filter. This is covered in detail on the [Capture Rules](/docs/datasets/capture-rules) page.
+
+In brief: you define a filter (model, provider, cost threshold, etc.) and a sample rate. When a span completes and matches the filter, Traceway automatically creates a datapoint in the target dataset.
+
+## Managing datapoints
+
+### List datapoints
+
+```ts
+const { datapoints } = await tw.listDatapoints(dataset.id);
+```
+
+```bash
+curl "https://api.traceway.ai/api/datasets/${DATASET_ID}/datapoints" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+### Delete a datapoint
+
+```ts
+await tw.deleteDatapoint(dataset.id, datapointId);
+```
+
+```bash
+curl -X DELETE "https://api.traceway.ai/api/datasets/${DATASET_ID}/datapoints/${DP_ID}" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+### Get a single datapoint
+
+```bash
+curl "https://api.traceway.ai/api/datasets/${DATASET_ID}/datapoints/${DP_ID}" \
+  -H "Authorization: Bearer tw_sk_..."
+```

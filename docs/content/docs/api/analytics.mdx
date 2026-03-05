@@ -1,0 +1,130 @@
+---
+title: Analytics
+description: REST API endpoints for querying aggregated metrics — cost, latency, tokens, usage.
+---
+
+## Summary
+
+```
+GET /api/analytics/summary
+```
+
+Returns high-level aggregate metrics for the current project:
+
+```json
+{
+  "total_traces": 1250,
+  "total_spans": 4800,
+  "total_cost": 12.45,
+  "total_tokens": 2450000,
+  "avg_latency_ms": 820,
+  "error_rate": 0.023,
+  "models": {
+    "gpt-4o": { "count": 2100, "cost": 8.50, "tokens": 1800000 },
+    "gpt-4o-mini": { "count": 2700, "cost": 3.95, "tokens": 650000 }
+  }
+}
+```
+
+## Query analytics
+
+```
+POST /api/analytics
+```
+
+Query time-series analytics with filters and grouping:
+
+```json
+{
+  "since": "2024-06-01T00:00:00Z",
+  "until": "2024-06-15T00:00:00Z",
+  "group_by": "day",
+  "model": "gpt-4o",
+  "provider": "openai"
+}
+```
+
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `since` | No | ISO 8601 | Start of time range |
+| `until` | No | ISO 8601 | End of time range |
+| `group_by` | No | string | `hour`, `day`, or `week` (default: `day`) |
+| `model` | No | string | Filter by model |
+| `provider` | No | string | Filter by provider |
+
+Response:
+
+```json
+{
+  "buckets": [
+    {
+      "timestamp": "2024-06-01T00:00:00Z",
+      "span_count": 350,
+      "cost": 1.23,
+      "tokens": 180000,
+      "avg_latency_ms": 750,
+      "error_count": 8
+    },
+    {
+      "timestamp": "2024-06-02T00:00:00Z",
+      "span_count": 420,
+      "cost": 1.56,
+      "tokens": 210000,
+      "avg_latency_ms": 810,
+      "error_count": 3
+    }
+  ]
+}
+```
+
+## Other endpoints
+
+### Stats
+
+```
+GET /api/stats
+```
+
+Basic counts:
+
+```json
+{
+  "trace_count": 1250,
+  "span_count": 4800
+}
+```
+
+### Export all data
+
+```
+GET /api/export/json
+```
+
+Downloads all traces, spans, datasets, and datapoints as a single JSON file. Useful for backups and migration.
+
+### Health
+
+```
+GET /api/health
+```
+
+Returns server health information:
+
+```json
+{
+  "status": "ok",
+  "instance_id": "abc123",
+  "uptime": 86400,
+  "version": "0.1.0"
+}
+```
+
+No authentication required.
+
+### OpenAPI spec
+
+```
+GET /api/openapi.json
+```
+
+Returns the OpenAPI 3.0 specification for the full API. No authentication required.
