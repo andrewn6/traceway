@@ -2,6 +2,7 @@ import { api } from "encore.dev/api";
 import { and, asc, eq } from "drizzle-orm";
 
 import { db } from "../core/database";
+import { JsonValue } from "../core/json";
 import { fileVersions } from "../core/schema";
 import { ScopeQuery } from "../core/types";
 import { newId, validateScope } from "../core/utils";
@@ -45,7 +46,7 @@ export const createFileVersion = api(
       id?: string;
       path: string;
       hash: string;
-      metadata?: unknown;
+      metadata?: JsonValue;
       created_by_span?: string;
     }
   ) => {

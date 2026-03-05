@@ -1,6 +1,7 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 
 import { db } from "../core/database";
+import { asJson } from "../core/json";
 import { evalResults, evalRuns } from "../core/schema";
 import { newId } from "../core/utils";
 import {
@@ -16,10 +17,10 @@ function mapRun(row: typeof evalRuns.$inferSelect): EvalRun {
     id: row.id,
     dataset_id: row.datasetId,
     name: row.name ?? undefined,
-    config: row.config,
+    config: asJson(row.config),
     scoring: row.scoring,
     status: row.status,
-    results: row.results,
+    results: asJson(row.results),
     trace_id: row.traceId ?? undefined,
     created_at: row.createdAt.toISOString(),
     completed_at: row.completedAt?.toISOString(),
@@ -33,7 +34,7 @@ function mapResult(row: typeof evalResults.$inferSelect): EvalResult {
     run_id: row.runId,
     datapoint_id: row.datapointId,
     status: row.status,
-    actual_output: row.actualOutput,
+    actual_output: asJson(row.actualOutput),
     score: row.score ?? undefined,
     score_reason: row.scoreReason ?? undefined,
     latency_ms: row.latencyMs,

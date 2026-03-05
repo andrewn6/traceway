@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { db } from "../core/database";
+import { JsonValue, asOptionalJson } from "../core/json";
 import { datapoints, queueItems } from "../core/schema";
 import { newId } from "../core/utils";
 import { QueueItem } from "./types";
@@ -13,8 +14,8 @@ function mapQueueItem(row: typeof queueItems.$inferSelect): QueueItem {
     status: row.status as QueueItem["status"],
     claimed_by: row.claimedBy ?? undefined,
     claimed_at: row.claimedAt?.toISOString(),
-    original_data: row.originalData ?? undefined,
-    edited_data: row.editedData ?? undefined,
+    original_data: asOptionalJson(row.originalData),
+    edited_data: asOptionalJson(row.editedData),
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
   };
@@ -97,7 +98,7 @@ export const QueueService = {
     return updated ? mapQueueItem(updated) : null;
   },
 
-  async submit(orgId: string, projectId: string, id: string, editedData: unknown): Promise<QueueItem | null> {
+  async submit(orgId: string, projectId: string, id: string, editedData: JsonValue): Promise<QueueItem | null> {
     const [updated] = await db
       .update(queueItems)
       .set({

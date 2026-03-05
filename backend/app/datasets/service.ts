@@ -1,6 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 
 import { db } from "../core/database";
+import { asJson } from "../core/json";
 import { datapoints, datasets } from "../core/schema";
 import { newId, nowIso } from "../core/utils";
 import {
@@ -27,7 +28,7 @@ function mapDatapoint(row: typeof datapoints.$inferSelect): Datapoint {
   return {
     id: row.id,
     dataset_id: row.datasetId,
-    kind: row.kind,
+    kind: asJson(row.kind),
     source: row.source,
     source_span_id: row.sourceSpanId ?? undefined,
     created_at: row.createdAt.toISOString(),

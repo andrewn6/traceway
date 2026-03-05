@@ -1,13 +1,14 @@
 import { ScopeQuery } from "../core/types";
+import { JsonValue } from "../core/json";
 
 export interface EvalRun {
   id: string;
   dataset_id: string;
   name?: string;
-  config: unknown;
+  config: JsonValue;
   scoring: string;
   status: string;
-  results: unknown;
+  results: JsonValue;
   trace_id?: string;
   created_at: string;
   completed_at?: string;
@@ -19,7 +20,7 @@ export interface EvalResult {
   run_id: string;
   datapoint_id: string;
   status: string;
-  actual_output: unknown;
+  actual_output: JsonValue;
   score?: number;
   score_reason?: string;
   latency_ms: number;
@@ -34,14 +35,14 @@ export type CreateEvalRunRequest = ScopeQuery & {
   id?: string;
   dataset_id: string;
   name?: string;
-  config: unknown;
+  config: JsonValue;
   scoring?: string;
 };
 
 export type UpdateEvalRunRequest = ScopeQuery & {
   id: string;
   status?: string;
-  results?: unknown;
+  results?: JsonValue;
   trace_id?: string;
   completed_at?: string;
   error?: string;
@@ -52,7 +53,7 @@ export type CreateEvalResultRequest = ScopeQuery & {
   run_id: string;
   datapoint_id: string;
   status?: string;
-  actual_output?: unknown;
+  actual_output?: JsonValue;
   score?: number;
   score_reason?: string;
   latency_ms?: number;

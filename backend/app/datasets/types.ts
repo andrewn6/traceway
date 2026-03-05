@@ -1,4 +1,5 @@
 import { ScopeQuery } from "../core/types";
+import { JsonValue } from "../core/json";
 
 export interface Dataset {
   id: string;
@@ -13,7 +14,7 @@ export interface Dataset {
 export interface Datapoint {
   id: string;
   dataset_id: string;
-  kind: unknown;
+  kind: JsonValue;
   source: string;
   source_span_id?: string;
   created_at: string;
@@ -34,7 +35,7 @@ export type UpdateDatasetRequest = ScopeQuery & {
 export type CreateDatapointRequest = ScopeQuery & {
   id?: string;
   dataset_id: string;
-  kind: unknown;
+  kind: JsonValue;
   source: string;
   source_span_id?: string;
 };

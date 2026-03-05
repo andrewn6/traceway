@@ -1,4 +1,5 @@
 import { ScopeQuery } from "../core/types";
+import { JsonValue } from "../core/json";
 
 export interface QueueItem {
   id: string;
@@ -7,8 +8,8 @@ export interface QueueItem {
   status: "pending" | "claimed" | "completed";
   claimed_by?: string;
   claimed_at?: string;
-  original_data?: unknown;
-  edited_data?: unknown;
+  original_data?: JsonValue;
+  edited_data?: JsonValue;
   created_at: string;
   updated_at: string;
 }
@@ -25,5 +26,5 @@ export type ClaimRequest = ScopeQuery & {
 
 export type SubmitRequest = ScopeQuery & {
   id: string;
-  edited_data?: unknown;
+  edited_data?: JsonValue;
 };

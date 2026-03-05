@@ -1,6 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 
 import { db } from "../core/database";
+import { asJson } from "../core/json";
 import { captureRules } from "../core/schema";
 import { newId } from "../core/utils";
 import { CaptureRule, CreateCaptureRuleRequest, UpdateCaptureRuleRequest } from "./types";
@@ -11,7 +12,7 @@ function mapRule(row: typeof captureRules.$inferSelect): CaptureRule {
     dataset_id: row.datasetId,
     name: row.name,
     enabled: row.enabled,
-    filters: row.filters,
+    filters: asJson(row.filters),
     sample_rate: row.sampleRate,
     captured_count: row.capturedCount,
     created_at: row.createdAt.toISOString(),
