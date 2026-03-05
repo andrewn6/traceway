@@ -3,6 +3,7 @@ pub mod auth_keys;
 pub mod auth_routes;
 pub mod billing_routes;
 pub mod capture;
+pub mod control_plane;
 pub mod event_log;
 pub mod events;
 pub mod jobs;
@@ -214,6 +215,7 @@ pub struct AppState {
     pub events_tx: broadcast::Sender<SystemEvent>,
     /// Durable event log for SSE replay on reconnect.
     pub event_log: Arc<dyn events::EventLog>,
+    pub control_plane: control_plane::ControlPlaneClient,
     pub start_time: Instant,
     pub config: Arc<RwLock<serde_json::Value>>,
     pub config_path: Arc<String>,
@@ -633,7 +635,7 @@ pub struct EnqueueResponse {
 
 // --- Eval response types ---
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct EvalRunDetailResponse {
     #[serde(flatten)]
     pub run: EvalRun,
@@ -1651,6 +1653,43 @@ async fn list_datasets(
     State(state): State<AppState>,
 ) -> Result<Json<DatasetListResponse>, (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::DatasetsRead)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let datasets = state
+            .control_plane
+            .list_datasets(ctx.org_id, ctx.project_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend list datasets failed: {e}");
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({ "error": "backend unavailable" })),
+                )
+            })?
+            .unwrap_or_default();
+
+        let mut items = Vec::with_capacity(datasets.len());
+        for ds in datasets {
+            let datapoint_count = state
+                .control_plane
+                .list_datapoints(ctx.org_id, ctx.project_id, ds.id)
+                .await
+                .ok()
+                .and_then(|v| v)
+                .map(|v| v.len())
+                .unwrap_or(0);
+            items.push(DatasetResponse {
+                dataset: ds,
+                datapoint_count,
+            });
+        }
+        let count = items.len();
+        return Ok(Json(DatasetListResponse {
+            datasets: items,
+            count,
+        }));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
     let r = store.read().await;
     let datasets: Vec<DatasetResponse> = r
@@ -1681,11 +1720,47 @@ async fn create_dataset(
     Json(req): Json<CreateDatasetRequest>,
 ) -> Result<(StatusCode, Json<Dataset>), (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::DatasetsWrite)?;
-    let dataset = Dataset::new(req.name, req.description);
-    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
-    let mut w = store.write().await;
-    w.save_dataset(dataset.clone()).await.map_err(storage_err_json)?;
-    drop(w);
+
+    let dataset = if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        state
+            .control_plane
+            .create_dataset(ctx.org_id, ctx.project_id, req.name, req.description)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend create dataset failed: {e}");
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({ "error": "backend unavailable" })),
+                )
+            })?
+            .ok_or_else(|| {
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({ "error": "backend unavailable" })),
+                )
+            })?
+    } else {
+        let dataset = Dataset::new(req.name, req.description);
+        let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
+        let mut w = store.write().await;
+        w.save_dataset(dataset.clone()).await.map_err(storage_err_json)?;
+
+        if state.control_plane.mode == control_plane::ControlPlaneMode::Shadow {
+            let cp = state.control_plane.clone();
+            let org_id = ctx.org_id;
+            let project_id = ctx.project_id;
+            let name = dataset.name.clone();
+            let description = dataset.description.clone();
+            tokio::spawn(async move {
+                if let Err(e) = cp.create_dataset(org_id, project_id, name, description).await {
+                    tracing::warn!("backend shadow create dataset failed: {e}");
+                }
+            });
+        }
+
+        dataset
+    };
+
     state.emit_event(SystemEvent::DatasetCreated { dataset: dataset.clone() }, &ctx.org_id.to_string());
     Ok((StatusCode::CREATED, Json(dataset)))
 }
@@ -1708,6 +1783,31 @@ async fn get_dataset(
     Path(dataset_id): Path<DatasetId>,
 ) -> Result<Json<DatasetResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let ds = state
+            .control_plane
+            .get_dataset(ctx.org_id, ctx.project_id, dataset_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend get dataset failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?;
+        let datapoint_count = state
+            .control_plane
+            .list_datapoints(ctx.org_id, ctx.project_id, dataset_id)
+            .await
+            .ok()
+            .and_then(|v| v)
+            .map(|v| v.len())
+            .unwrap_or(0);
+        return Ok(Json(DatasetResponse {
+            datapoint_count,
+            dataset: ds,
+        }));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     let ds = w.get_dataset_or_load(dataset_id).await.ok_or(StatusCode::NOT_FOUND)?.clone();
@@ -1737,6 +1837,31 @@ async fn update_dataset(
     Json(req): Json<UpdateDatasetRequest>,
 ) -> Result<Json<DatasetResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let updated = state
+            .control_plane
+            .update_dataset(ctx.org_id, ctx.project_id, dataset_id, &req)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend update dataset failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?;
+        let count = state
+            .control_plane
+            .list_datapoints(ctx.org_id, ctx.project_id, dataset_id)
+            .await
+            .ok()
+            .and_then(|v| v)
+            .map(|v| v.len())
+            .unwrap_or(0);
+        return Ok(Json(DatasetResponse {
+            dataset: updated,
+            datapoint_count: count,
+        }));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     let ds = w.get_dataset_or_load(dataset_id).await.ok_or(StatusCode::NOT_FOUND)?.clone();
@@ -1749,6 +1874,23 @@ async fn update_dataset(
     }
     updated.updated_at = chrono::Utc::now();
     w.save_dataset(updated.clone()).await.map_err(storage_err_status)?;
+    if state.control_plane.mode == control_plane::ControlPlaneMode::Shadow {
+        let cp = state.control_plane.clone();
+        let org_id = ctx.org_id;
+        let project_id = ctx.project_id;
+        let shadow_req = UpdateDatasetRequest {
+            name: Some(updated.name.clone()),
+            description: updated.description.clone(),
+        };
+        tokio::spawn(async move {
+            if let Err(e) = cp
+                .update_dataset(org_id, project_id, dataset_id, &shadow_req)
+                .await
+            {
+                tracing::warn!("backend shadow update dataset failed: {e}");
+            }
+        });
+    }
     let count = w.datapoint_count_for_dataset(dataset_id);
     Ok(Json(DatasetResponse {
         dataset: updated,
@@ -1776,6 +1918,26 @@ async fn delete_dataset_handler(
     if !ctx.has_scope(auth::Scope::DatasetsWrite) {
         return StatusCode::FORBIDDEN;
     }
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        match state
+            .control_plane
+            .delete_dataset(ctx.org_id, ctx.project_id, dataset_id)
+            .await
+        {
+            Ok(Some(true)) => {
+                state.emit_event(SystemEvent::DatasetDeleted { dataset_id }, &ctx.org_id.to_string());
+                return StatusCode::OK;
+            }
+            Ok(Some(false)) => return StatusCode::NOT_FOUND,
+            Ok(None) => return StatusCode::BAD_GATEWAY,
+            Err(e) => {
+                tracing::error!(%dataset_id, "backend delete dataset failed: {e}");
+                return StatusCode::BAD_GATEWAY;
+            }
+        }
+    }
+
     let store = match state.store_for_project(ctx.org_id, ctx.project_id).await {
         Ok(s) => s,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
@@ -1783,6 +1945,16 @@ async fn delete_dataset_handler(
     let mut w = store.write().await;
     match w.delete_dataset(dataset_id).await {
         Ok(true) => {
+            if state.control_plane.mode == control_plane::ControlPlaneMode::Shadow {
+                let cp = state.control_plane.clone();
+                let org_id = ctx.org_id;
+                let project_id = ctx.project_id;
+                tokio::spawn(async move {
+                    if let Err(e) = cp.delete_dataset(org_id, project_id, dataset_id).await {
+                        tracing::warn!("backend shadow delete dataset failed: {e}");
+                    }
+                });
+            }
             drop(w);
             state.emit_event(SystemEvent::DatasetDeleted { dataset_id }, &ctx.org_id.to_string());
             StatusCode::OK
@@ -1816,11 +1988,27 @@ async fn list_datapoints(
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<Page<Datapoint>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let datapoints = state
+            .control_plane
+            .list_datapoints(ctx.org_id, ctx.project_id, dataset_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend list datapoints failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?;
+        let page = paginate(datapoints, &params)?;
+        return Ok(Json(page));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     if w.get_dataset_or_load(dataset_id).await.is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
+
     let datapoints: Vec<Datapoint> = w
         .datapoints_for_dataset(dataset_id)
         .into_iter()
@@ -1880,14 +2068,41 @@ async fn create_datapoint(
     Json(req): Json<CreateDatapointRequest>,
 ) -> Result<(StatusCode, Json<Datapoint>), StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
-    let mut w = store.write().await;
-    if w.get_dataset_or_load(dataset_id).await.is_none() {
-        return Err(StatusCode::NOT_FOUND);
-    }
-    let dp = Datapoint::new(dataset_id, req.kind, DatapointSource::Manual);
-    w.save_datapoint(dp.clone()).await.map_err(storage_err_status)?;
-    drop(w);
+
+    let dp = if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        state
+            .control_plane
+            .create_datapoint(ctx.org_id, ctx.project_id, dataset_id, req.kind)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend create datapoint failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?
+    } else {
+        let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
+        let mut w = store.write().await;
+        if w.get_dataset_or_load(dataset_id).await.is_none() {
+            return Err(StatusCode::NOT_FOUND);
+        }
+        let dp = Datapoint::new(dataset_id, req.kind.clone(), DatapointSource::Manual);
+        w.save_datapoint(dp.clone()).await.map_err(storage_err_status)?;
+
+        if state.control_plane.mode == control_plane::ControlPlaneMode::Shadow {
+            let cp = state.control_plane.clone();
+            let org_id = ctx.org_id;
+            let project_id = ctx.project_id;
+            let kind = req.kind;
+            tokio::spawn(async move {
+                if let Err(e) = cp.create_datapoint(org_id, project_id, dataset_id, kind).await {
+                    tracing::warn!("backend shadow create datapoint failed: {e}");
+                }
+            });
+        }
+
+        dp
+    };
+
     state.emit_event(SystemEvent::DatapointCreated { datapoint: dp.clone() }, &ctx.org_id.to_string());
     Ok((StatusCode::CREATED, Json(dp)))
 }
@@ -1960,11 +2175,40 @@ async fn export_span_to_dataset(
     Json(req): Json<ExportSpanRequest>,
 ) -> Result<(StatusCode, Json<Datapoint>), StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
+        let r = store.read().await;
+        let span = r.get(req.span_id).ok_or(StatusCode::NOT_FOUND)?.clone();
+        drop(r);
+
+        let kind = DatapointKind::Generic {
+            input: span.input().cloned().unwrap_or(serde_json::Value::Null),
+            expected_output: span.output().cloned(),
+            actual_output: None,
+            score: None,
+            metadata: HashMap::new(),
+        };
+
+        let dp = state
+            .control_plane
+            .create_datapoint(ctx.org_id, ctx.project_id, dataset_id, kind)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend export span datapoint failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?;
+        state.emit_event(SystemEvent::DatapointCreated { datapoint: dp.clone() }, &ctx.org_id.to_string());
+        return Ok((StatusCode::CREATED, Json(dp)));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     if w.get_dataset_or_load(dataset_id).await.is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
+
     let span = w.get(req.span_id).ok_or(StatusCode::NOT_FOUND)?.clone();
 
     let kind = DatapointKind::Generic {
@@ -2102,6 +2346,60 @@ async fn import_file(
     if !ctx.has_scope(auth::Scope::DatasetsWrite) {
         return Err((StatusCode::FORBIDDEN, "insufficient permissions: requires DatasetsWrite".to_string()));
     }
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        if state
+            .control_plane
+            .get_dataset(ctx.org_id, ctx.project_id, dataset_id)
+            .await
+            .map_err(|e| (StatusCode::BAD_GATEWAY, format!("backend error: {e}")))?
+            .is_none()
+        {
+            return Err((StatusCode::NOT_FOUND, "dataset not found".to_string()));
+        }
+
+        let mut imported = 0usize;
+        while let Some(field) = multipart
+            .next_field()
+            .await
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("multipart error: {}", e)))?
+        {
+            let filename = field.file_name().unwrap_or("data").to_string();
+            let data = field
+                .bytes()
+                .await
+                .map_err(|e| (StatusCode::BAD_REQUEST, format!("read error: {}", e)))?;
+
+            let kinds = if filename.ends_with(".csv") {
+                parse_csv_import(&data)
+            } else if filename.ends_with(".jsonl") {
+                parse_jsonl_import(&data)
+            } else {
+                parse_json_import(&data)
+            }
+            .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+            for kind in kinds {
+                let dp = state
+                    .control_plane
+                    .create_datapoint(ctx.org_id, ctx.project_id, dataset_id, kind)
+                    .await
+                    .map_err(|e| (StatusCode::BAD_GATEWAY, format!("backend error: {e}")))?
+                    .ok_or((StatusCode::BAD_GATEWAY, "backend unavailable".to_string()))?;
+                state.emit_event(SystemEvent::DatapointCreated { datapoint: dp }, &ctx.org_id.to_string());
+                imported += 1;
+            }
+        }
+
+        return Ok((
+            StatusCode::CREATED,
+            Json(ImportResponse {
+                imported,
+                dataset_id,
+            }),
+        ));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await
         .map_err(|e| (e.0, e.1))?;
     // Verify dataset exists (with backend fallback for multi-instance)
@@ -2173,6 +2471,21 @@ async fn list_queue(
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<Page<QueueItem>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let items = state
+            .control_plane
+            .list_queue_items(ctx.org_id, ctx.project_id, Some(dataset_id))
+            .await
+            .map_err(|e| {
+                tracing::error!("backend list queue failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .unwrap_or_default();
+        let page = paginate(items, &params)?;
+        return Ok(Json(page));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     if w.get_dataset_or_load(dataset_id).await.is_none() {
@@ -2207,11 +2520,34 @@ async fn enqueue_datapoints(
     Json(req): Json<EnqueueRequest>,
 ) -> Result<(StatusCode, Json<EnqueueResponse>), StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let items = state
+            .control_plane
+            .enqueue_datapoints(ctx.org_id, ctx.project_id, dataset_id, req)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend enqueue datapoints failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .unwrap_or_default();
+        for item in &items {
+            state.emit_event(SystemEvent::QueueItemUpdated { item: item.clone() }, &ctx.org_id.to_string());
+        }
+        return Ok((StatusCode::CREATED, Json(EnqueueResponse { enqueued: items.len() })));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     if w.get_dataset_or_load(dataset_id).await.is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
+
+    let shadow_datapoint_ids = if state.control_plane.mode == control_plane::ControlPlaneMode::Shadow {
+        Some(req.datapoint_ids.clone())
+    } else {
+        None
+    };
 
     let mut enqueued = 0;
     for dp_id in req.datapoint_ids {
@@ -2226,6 +2562,24 @@ async fn enqueue_datapoints(
             enqueued += 1;
         }
     }
+
+    if let Some(datapoint_ids) = shadow_datapoint_ids {
+        let cp = state.control_plane.clone();
+        let org_id = ctx.org_id;
+        let project_id = ctx.project_id;
+        tokio::spawn(async move {
+            let shadow_req = EnqueueRequest {
+                datapoint_ids,
+            };
+            if let Err(e) = cp
+                .enqueue_datapoints(org_id, project_id, dataset_id, shadow_req)
+                .await
+            {
+                tracing::warn!("backend shadow enqueue datapoints failed: {e}");
+            }
+        });
+    }
+
     Ok((StatusCode::CREATED, Json(EnqueueResponse { enqueued })))
 }
 
@@ -2249,13 +2603,47 @@ async fn claim_queue_item(
     Json(req): Json<ClaimRequest>,
 ) -> Result<Json<QueueItem>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let item = state
+            .control_plane
+            .claim_queue_item(ctx.org_id, ctx.project_id, item_id, req)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend claim queue item failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::CONFLICT)?;
+        state.emit_event(SystemEvent::QueueItemUpdated { item: item.clone() }, &ctx.org_id.to_string());
+        return Ok(Json(item));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
+    let claimed_by_shadow = req.claimed_by.clone();
     let item = w
         .claim_queue_item(item_id, req.claimed_by)
         .await
         .map_err(storage_err_status)?
         .ok_or(StatusCode::CONFLICT)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::Shadow {
+        let cp = state.control_plane.clone();
+        let org_id = ctx.org_id;
+        let project_id = ctx.project_id;
+        tokio::spawn(async move {
+            let shadow_req = ClaimRequest {
+                claimed_by: claimed_by_shadow,
+            };
+            if let Err(e) = cp
+                .claim_queue_item(org_id, project_id, item_id, shadow_req)
+                .await
+            {
+                tracing::warn!("backend shadow claim queue item failed: {e}");
+            }
+        });
+    }
+
     drop(w);
     state.emit_event(SystemEvent::QueueItemUpdated { item: item.clone() }, &ctx.org_id.to_string());
     Ok(Json(item))
@@ -2281,8 +2669,24 @@ async fn submit_queue_item(
     Json(req): Json<SubmitRequest>,
 ) -> Result<Json<QueueItem>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let item = state
+            .control_plane
+            .submit_queue_item(ctx.org_id, ctx.project_id, item_id, req)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend submit queue item failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::CONFLICT)?;
+        state.emit_event(SystemEvent::QueueItemUpdated { item: item.clone() }, &ctx.org_id.to_string());
+        return Ok(Json(item));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
+    let edited_shadow = req.edited_data.clone();
 
     // Get the queue item to find the datapoint
     let qi = w.get_queue_item(item_id).ok_or(StatusCode::NOT_FOUND)?.clone();
@@ -2312,6 +2716,24 @@ async fn submit_queue_item(
         .await
         .map_err(storage_err_status)?
         .ok_or(StatusCode::CONFLICT)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::Shadow {
+        let cp = state.control_plane.clone();
+        let org_id = ctx.org_id;
+        let project_id = ctx.project_id;
+        tokio::spawn(async move {
+            let shadow_req = SubmitRequest {
+                edited_data: edited_shadow,
+            };
+            if let Err(e) = cp
+                .submit_queue_item(org_id, project_id, item_id, shadow_req)
+                .await
+            {
+                tracing::warn!("backend shadow submit queue item failed: {e}");
+            }
+        });
+    }
+
     drop(w);
     state.emit_event(SystemEvent::QueueItemUpdated { item: item.clone() }, &ctx.org_id.to_string());
     Ok(Json(item))
@@ -2338,6 +2760,34 @@ async fn list_all_queue_items(
     Query(filter): Query<QueueFilterParams>,
 ) -> Result<Json<Page<QueueItem>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let mut items = state
+            .control_plane
+            .list_queue_items(ctx.org_id, ctx.project_id, None)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend list all queue items failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .unwrap_or_default();
+        if let Some(ref status_filter) = filter.status {
+            items.retain(|qi| qi.status.as_str() == status_filter.as_str());
+        }
+        items.sort_by(|a, b| {
+            let status_ord = |s: &QueueItemStatus| match s {
+                QueueItemStatus::Pending => 0,
+                QueueItemStatus::Claimed => 1,
+                QueueItemStatus::Completed => 2,
+            };
+            status_ord(&a.status)
+                .cmp(&status_ord(&b.status))
+                .then_with(|| b.created_at.cmp(&a.created_at))
+        });
+        let page = paginate(items, &params)?;
+        return Ok(Json(page));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let r = store.read().await;
     let mut items: Vec<QueueItem> = r
@@ -2384,6 +2834,49 @@ async fn export_span_and_enqueue(
     Json(req): Json<ExportSpanRequest>,
 ) -> Result<(StatusCode, Json<QueueItem>), StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
+        let r = store.read().await;
+        let span = r.get(req.span_id).ok_or(StatusCode::NOT_FOUND)?.clone();
+        drop(r);
+
+        let kind = DatapointKind::Generic {
+            input: span.input().cloned().unwrap_or(serde_json::Value::Null),
+            expected_output: span.output().cloned(),
+            actual_output: None,
+            score: None,
+            metadata: HashMap::new(),
+        };
+
+        let dp = state
+            .control_plane
+            .create_datapoint(ctx.org_id, ctx.project_id, dataset_id, kind)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend export+enqueue create datapoint failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?;
+        state.emit_event(SystemEvent::DatapointCreated { datapoint: dp.clone() }, &ctx.org_id.to_string());
+
+        let enqueue = EnqueueRequest {
+            datapoint_ids: vec![dp.id],
+        };
+        let mut items = state
+            .control_plane
+            .enqueue_datapoints(ctx.org_id, ctx.project_id, dataset_id, enqueue)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend export+enqueue enqueue failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .unwrap_or_default();
+        let item = items.pop().ok_or(StatusCode::BAD_GATEWAY)?;
+        state.emit_event(SystemEvent::QueueItemUpdated { item: item.clone() }, &ctx.org_id.to_string());
+        return Ok((StatusCode::CREATED, Json(item)));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
 
@@ -2493,6 +2986,21 @@ async fn list_eval_runs(
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<Page<EvalRun>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let runs = state
+            .control_plane
+            .list_eval_runs(ctx.org_id, ctx.project_id, dataset_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend list eval runs failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .unwrap_or_default();
+        let page = paginate(runs, &params)?;
+        return Ok(Json(page));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     if w.get_dataset_or_load(dataset_id).await.is_none() {
@@ -2511,6 +3019,29 @@ async fn create_eval_run(
     Json(req): Json<CreateEvalRunRequest>,
 ) -> Result<(StatusCode, Json<EvalRun>), (StatusCode, Json<serde_json::Value>)> {
     require_scope(&ctx, auth::Scope::DatasetsWrite)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let run = state
+            .control_plane
+            .create_eval_run(ctx.org_id, ctx.project_id, dataset_id, req)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend create eval run failed: {e}");
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({ "error": "backend unavailable" })),
+                )
+            })?
+            .ok_or_else(|| {
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({ "error": "backend unavailable" })),
+                )
+            })?;
+        state.emit_event(SystemEvent::EvalRunCreated { run: run.clone() }, &ctx.org_id.to_string());
+        return Ok((StatusCode::CREATED, Json(run)));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_json)?;
 
     // Verify dataset exists and count datapoints (with backend fallback for multi-instance)
@@ -2520,6 +3051,16 @@ async fn create_eval_run(
             return Err((StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "dataset not found"}))));
         }
     }
+
+    let shadow_req = if state.control_plane.mode == control_plane::ControlPlaneMode::Shadow {
+        Some(CreateEvalRunRequest {
+            name: req.name.clone(),
+            config: req.config.clone(),
+            scoring: req.scoring.clone(),
+        })
+    } else {
+        None
+    };
 
     let mut run = EvalRun::new(dataset_id, req.name, req.config, req.scoring);
 
@@ -2533,6 +3074,20 @@ async fn create_eval_run(
     drop(w);
 
     state.emit_event(SystemEvent::EvalRunCreated { run: run.clone() }, &ctx.org_id.to_string());
+
+    if let Some(shadow_req) = shadow_req {
+        let cp = state.control_plane.clone();
+        let org_id = ctx.org_id;
+        let project_id = ctx.project_id;
+        tokio::spawn(async move {
+            if let Err(e) = cp
+                .create_eval_run(org_id, project_id, dataset_id, shadow_req)
+                .await
+            {
+                tracing::warn!("backend shadow create eval run failed: {e}");
+            }
+        });
+    }
 
     // Spawn the eval execution task
     let run_id = run.id;
@@ -2554,6 +3109,20 @@ async fn get_eval_run_handler(
     Path(run_id): Path<EvalRunId>,
 ) -> Result<Json<EvalRunDetailResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let detail = state
+            .control_plane
+            .get_eval_run_detail(ctx.org_id, ctx.project_id, run_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend get eval run failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?;
+        return Ok(Json(detail));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let r = store.read().await;
     let run = r.get_eval_run(run_id).ok_or(StatusCode::NOT_FOUND)?.clone();
@@ -2570,13 +3139,42 @@ async fn delete_eval_run_handler(
     if !ctx.has_scope(auth::Scope::DatasetsWrite) {
         return StatusCode::FORBIDDEN;
     }
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        match state
+            .control_plane
+            .delete_eval_run(ctx.org_id, ctx.project_id, run_id)
+            .await
+        {
+            Ok(Some(true)) => return StatusCode::OK,
+            Ok(Some(false)) => return StatusCode::NOT_FOUND,
+            Ok(None) => return StatusCode::BAD_GATEWAY,
+            Err(e) => {
+                tracing::error!(%run_id, "backend delete eval run failed: {e}");
+                return StatusCode::BAD_GATEWAY;
+            }
+        }
+    }
+
     let store = match state.store_for_project(ctx.org_id, ctx.project_id).await {
         Ok(s) => s,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
     };
     let mut w = store.write().await;
     match w.delete_eval_run(run_id).await {
-        Ok(true) => StatusCode::OK,
+        Ok(true) => {
+            if state.control_plane.mode == control_plane::ControlPlaneMode::Shadow {
+                let cp = state.control_plane.clone();
+                let org_id = ctx.org_id;
+                let project_id = ctx.project_id;
+                tokio::spawn(async move {
+                    if let Err(e) = cp.delete_eval_run(org_id, project_id, run_id).await {
+                        tracing::warn!("backend shadow delete eval run failed: {e}");
+                    }
+                });
+            }
+            StatusCode::OK
+        },
         Ok(false) => StatusCode::NOT_FOUND,
         Err(e) => {
             tracing::error!(%run_id, "storage error deleting eval run: {e}");
@@ -2592,6 +3190,21 @@ async fn cancel_eval_run(
     Path(run_id): Path<EvalRunId>,
 ) -> Result<Json<EvalRun>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let run = state
+            .control_plane
+            .cancel_eval_run(ctx.org_id, ctx.project_id, run_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend cancel eval run failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?;
+        state.emit_event(SystemEvent::EvalRunCompleted { run: run.clone() }, &ctx.org_id.to_string());
+        return Ok(Json(run));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     let run = w.get_eval_run(run_id).ok_or(StatusCode::NOT_FOUND)?.clone();
@@ -2602,6 +3215,16 @@ async fn cancel_eval_run(
     updated.status = EvalRunStatus::Cancelled;
     updated.completed_at = Some(chrono::Utc::now());
     w.save_eval_run(updated.clone()).await.map_err(storage_err_status)?;
+    if state.control_plane.mode == control_plane::ControlPlaneMode::Shadow {
+        let cp = state.control_plane.clone();
+        let org_id = ctx.org_id;
+        let project_id = ctx.project_id;
+        tokio::spawn(async move {
+            if let Err(e) = cp.cancel_eval_run(org_id, project_id, run_id).await {
+                tracing::warn!("backend shadow cancel eval run failed: {e}");
+            }
+        });
+    }
     drop(w);
     state.emit_event(SystemEvent::EvalRunCompleted { run: updated.clone() }, &ctx.org_id.to_string());
     Ok(Json(updated))
@@ -2615,11 +3238,6 @@ async fn compare_eval_runs(
     Query(params): Query<CompareParams>,
 ) -> Result<Json<ComparisonResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
-    let mut w = store.write().await;
-    if w.get_dataset_or_load(dataset_id).await.is_none() {
-        return Err(StatusCode::NOT_FOUND);
-    }
 
     let run_ids: Vec<EvalRunId> = params.runs.split(',')
         .filter_map(|s| s.trim().parse().ok())
@@ -2627,6 +3245,90 @@ async fn compare_eval_runs(
 
     if run_ids.len() < 2 || run_ids.len() > 4 {
         return Err(StatusCode::BAD_REQUEST);
+    }
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let datapoints = state
+            .control_plane
+            .list_datapoints(ctx.org_id, ctx.project_id, dataset_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend list datapoints for compare failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?;
+
+        let mut runs = Vec::new();
+        let mut all_results: std::collections::HashMap<EvalRunId, Vec<EvalResult>> = std::collections::HashMap::new();
+
+        for run_id in &run_ids {
+            let detail = state
+                .control_plane
+                .get_eval_run_detail(ctx.org_id, ctx.project_id, *run_id)
+                .await
+                .map_err(|e| {
+                    tracing::error!("backend get eval run detail failed: {e}");
+                    StatusCode::BAD_GATEWAY
+                })?
+                .ok_or(StatusCode::NOT_FOUND)?;
+            if detail.run.dataset_id != dataset_id {
+                return Err(StatusCode::BAD_REQUEST);
+            }
+            all_results.insert(*run_id, detail.result_items.clone());
+            runs.push(detail.run);
+        }
+
+        let mut comparison_datapoints = Vec::new();
+        for dp in &datapoints {
+            let (input, expected) = match &dp.kind {
+                DatapointKind::Generic { input, expected_output, .. } => {
+                    (input.clone(), expected_output.clone())
+                }
+                DatapointKind::LlmConversation { messages, expected, .. } => {
+                    (
+                        serde_json::to_value(messages).unwrap_or_default(),
+                        expected
+                            .as_ref()
+                            .map(|e| serde_json::to_value(e).unwrap_or_default()),
+                    )
+                }
+            };
+
+            let mut results_map = std::collections::HashMap::new();
+            for run_id in &run_ids {
+                if let Some(run_results) = all_results.get(run_id) {
+                    if let Some(result) = run_results.iter().find(|r| r.datapoint_id == dp.id) {
+                        results_map.insert(
+                            run_id.to_string(),
+                            ComparisonCell {
+                                output: result.actual_output.clone(),
+                                score: result.score,
+                                latency_ms: result.latency_ms,
+                                status: result.status.as_str().to_string(),
+                            },
+                        );
+                    }
+                }
+            }
+
+            comparison_datapoints.push(ComparisonDatapoint {
+                datapoint_id: dp.id,
+                input,
+                expected,
+                results: results_map,
+            });
+        }
+
+        return Ok(Json(ComparisonResponse {
+            runs,
+            datapoints: comparison_datapoints,
+        }));
+    }
+
+    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
+    let mut w = store.write().await;
+    if w.get_dataset_or_load(dataset_id).await.is_none() {
+        return Err(StatusCode::NOT_FOUND);
     }
 
     let mut runs = Vec::new();
@@ -2692,6 +3394,21 @@ async fn list_capture_rules(
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<Page<CaptureRule>>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let rules = state
+            .control_plane
+            .list_capture_rules(ctx.org_id, ctx.project_id, dataset_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend list capture rules failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .unwrap_or_default();
+        let page = paginate(rules, &params)?;
+        return Ok(Json(page));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     if w.get_dataset_or_load(dataset_id).await.is_none() {
@@ -2710,6 +3427,20 @@ async fn create_capture_rule(
     Json(req): Json<CreateCaptureRuleRequest>,
 ) -> Result<(StatusCode, Json<CaptureRule>), StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let rule = state
+            .control_plane
+            .create_capture_rule(ctx.org_id, ctx.project_id, dataset_id, req)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend create capture rule failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?;
+        return Ok((StatusCode::CREATED, Json(rule)));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     if w.get_dataset_or_load(dataset_id).await.is_none() {
@@ -2717,6 +3448,26 @@ async fn create_capture_rule(
     }
     let rule = CaptureRule::new(dataset_id, req.name, req.filters, req.sample_rate);
     w.save_capture_rule(rule.clone()).await.map_err(storage_err_status)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::Shadow {
+        let cp = state.control_plane.clone();
+        let org_id = ctx.org_id;
+        let project_id = ctx.project_id;
+        let shadow_req = CreateCaptureRuleRequest {
+            name: rule.name.clone(),
+            filters: rule.filters.clone(),
+            sample_rate: rule.sample_rate,
+        };
+        tokio::spawn(async move {
+            if let Err(e) = cp
+                .create_capture_rule(org_id, project_id, dataset_id, shadow_req)
+                .await
+            {
+                tracing::warn!("backend shadow create capture rule failed: {e}");
+            }
+        });
+    }
+
     Ok((StatusCode::CREATED, Json(rule)))
 }
 
@@ -2728,6 +3479,20 @@ async fn update_capture_rule(
     Json(req): Json<UpdateCaptureRuleRequest>,
 ) -> Result<Json<CaptureRule>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let updated = state
+            .control_plane
+            .update_capture_rule(ctx.org_id, ctx.project_id, rule_id, req)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend update capture rule failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?;
+        return Ok(Json(updated));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     let rule = w.get_capture_rule(rule_id).ok_or(StatusCode::NOT_FOUND)?.clone();
@@ -2742,6 +3507,26 @@ async fn update_capture_rule(
         updated.sample_rate = sample_rate;
     }
     w.save_capture_rule(updated.clone()).await.map_err(storage_err_status)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::Shadow {
+        let cp = state.control_plane.clone();
+        let org_id = ctx.org_id;
+        let project_id = ctx.project_id;
+        let shadow_req = UpdateCaptureRuleRequest {
+            name: Some(updated.name.clone()),
+            filters: Some(updated.filters.clone()),
+            sample_rate: Some(updated.sample_rate),
+        };
+        tokio::spawn(async move {
+            if let Err(e) = cp
+                .update_capture_rule(org_id, project_id, rule_id, shadow_req)
+                .await
+            {
+                tracing::warn!("backend shadow update capture rule failed: {e}");
+            }
+        });
+    }
+
     Ok(Json(updated))
 }
 
@@ -2754,13 +3539,45 @@ async fn delete_capture_rule_handler(
     if !ctx.has_scope(auth::Scope::DatasetsWrite) {
         return StatusCode::FORBIDDEN;
     }
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        match state
+            .control_plane
+            .delete_capture_rule(ctx.org_id, ctx.project_id, rule_id)
+            .await
+        {
+            Ok(Some(true)) => return StatusCode::OK,
+            Ok(Some(false)) => return StatusCode::NOT_FOUND,
+            Ok(None) => return StatusCode::BAD_GATEWAY,
+            Err(e) => {
+                tracing::error!(%rule_id, "backend delete capture rule failed: {e}");
+                return StatusCode::BAD_GATEWAY;
+            }
+        }
+    }
+
     let store = match state.store_for_project(ctx.org_id, ctx.project_id).await {
         Ok(s) => s,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
     };
     let mut w = store.write().await;
     match w.delete_capture_rule(rule_id).await {
-        Ok(true) => StatusCode::OK,
+        Ok(true) => {
+            if state.control_plane.mode == control_plane::ControlPlaneMode::Shadow {
+                let cp = state.control_plane.clone();
+                let org_id = ctx.org_id;
+                let project_id = ctx.project_id;
+                tokio::spawn(async move {
+                    if let Err(e) = cp
+                        .delete_capture_rule(org_id, project_id, rule_id)
+                        .await
+                    {
+                        tracing::warn!("backend shadow delete capture rule failed: {e}");
+                    }
+                });
+            }
+            StatusCode::OK
+        }
         Ok(false) => StatusCode::NOT_FOUND,
         Err(e) => {
             tracing::error!(%rule_id, "storage error deleting capture rule: {e}");
@@ -2776,12 +3593,41 @@ async fn toggle_capture_rule(
     Path(rule_id): Path<CaptureRuleId>,
 ) -> Result<Json<CaptureRule>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let rule = state
+            .control_plane
+            .toggle_capture_rule(ctx.org_id, ctx.project_id, rule_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend toggle capture rule failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?;
+        return Ok(Json(rule));
+    }
+
     let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
     let mut w = store.write().await;
     let rule = w.get_capture_rule(rule_id).ok_or(StatusCode::NOT_FOUND)?.clone();
     let mut updated = rule;
     updated.enabled = !updated.enabled;
     w.save_capture_rule(updated.clone()).await.map_err(storage_err_status)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::Shadow {
+        let cp = state.control_plane.clone();
+        let org_id = ctx.org_id;
+        let project_id = ctx.project_id;
+        tokio::spawn(async move {
+            if let Err(e) = cp
+                .toggle_capture_rule(org_id, project_id, rule_id)
+                .await
+            {
+                tracing::warn!("backend shadow toggle capture rule failed: {e}");
+            }
+        });
+    }
+
     Ok(Json(updated))
 }
 
@@ -2792,9 +3638,33 @@ async fn list_provider_connections(
     State(state): State<AppState>,
 ) -> Result<Json<ProviderConnectionListResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
+
+    if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        let conns = state
+            .control_plane
+            .list_provider_connections(ctx.org_id, ctx.project_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend list provider connections failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .unwrap_or_default();
+        let connections: Vec<ProviderConnectionInfo> =
+            conns.into_iter().map(|c| c.to_info()).collect();
+        let count = connections.len();
+        return Ok(Json(ProviderConnectionListResponse { connections, count }));
+    }
+
+    let store = state
+        .store_for_project(ctx.org_id, ctx.project_id)
+        .await
+        .map_err(store_err_status)?;
     let r = store.read().await;
-    let connections: Vec<ProviderConnectionInfo> = r.list_provider_connections().iter().map(|c| c.to_info()).collect();
+    let connections: Vec<ProviderConnectionInfo> = r
+        .list_provider_connections()
+        .iter()
+        .map(|c| c.to_info())
+        .collect();
     let count = connections.len();
     Ok(Json(ProviderConnectionListResponse { connections, count }))
 }
@@ -2805,14 +3675,56 @@ async fn create_provider_connection(
     Json(req): Json<CreateProviderConnectionRequest>,
 ) -> Result<(StatusCode, Json<ProviderConnectionInfo>), StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
+
     let mut conn = ProviderConnection::new(req.name, req.provider);
     conn.base_url = req.base_url;
     conn.api_key = req.api_key;
     conn.default_model = req.default_model;
     let info = conn.to_info();
-    let mut w = store.write().await;
-    w.save_provider_connection(conn).await.map_err(storage_err_status)?;
+
+    match state.control_plane.mode {
+        control_plane::ControlPlaneMode::On => {
+            state
+                .control_plane
+                .save_provider_connection(ctx.org_id, ctx.project_id, &conn)
+                .await
+                .map_err(|e| {
+                    tracing::error!("backend create provider connection failed: {e}");
+                    StatusCode::BAD_GATEWAY
+                })?;
+        }
+        control_plane::ControlPlaneMode::Shadow => {
+            let store = state
+                .store_for_project(ctx.org_id, ctx.project_id)
+                .await
+                .map_err(store_err_status)?;
+            let mut w = store.write().await;
+            w.save_provider_connection(conn.clone())
+                .await
+                .map_err(storage_err_status)?;
+
+            let cp = state.control_plane.clone();
+            tokio::spawn(async move {
+                if let Err(e) = cp
+                    .save_provider_connection(ctx.org_id, ctx.project_id, &conn)
+                    .await
+                {
+                    tracing::warn!("backend shadow create provider connection failed: {e}");
+                }
+            });
+        }
+        control_plane::ControlPlaneMode::Off => {
+            let store = state
+                .store_for_project(ctx.org_id, ctx.project_id)
+                .await
+                .map_err(store_err_status)?;
+            let mut w = store.write().await;
+            w.save_provider_connection(conn)
+                .await
+                .map_err(storage_err_status)?;
+        }
+    }
+
     Ok((StatusCode::CREATED, Json(info)))
 }
 
@@ -2823,9 +3735,28 @@ async fn update_provider_connection(
     Json(req): Json<UpdateProviderConnectionRequest>,
 ) -> Result<Json<ProviderConnectionInfo>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsWrite).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
-    let mut w = store.write().await;
-    let mut conn = w.get_provider_connection(conn_id).ok_or(StatusCode::NOT_FOUND)?.clone();
+
+    let mut conn = if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        state
+            .control_plane
+            .get_provider_connection(ctx.org_id, ctx.project_id, conn_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend get provider connection failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?
+    } else {
+        let store = state
+            .store_for_project(ctx.org_id, ctx.project_id)
+            .await
+            .map_err(store_err_status)?;
+        let w = store.read().await;
+        w.get_provider_connection(conn_id)
+            .ok_or(StatusCode::NOT_FOUND)?
+            .clone()
+    };
+
     if let Some(name) = req.name { conn.name = name; }
     if let Some(provider) = req.provider { conn.provider = provider; }
     if let Some(base_url) = req.base_url { conn.base_url = Some(base_url); }
@@ -2833,7 +3764,50 @@ async fn update_provider_connection(
     if let Some(default_model) = req.default_model { conn.default_model = Some(default_model); }
     conn.updated_at = chrono::Utc::now();
     let info = conn.to_info();
-    w.save_provider_connection(conn).await.map_err(storage_err_status)?;
+
+    match state.control_plane.mode {
+        control_plane::ControlPlaneMode::On => {
+            state
+                .control_plane
+                .save_provider_connection(ctx.org_id, ctx.project_id, &conn)
+                .await
+                .map_err(|e| {
+                    tracing::error!("backend update provider connection failed: {e}");
+                    StatusCode::BAD_GATEWAY
+                })?;
+        }
+        control_plane::ControlPlaneMode::Shadow => {
+            let store = state
+                .store_for_project(ctx.org_id, ctx.project_id)
+                .await
+                .map_err(store_err_status)?;
+            let mut w = store.write().await;
+            w.save_provider_connection(conn.clone())
+                .await
+                .map_err(storage_err_status)?;
+
+            let cp = state.control_plane.clone();
+            tokio::spawn(async move {
+                if let Err(e) = cp
+                    .save_provider_connection(ctx.org_id, ctx.project_id, &conn)
+                    .await
+                {
+                    tracing::warn!("backend shadow update provider connection failed: {e}");
+                }
+            });
+        }
+        control_plane::ControlPlaneMode::Off => {
+            let store = state
+                .store_for_project(ctx.org_id, ctx.project_id)
+                .await
+                .map_err(store_err_status)?;
+            let mut w = store.write().await;
+            w.save_provider_connection(conn)
+                .await
+                .map_err(storage_err_status)?;
+        }
+    }
+
     Ok(Json(info))
 }
 
@@ -2845,17 +3819,62 @@ async fn delete_provider_connection_handler(
     if !ctx.has_scope(auth::Scope::DatasetsWrite) {
         return StatusCode::FORBIDDEN;
     }
-    let store = match state.store_for_project(ctx.org_id, ctx.project_id).await {
-        Ok(s) => s,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
-    };
-    let mut w = store.write().await;
-    match w.delete_provider_connection(conn_id).await {
-        Ok(true) => StatusCode::OK,
-        Ok(false) => StatusCode::NOT_FOUND,
-        Err(e) => {
-            tracing::error!(%conn_id, "storage error deleting provider connection: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
+
+    match state.control_plane.mode {
+        control_plane::ControlPlaneMode::On => {
+            match state
+                .control_plane
+                .delete_provider_connection(ctx.org_id, ctx.project_id, conn_id)
+                .await
+            {
+                Ok(()) => StatusCode::OK,
+                Err(e) => {
+                    tracing::error!(%conn_id, "backend delete provider connection failed: {e}");
+                    StatusCode::BAD_GATEWAY
+                }
+            }
+        }
+        control_plane::ControlPlaneMode::Shadow => {
+            let store = match state.store_for_project(ctx.org_id, ctx.project_id).await {
+                Ok(s) => s,
+                Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            let mut w = store.write().await;
+            let local_status = match w.delete_provider_connection(conn_id).await {
+                Ok(true) => StatusCode::OK,
+                Ok(false) => StatusCode::NOT_FOUND,
+                Err(e) => {
+                    tracing::error!(%conn_id, "storage error deleting provider connection: {e}");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                }
+            };
+
+            let cp = state.control_plane.clone();
+            tokio::spawn(async move {
+                if let Err(e) = cp
+                    .delete_provider_connection(ctx.org_id, ctx.project_id, conn_id)
+                    .await
+                {
+                    tracing::warn!(%conn_id, "backend shadow delete provider connection failed: {e}");
+                }
+            });
+
+            local_status
+        }
+        control_plane::ControlPlaneMode::Off => {
+            let store = match state.store_for_project(ctx.org_id, ctx.project_id).await {
+                Ok(s) => s,
+                Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            let mut w = store.write().await;
+            match w.delete_provider_connection(conn_id).await {
+                Ok(true) => StatusCode::OK,
+                Ok(false) => StatusCode::NOT_FOUND,
+                Err(e) => {
+                    tracing::error!(%conn_id, "storage error deleting provider connection: {e}");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                }
+            }
         }
     }
 }
@@ -2936,9 +3955,27 @@ async fn list_provider_connection_models(
     Path(conn_id): Path<ProviderConnectionId>,
 ) -> Result<Json<ProviderModelsResponse>, StatusCode> {
     require_scope(&ctx, auth::Scope::DatasetsRead).map_err(|_| StatusCode::FORBIDDEN)?;
-    let store = state.store_for_project(ctx.org_id, ctx.project_id).await.map_err(store_err_status)?;
-    let r = store.read().await;
-    let conn = r.get_provider_connection(conn_id).ok_or(StatusCode::NOT_FOUND)?;
+
+    let conn = if state.control_plane.mode == control_plane::ControlPlaneMode::On {
+        state
+            .control_plane
+            .get_provider_connection(ctx.org_id, ctx.project_id, conn_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("backend get provider connection failed: {e}");
+                StatusCode::BAD_GATEWAY
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?
+    } else {
+        let store = state
+            .store_for_project(ctx.org_id, ctx.project_id)
+            .await
+            .map_err(store_err_status)?;
+        let r = store.read().await;
+        r.get_provider_connection(conn_id)
+            .ok_or(StatusCode::NOT_FOUND)?
+            .clone()
+    };
 
     let base_url = conn.base_url.as_deref()
         .filter(|s| !s.is_empty())
@@ -3776,6 +4813,7 @@ fn build_router(
         org_stores,
         events_tx,
         event_log,
+        control_plane: control_plane::ControlPlaneClient::from_env(),
         start_time,
         config: Arc::new(RwLock::new(config)),
         config_path: Arc::new(config_path),
