@@ -1,5 +1,6 @@
-// In production, set VITE_API_URL to your API server (e.g., https://api.traceway.example.com)
-// Falls back to relative /api for embedded mode or local dev with proxy
+// Browser clients talk directly to Encore public APIs.
+// In production, set VITE_API_URL to your Encore API origin (e.g., https://api.traceway.ai).
+// Falls back to relative /api for local proxy-based development.
 export const API_BASE = (import.meta.env.VITE_API_URL as string) || '/api';
 
 // ─── Generated Types ─────────────────────────────────────────────────
@@ -664,6 +665,10 @@ export interface OrgMember {
 	role: string;
 }
 
+export interface BillingCheckoutResponse {
+	url: string;
+}
+
 // ─── Project Types ───────────────────────────────────────────────────
 
 export interface Project {
@@ -701,6 +706,8 @@ export const createApiKey = (name: string, scopes?: Scope[]) =>
 	post<ApiKeyCreated>('/org/api-keys', scopes ? { name, scopes } : { name });
 export const deleteApiKey = (id: string) => del<unknown>(`/org/api-keys/${id}`);
 export const getOrgMembers = () => get<OrgMember[]>('/org/members');
+export const createBillingCheckout = (plan: 'pro' | 'team') =>
+	post<BillingCheckoutResponse>('/billing/checkout', { plan });
 
 // ─── Project Endpoints ──────────────────────────────────────────────
 

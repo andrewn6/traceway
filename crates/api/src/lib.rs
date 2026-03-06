@@ -1,7 +1,5 @@
 pub mod any_backend;
 pub mod auth_keys;
-pub mod auth_routes;
-pub mod billing_routes;
 pub mod capture;
 pub mod control_plane;
 pub mod event_log;
@@ -4879,87 +4877,18 @@ fn build_router(
             .allow_headers(Any)
     };
 
-    // Auth middleware state (injected as Extension for `from_fn`)
-    let auth_mw_state = AuthMiddlewareState {
-        config: state.auth_config.clone(),
-        lookup: state.api_key_lookup.clone(),
-        cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
-    };
-
-    // Protected routes (auth middleware applied)
-    let protected = Router::new()
-        // Traces
-        .route("/traces", get(list_traces).post(create_trace).delete(clear_all_traces))
-        .route("/traces/:trace_id", get(get_trace).delete(delete_trace))
-        // Spans
-        .route("/spans", get(list_spans).post(create_span))
-        .route("/spans/:span_id", get(get_span).delete(delete_span))
-        .route("/spans/:span_id/complete", post(complete_span))
-        .route("/spans/:span_id/fail", post(fail_span))
-        // Files
-        .route("/files", get(list_files))
-        .route("/files/content/:hash", get(get_file_content))
-        .route("/files/*path", get(get_file_versions))
-        // Datasets
-        .route("/datasets", get(list_datasets).post(create_dataset))
-        .route("/datasets/:id", get(get_dataset).put(update_dataset).delete(delete_dataset_handler))
-        .route("/datasets/:id/datapoints", get(list_datapoints).post(create_datapoint))
-        .route("/datasets/:id/datapoints/:dp_id", get(get_datapoint_handler).delete(delete_datapoint_handler))
-        .route("/datasets/:id/export-span", post(export_span_to_dataset))
-        .route("/datasets/:id/import", post(import_file))
-        .route("/datasets/:id/queue", get(list_queue).post(enqueue_datapoints))
-        .route("/datasets/:id/export-span-and-enqueue", post(export_span_and_enqueue))
-        .route("/queue", get(list_all_queue_items))
-        .route("/queue/:item_id/claim", post(claim_queue_item))
-        .route("/queue/:item_id/submit", post(submit_queue_item))
-        // Eval runs
-        .route("/datasets/:id/eval", get(list_eval_runs).post(create_eval_run))
-        .route("/datasets/:id/compare", get(compare_eval_runs))
-        .route("/eval/:run_id", get(get_eval_run_handler).delete(delete_eval_run_handler))
-        .route("/eval/:run_id/cancel", post(cancel_eval_run))
-        // Capture rules
-        .route("/datasets/:id/rules", get(list_capture_rules).post(create_capture_rule))
-        .route("/rules/:rule_id", axum::routing::put(update_capture_rule).delete(delete_capture_rule_handler))
-        .route("/rules/:rule_id/toggle", post(toggle_capture_rule))
-        // Provider connections
-        .route("/provider-connections", get(list_provider_connections).post(create_provider_connection))
-        .route("/provider-connections/test", post(test_provider_connection))
-        .route("/provider-connections/:conn_id", axum::routing::put(update_provider_connection).delete(delete_provider_connection_handler))
-        .route("/provider-connections/:conn_id/models", get(list_provider_connection_models))
-        // Analytics
-        .route("/analytics", post(post_analytics))
-        .route("/analytics/summary", get(analytics_summary))
-        // Stats & Export
-        .route("/stats", get(get_stats))
-        .route("/export/json", get(export_json))
-        // Config & Shutdown
-        .route("/config", get(get_config).put(update_config))
-        .route("/shutdown", post(post_shutdown))
-        // SSE
-        .route("/events", get(events))
-        // Auth routes that require auth (me, org, api-keys)
-        .merge(auth_routes::protected_auth_router())
-        // Billing routes that require auth (checkout)
-        .merge(billing_routes::billing_protected_router())
-        .layer(AuthLayer { state: auth_mw_state });
-
-    // Public routes (no auth required)
+    // Rust API is now ingest/infra-only. Public product APIs moved to Encore.
     let public = Router::new()
         // Health & Observability
         .route("/health", get(health))
         .route("/ready", get(ready))
         .route("/live", get(live))
         .route("/metrics", get(prometheus_metrics))
-        // OpenAPI spec
-        .route("/openapi.json", get(openapi_spec))
-        // Auth routes that don't require auth (config, signup, login, logout)
-        .merge(auth_routes::public_auth_router())
-        // Billing webhooks (Polar.sh)
-        .merge(billing_routes::billing_router());
+        // Config & lifecycle for local/dev daemon workflows.
+        .route("/config", get(get_config).put(update_config))
+        .route("/shutdown", post(post_shutdown));
 
-    let api = Router::new()
-        .merge(protected)
-        .merge(public);
+    let api = Router::new().merge(public);
 
     // OTLP ingest routes — outside /api, with self-contained auth.
     // OTel SDKs expect `POST /v1/traces` at the root.

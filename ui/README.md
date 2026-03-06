@@ -1,42 +1,37 @@
-# sv
+# Traceway UI
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+SvelteKit frontend for Traceway.
 
-## Creating a project
+## Local development
 
-If you're seeing this, you've probably already done this step. Congrats!
-
-```sh
-# create a new project
-npx sv create my-app
-```
-
-To recreate this project with the same configuration:
+1. Install deps:
 
 ```sh
-# recreate this project
-npx sv create --template minimal --types ts --no-install ui
+npm install
 ```
 
-## Developing
+2. Configure API URL:
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+```sh
+cp .env.example .env
+```
+
+3. Run dev server:
 
 ```sh
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
-## Building
+## API wiring
 
-To create a production version of your app:
+- UI calls Encore public APIs directly.
+- Set `VITE_API_URL` to your Encore base URL.
+  - local: `http://localhost:4000`
+  - prod: `https://api.traceway.ai`
+
+## Build
 
 ```sh
 npm run build
+npm run preview
 ```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.

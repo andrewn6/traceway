@@ -543,7 +543,6 @@ async fn main() {
 #[cfg(feature = "cloud")]
 async fn run_cloud_mode() {
     use crate::cloud::{setup_cloud_logging, CloudConfig};
-    use api::auth_keys::{CompositeApiKeyLookup, EnvApiKeyLookup};
 
     let cloud_config = CloudConfig::from_env();
     setup_cloud_logging(&cloud_config);
@@ -553,42 +552,8 @@ async fn run_cloud_mode() {
 
     let start_time = Instant::now();
 
-    // ── Auth: Postgres-backed auth store ────────────────────────────
+    // ── Auth mode flag (used by Rust API for legacy local/cloud behavior) ──
     let auth_config = api::auth_keys::auth_config_from_env();
-    let auth_store: Option<Arc<dyn auth::AuthStore>> = if !auth_config.local_mode {
-        match std::env::var("DATABASE_URL") {
-            Ok(url) => {
-                info!("Connecting to Postgres for auth store");
-                match storage_postgres::PostgresAuthStore::connect(&url).await {
-                    Ok(pg) => {
-                        if let Err(e) = pg.migrate().await {
-                            error!("Failed to run auth migrations: {}", e);
-                            std::process::exit(1);
-                        }
-                        info!("Auth store ready (Postgres)");
-                        Some(Arc::new(pg) as Arc<dyn auth::AuthStore>)
-                    }
-                    Err(e) => {
-                        error!("Failed to connect to Postgres: {}", e);
-                        std::process::exit(1);
-                    }
-                }
-            }
-            Err(_) => {
-                warn!("DATABASE_URL not set - auth features will be unavailable");
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    // ── API Key lookup ──────────────────────────────────────────────
-    let api_key_lookup: Arc<dyn auth::ApiKeyLookup> = if let Some(ref store) = auth_store {
-        Arc::new(CompositeApiKeyLookup::new(store.clone()))
-    } else {
-        Arc::new(EnvApiKeyLookup::from_env())
-    };
 
     // ── Trace storage ───────────────────────────────────────────────
     let org_stores: Arc<api::OrgStoreManager> = match cloud_config.storage_backend {
@@ -638,21 +603,6 @@ async fn run_cloud_mode() {
 
     info!("Storage ready");
 
-    // ── Email sender ─────────────────────────────────────────────────
-    let email_sender: Arc<dyn auth::EmailSender> = match auth::ResendSender::from_env() {
-        Ok(sender) => {
-            info!("Email sender ready (Resend)");
-            Arc::new(sender)
-        }
-        Err(_) => {
-            warn!("RESEND_API_KEY not set - emails will be suppressed");
-            Arc::new(auth::NoopEmailSender)
-        }
-    };
-
-    let app_url = std::env::var("APP_URL")
-        .unwrap_or_else(|_| format!("http://localhost:{}", cloud_config.port));
-
     // ── Shutdown signal handling ─────────────────────────────────────
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
@@ -673,33 +623,12 @@ async fn run_cloud_mode() {
         let shutdown_tx_clone = shutdown_tx.clone();
         let addr = addr.clone();
 
-        let mut builder = api::RouterBuilder::with_org_stores(org_stores)
+        let builder = api::RouterBuilder::with_org_stores(org_stores)
             .start_time(start_time)
             .config(config_json)
             .config_path(String::new())
             .shutdown_tx(shutdown_tx_clone)
-            .auth_config(auth_config)
-            .api_key_lookup(api_key_lookup)
-            .email_sender(email_sender)
-            .app_url(app_url);
-
-        if let Some(ref s) = auth_store {
-            builder = builder.auth_store(s.clone());
-        }
-
-        if let Ok(secret) = std::env::var("POLAR_WEBHOOK_SECRET") {
-            if !secret.is_empty() {
-                info!("Polar webhook signature verification enabled");
-                builder = builder.polar_webhook_secret(secret);
-            }
-        }
-
-        if let Ok(token) = std::env::var("POLAR_ACCESS_TOKEN") {
-            if !token.is_empty() {
-                info!("Polar checkout integration enabled");
-                builder = builder.polar_access_token(token);
-            }
-        }
+            .auth_config(auth_config);
 
         let app = builder.build();
 
@@ -712,18 +641,6 @@ async fn run_cloud_mode() {
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
         }
     });
-
-    // ── Retention cleanup background task ─────────────────────────────
-    let retention_handle = if let Some(ref store) = auth_store {
-        info!("Starting retention cleanup background task");
-        Some(tokio::spawn(api::run_retention_cleanup(
-            org_stores.clone(),
-            store.clone(),
-            shutdown_rx.clone(),
-        )))
-    } else {
-        None
-    };
 
     info!("Cloud daemon ready on http://{}", addr);
 
@@ -753,9 +670,6 @@ async fn run_cloud_mode() {
 
     let shutdown_result = tokio::time::timeout(SHUTDOWN_TIMEOUT, async {
         let _ = api_handle.await;
-        if let Some(h) = retention_handle {
-            let _ = h.await;
-        }
     }).await;
 
     match shutdown_result {

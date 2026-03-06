@@ -1,13 +1,12 @@
 import { APIError, api } from "encore.dev/api";
 import { CronJob } from "encore.dev/cron";
-import { Subscription } from "encore.dev/pubsub";
 import { and, eq, inArray, lt } from "drizzle-orm";
 
 import { datasets, evals } from "~encore/clients";
 import { db } from "../core/database";
 import { evalRuns } from "../core/schema";
 import { asJson } from "../core/json";
-import { evalRunCompleted, evalRunRequested } from "../evals/events";
+import { evalRunCompleted } from "../evals/events";
 import { evalArtifacts } from "./storage";
 import { systemCallOpts } from "./system";
 
@@ -150,12 +149,6 @@ async function recoverForScope(orgId: string, projectId: string, staleMinutes: n
 
   return stale.length;
 }
-
-const _runnerSub = new Subscription(evalRunRequested, "execute-eval-run", {
-  handler: async (event) => {
-    await executeEvalRun(event.org_id, event.project_id, event.run_id, event.dataset_id);
-  },
-});
 
 export const runEvalNow = api(
   { method: "POST", path: "/internal/workflows/evals/:run_id/run", auth: true, expose: true },

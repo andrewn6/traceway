@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getOrg, type OrgInfo, API_BASE } from '$lib/api';
+	import { createBillingCheckout, getOrg, type OrgInfo } from '$lib/api';
 	import { onMount } from 'svelte';
 
 	let org: OrgInfo | null = $state(null);
@@ -40,20 +40,11 @@
 	}
 
 	async function startCheckout(plan: string) {
+		if (plan !== 'pro' && plan !== 'team') return;
 		checkoutLoading = plan;
 		error = '';
 		try {
-			const res = await fetch(`${API_BASE}/billing/checkout`, {
-				method: 'POST',
-				credentials: 'include',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ plan })
-			});
-			if (!res.ok) {
-				const text = await res.text();
-				throw new Error(text || `Failed to create checkout (${res.status})`);
-			}
-			const data = await res.json();
+			const data = await createBillingCheckout(plan);
 			if (data.url) {
 				window.location.href = data.url;
 			} else {

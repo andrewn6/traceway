@@ -3,7 +3,6 @@
 	"buildCommand": "npm run build",
 	"outputDirectory": "build",
 	"rewrites": [
-		{ "source": "/api/:match*", "destination": "https://api.traceway.ai/api/:match*" },
 		{ "source": "/:path*", "destination": "/index.html" }
 	]
 }
