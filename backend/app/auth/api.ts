@@ -1,6 +1,6 @@
 import { api } from "encore.dev/api";
 
-import { handlePreflight, json, readJsonBody, setCors } from "../core/public_api";
+import { handlePreflight, json, readJsonBody, setCors } from "../shared/http";
 import {
   acceptInviteToken,
   clearSessionCookie,

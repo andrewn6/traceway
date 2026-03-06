@@ -84,13 +84,11 @@ export async function requireScope(req: IncomingMessage, res: ServerResponse): P
   if (expected && token && token === expected) {
     const orgHeader = req.headers["x-traceway-org-id"];
     const projectHeader = req.headers["x-traceway-project-id"];
-    const orgId = (typeof orgHeader === "string" ? orgHeader : Array.isArray(orgHeader) ? orgHeader[0] : undefined) ?? process.env.TRACEWAY_DEFAULT_ORG_ID;
-    const projectId =
-      (typeof projectHeader === "string" ? projectHeader : Array.isArray(projectHeader) ? projectHeader[0] : undefined) ??
-      process.env.TRACEWAY_DEFAULT_PROJECT_ID;
+    const orgId = typeof orgHeader === "string" ? orgHeader : Array.isArray(orgHeader) ? orgHeader[0] : undefined;
+    const projectId = typeof projectHeader === "string" ? projectHeader : Array.isArray(projectHeader) ? projectHeader[0] : undefined;
 
     if (!orgId || !projectId) {
-      json(res, 401, { error: "Daemon auth missing org/project scope" });
+      json(res, 401, { error: "Daemon auth missing x-traceway-org-id/x-traceway-project-id headers" });
       return null;
     }
 

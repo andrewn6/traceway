@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "../core/database";
 import { organizations, users } from "../core/schema";
-import { handlePreflight, json, readJsonBody, requireSession, setCors } from "../core/public_api";
+import { handlePreflight, json, readJsonBody, requireSession, setCors } from "../shared/http";
 
 type PolarWebhookPayload = {
   type: string;
