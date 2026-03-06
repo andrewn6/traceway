@@ -1,5 +1,87 @@
 import * as p from "drizzle-orm/pg-core";
 
+export const organizations = p.pgTable(
+  "organizations",
+  {
+    id: p.uuid().primaryKey(),
+    name: p.text().notNull(),
+    slug: p.text().notNull().unique(),
+    plan: p.text().notNull().default("free"),
+    createdAt: p.timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: p.timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [p.index("organizations_slug_idx").on(table.slug)]
+);
+
+export const projects = p.pgTable(
+  "projects",
+  {
+    id: p.uuid().primaryKey(),
+    orgId: p
+      .uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: p.text().notNull(),
+    slug: p.text().notNull(),
+    isDefault: p.boolean("is_default").notNull().default(false),
+    createdAt: p.timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: p.timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    p.index("projects_org_idx").on(table.orgId),
+    p.unique("projects_org_slug_unique").on(table.orgId, table.slug),
+  ]
+);
+
+export const users = p.pgTable(
+  "users",
+  {
+    id: p.uuid().primaryKey(),
+    orgId: p
+      .uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    email: p.text().notNull().unique(),
+    name: p.text(),
+    role: p.text().notNull().default("member"),
+    passwordHash: p.text("password_hash").notNull(),
+    createdAt: p.timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: p.timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    p.index("users_org_idx").on(table.orgId),
+    p.index("users_email_idx").on(table.email),
+  ]
+);
+
+export const authSessions = p.pgTable(
+  "auth_sessions",
+  {
+    id: p.uuid().primaryKey(),
+    userId: p
+      .uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    orgId: p
+      .uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: p
+      .uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    tokenHash: p.text("token_hash").notNull().unique(),
+    expiresAt: p.timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: p.timestamp("created_at", { withTimezone: true }).notNull(),
+    lastUsedAt: p.timestamp("last_used_at", { withTimezone: true }),
+  },
+  (table) => [
+    p.index("auth_sessions_user_idx").on(table.userId),
+    p.index("auth_sessions_token_hash_idx").on(table.tokenHash),
+    p.index("auth_sessions_expires_idx").on(table.expiresAt),
+  ]
+);
+
 export const providerConnections = p.pgTable(
   "provider_connections",
   {

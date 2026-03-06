@@ -41,6 +41,7 @@ export const createEvalRun = api(
       project_id: req.project_id,
       run_id: run.id,
       dataset_id: run.dataset_id,
+      requested_at: new Date().toISOString(),
     });
     return run;
   }
