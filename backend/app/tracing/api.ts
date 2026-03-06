@@ -1,6 +1,7 @@
 import { api } from "encore.dev/api";
 
-import { handlePreflight, json, page, query, readJsonBody, requireScope, setCors } from "../core/public_api";
+import { handlePreflight, json, page, query, readJsonBody, requireScope, setCors } from "../shared/http";
+import { pathSegments } from "../shared/request";
 import { analyticsQuery, analyticsSummary } from "./analytics";
 import {
   clearAll,
@@ -21,10 +22,6 @@ import {
   listVersionsForPath,
   stats,
 } from "./service";
-
-function pathSegments(req: import("http").IncomingMessage): string[] {
-  return new URL(req.url ?? "/", "http://local").pathname.split("/").filter(Boolean);
-}
 
 export const listTracesEndpoint = api.raw(
   { expose: true, method: "GET", path: "/traces" },
