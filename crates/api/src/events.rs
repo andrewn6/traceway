@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::SystemEvent;
 
@@ -150,6 +150,7 @@ pub mod cloud {
     use redis::aio::ConnectionManager;
     use redis::AsyncCommands;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use tracing::{debug, error, warn};
 
     const REDIS_CHANNEL: &str = "traceway:events";
 

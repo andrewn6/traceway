@@ -17,6 +17,56 @@ use trace::{OrgId, Span, SpanId, SpanKind, SpanStatus, Trace, TraceId};
 
 use crate::{capture, AppState, SystemEvent};
 
+#[derive(Clone)]
+struct EncoreTraceBridge {
+    base_url: String,
+    control_token: String,
+}
+
+impl EncoreTraceBridge {
+    fn from_env() -> Option<Self> {
+        let mode = std::env::var("TRACEWAY_BACKEND_MODE")
+            .or_else(|_| std::env::var("TRACEWAY_CONTROL_PLANE_MODE"))
+            .unwrap_or_else(|_| "off".to_string())
+            .to_ascii_lowercase();
+        if mode != "on" {
+            return None;
+        }
+
+        let base_url = std::env::var("TRACEWAY_BACKEND_URL")
+            .or_else(|_| std::env::var("TRACEWAY_CONTROL_PLANE_URL"))
+            .ok()?
+            .trim_end_matches('/')
+            .to_string();
+        let control_token = std::env::var("TRACEWAY_BACKEND_TOKEN")
+            .or_else(|_| std::env::var("TRACEWAY_CONTROL_PLANE_TOKEN"))
+            .ok()?;
+
+        Some(Self {
+            base_url,
+            control_token,
+        })
+    }
+
+    async fn post_json(
+        &self,
+        client: &reqwest::Client,
+        path: &str,
+        org_id: &str,
+        project_id: &str,
+        body: serde_json::Value,
+    ) {
+        let _ = client
+            .post(format!("{}{}", self.base_url, path))
+            .header("x-traceway-control-token", &self.control_token)
+            .header("x-traceway-org-id", org_id)
+            .header("x-traceway-project-id", project_id)
+            .json(&body)
+            .send()
+            .await;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // OTLP namespace UUID for deterministic ID derivation (UUID v5).
 // Generated once, never changes. This is just a random UUID used as the
@@ -423,6 +473,8 @@ pub async fn ingest_traces(
     let ctx = extract_otlp_auth(&state, &headers).await?;
     let org_id = ctx.org_id;
     let project_id = ctx.project_id;
+    let org_id_str = org_id.to_string();
+    let project_id_str = project_id.to_string();
 
     let store = state
         .store_for_project(org_id, project_id)
@@ -482,7 +534,6 @@ pub async fn ingest_traces(
     }
 
     // ---- Create traces + insert spans ----
-    let org_id_str = org_id.to_string();
     let mut w = store.write().await;
 
     // Derive service.name from the first resource (used for trace naming)
@@ -523,6 +574,75 @@ pub async fn ingest_traces(
         }
     }
     drop(w);
+
+    // ---- Mirror traces/spans into Encore product API (daemon bridge) ----
+    if let Some(bridge) = EncoreTraceBridge::from_env() {
+        let client = reqwest::Client::new();
+        for (trace_id, (_earliest_start, root_name, spans)) in &traces_map {
+            let trace_name = root_name
+                .clone()
+                .or_else(|| service_name.clone())
+                .unwrap_or_else(|| "otlp-trace".to_string());
+
+            bridge
+                .post_json(
+                    &client,
+                    "/traces",
+                    &org_id_str,
+                    &project_id_str,
+                    serde_json::json!({
+                        "id": trace_id.to_string(),
+                        "name": trace_name,
+                        "tags": ["otlp"],
+                    }),
+                )
+                .await;
+
+            for span in spans {
+                bridge
+                    .post_json(
+                        &client,
+                        "/spans",
+                        &org_id_str,
+                        &project_id_str,
+                        serde_json::json!({
+                            "id": span.id().to_string(),
+                            "trace_id": span.trace_id().to_string(),
+                            "parent_id": span.parent_id().map(|p| p.to_string()),
+                            "name": span.name(),
+                            "kind": serde_json::to_value(span.kind()).unwrap_or(serde_json::json!({"type": "custom"})),
+                            "input": serde_json::Value::Null,
+                        }),
+                    )
+                    .await;
+
+                match span.status() {
+                    SpanStatus::Failed { error } => {
+                        bridge
+                            .post_json(
+                                &client,
+                                &format!("/spans/{}/fail", span.id()),
+                                &org_id_str,
+                                &project_id_str,
+                                serde_json::json!({"error": error}),
+                            )
+                            .await;
+                    }
+                    _ => {
+                        bridge
+                            .post_json(
+                                &client,
+                                &format!("/spans/{}/complete", span.id()),
+                                &org_id_str,
+                                &project_id_str,
+                                serde_json::json!({"output": serde_json::Value::Null}),
+                            )
+                            .await;
+                    }
+                }
+            }
+        }
+    }
 
     // ---- Emit events (outside write lock) ----
     for (trace_id, (earliest_start, root_name, spans)) in traces_map {

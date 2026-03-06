@@ -1,6 +1,6 @@
 import { api } from "encore.dev/api";
 
-import { handlePreflight, json, page, query, readJsonBody, requireSession, setCors } from "../core/public_api";
+import { handlePreflight, json, page, query, readJsonBody, requireScope, setCors } from "../core/public_api";
 import { analyticsQuery, analyticsSummary } from "./analytics";
 import {
   clearAll,
@@ -30,7 +30,7 @@ export const listTracesEndpoint = api.raw(
   { expose: true, method: "GET", path: "/traces" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     const items = await listTraces(session);
@@ -42,10 +42,10 @@ export const createTraceEndpoint = api.raw(
   { expose: true, method: "POST", path: "/traces" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
-    const body = await readJsonBody<{ name?: string; tags?: string[] }>(req);
+    const body = await readJsonBody<{ id?: string; name?: string; tags?: string[] }>(req);
     const trace = await createTrace(session, body);
     json(res, 200, trace);
   }
@@ -55,7 +55,7 @@ export const getTraceEndpoint = api.raw(
   { expose: true, method: "GET", path: "/traces/:trace_id" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     const traceId = pathSegments(req)[1] ?? "";
@@ -68,7 +68,7 @@ export const deleteTraceEndpoint = api.raw(
   { expose: true, method: "DELETE", path: "/traces/:trace_id" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     const traceId = pathSegments(req)[1] ?? "";
@@ -81,7 +81,7 @@ export const clearAllEndpoint = api.raw(
   { expose: true, method: "DELETE", path: "/traces" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     await clearAll(session);
@@ -93,7 +93,7 @@ export const listSpansEndpoint = api.raw(
   { expose: true, method: "GET", path: "/spans" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     const params = query(req);
@@ -123,10 +123,11 @@ export const createSpanEndpoint = api.raw(
   { expose: true, method: "POST", path: "/spans" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     const body = await readJsonBody<{
+      id?: string;
       trace_id: string;
       parent_id?: string | null;
       name: string;
@@ -142,7 +143,7 @@ export const getSpanEndpoint = api.raw(
   { expose: true, method: "GET", path: "/spans/:span_id" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     const spanId = pathSegments(req)[1] ?? "";
@@ -159,7 +160,7 @@ export const completeSpanEndpoint = api.raw(
   { expose: true, method: "POST", path: "/spans/:span_id/complete" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     const spanId = pathSegments(req)[1] ?? "";
@@ -173,7 +174,7 @@ export const failSpanEndpoint = api.raw(
   { expose: true, method: "POST", path: "/spans/:span_id/fail" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     const spanId = pathSegments(req)[1] ?? "";
@@ -187,7 +188,7 @@ export const deleteSpanEndpoint = api.raw(
   { expose: true, method: "DELETE", path: "/spans/:span_id" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     const spanId = pathSegments(req)[1] ?? "";
@@ -200,7 +201,7 @@ export const statsEndpoint = api.raw(
   { expose: true, method: "GET", path: "/stats" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     json(res, 200, await stats(session));
@@ -211,7 +212,7 @@ export const filesEndpoint = api.raw(
   { expose: true, method: "GET", path: "/files" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     const pathPrefix = query(req).get("path_prefix") ?? undefined;
@@ -224,7 +225,7 @@ export const fileVersionsEndpoint = api.raw(
   { expose: true, method: "GET", path: "/files/:path" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     const decoded = decodeURIComponent(pathSegments(req)[1] ?? "");
@@ -237,7 +238,7 @@ export const fileContentEndpoint = api.raw(
   { expose: true, method: "GET", path: "/files/content/:hash" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     const hash = pathSegments(req)[2] ?? "";
@@ -257,7 +258,7 @@ export const analyticsSummaryEndpoint = api.raw(
   { expose: true, method: "GET", path: "/analytics/summary" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     json(res, 200, await analyticsSummary(session));
@@ -268,7 +269,7 @@ export const analyticsQueryEndpoint = api.raw(
   { expose: true, method: "POST", path: "/analytics" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     const body = await readJsonBody(req);
@@ -280,7 +281,7 @@ export const exportJsonEndpoint = api.raw(
   { expose: true, method: "GET", path: "/export/json" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
     const traceId = query(req).get("trace_id") ?? undefined;
@@ -293,7 +294,7 @@ export const eventsEndpoint = api.raw(
   { expose: true, method: "GET", path: "/events" },
   async (req, res) => {
     if (handlePreflight(req, res)) return;
-    const session = await requireSession(req, res);
+    const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
 

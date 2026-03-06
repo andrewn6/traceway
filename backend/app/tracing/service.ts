@@ -78,11 +78,11 @@ export async function listTraces(scope: Scope): Promise<TraceItem[]> {
   return rows.map(mapTrace);
 }
 
-export async function createTrace(scope: Scope, input: { name?: string; tags?: string[] }): Promise<TraceItem> {
+export async function createTrace(scope: Scope, input: { id?: string; name?: string; tags?: string[] }): Promise<TraceItem> {
   const [row] = await db
     .insert(traces)
     .values({
-      id: newId(),
+      id: input.id ?? newId(),
       orgId: scope.org_id,
       projectId: scope.project_id,
       name: input.name ?? null,
@@ -91,7 +91,14 @@ export async function createTrace(scope: Scope, input: { name?: string; tags?: s
       endedAt: null,
       machineId: null,
     })
+    .onConflictDoNothing({ target: traces.id })
     .returning();
+
+  if (!row) {
+    const [existing] = await db.select().from(traces).where(eq(traces.id, input.id!)).limit(1);
+    if (existing) return mapTrace(existing);
+    throw new Error("Failed to create trace");
+  }
 
   const trace = mapTrace(row);
   await appendEvent(scope, "trace_created", { type: "trace_created", trace });
@@ -160,6 +167,7 @@ export async function getSpan(scope: Scope, spanId: string): Promise<SpanItem | 
 export async function createSpan(
   scope: Scope,
   input: {
+    id?: string;
     trace_id: string;
     parent_id?: string | null;
     name: string;
@@ -170,7 +178,7 @@ export async function createSpan(
   const [row] = await db
     .insert(spans)
     .values({
-      id: newId(),
+      id: input.id ?? newId(),
       orgId: scope.org_id,
       projectId: scope.project_id,
       traceId: input.trace_id,
@@ -183,7 +191,12 @@ export async function createSpan(
       startedAt: new Date(),
       endedAt: null,
     })
+    .onConflictDoNothing({ target: spans.id })
     .returning();
+
+  if (!row) {
+    return { id: input.id ?? "", trace_id: input.trace_id };
+  }
 
   const span = mapSpan(row);
   await appendEvent(scope, "span_created", { type: "span_created", span });

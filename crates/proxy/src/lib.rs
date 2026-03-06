@@ -29,6 +29,106 @@ struct ProxyState {
     target_url: String,
     client: reqwest::Client,
     capture_mode: CaptureMode,
+    encore_bridge: Option<EncoreBridgeConfig>,
+}
+
+#[derive(Clone)]
+struct EncoreBridgeConfig {
+    base_url: String,
+    control_token: String,
+    org_id: String,
+    project_id: String,
+}
+
+impl EncoreBridgeConfig {
+    fn from_env() -> Option<Self> {
+        let mode = std::env::var("TRACEWAY_BACKEND_MODE")
+            .or_else(|_| std::env::var("TRACEWAY_CONTROL_PLANE_MODE"))
+            .unwrap_or_else(|_| "off".to_string())
+            .to_ascii_lowercase();
+        if mode != "on" {
+            return None;
+        }
+
+        let base_url = std::env::var("TRACEWAY_BACKEND_URL")
+            .or_else(|_| std::env::var("TRACEWAY_CONTROL_PLANE_URL"))
+            .ok()?
+            .trim_end_matches('/')
+            .to_string();
+        let control_token = std::env::var("TRACEWAY_BACKEND_TOKEN")
+            .or_else(|_| std::env::var("TRACEWAY_CONTROL_PLANE_TOKEN"))
+            .ok()?;
+        let org_id = std::env::var("TRACEWAY_DEFAULT_ORG_ID").ok()?;
+        let project_id = std::env::var("TRACEWAY_DEFAULT_PROJECT_ID").ok()?;
+        Some(Self {
+            base_url,
+            control_token,
+            org_id,
+            project_id,
+        })
+    }
+}
+
+async fn bridge_create_trace(config: &EncoreBridgeConfig, client: &reqwest::Client, trace_id: trace::TraceId, name: &str) {
+    let _ = client
+        .post(format!("{}/traces", config.base_url))
+        .header("x-traceway-control-token", &config.control_token)
+        .header("x-traceway-org-id", &config.org_id)
+        .header("x-traceway-project-id", &config.project_id)
+        .json(&serde_json::json!({
+            "id": trace_id.to_string(),
+            "name": name,
+            "tags": ["proxy"],
+        }))
+        .send()
+        .await;
+}
+
+async fn bridge_create_span(
+    config: &EncoreBridgeConfig,
+    client: &reqwest::Client,
+    span_id: trace::SpanId,
+    trace_id: trace::TraceId,
+    span_name: &str,
+    kind: &SpanKind,
+    input_payload: Option<Value>,
+) {
+    let _ = client
+        .post(format!("{}/spans", config.base_url))
+        .header("x-traceway-control-token", &config.control_token)
+        .header("x-traceway-org-id", &config.org_id)
+        .header("x-traceway-project-id", &config.project_id)
+        .json(&serde_json::json!({
+            "id": span_id.to_string(),
+            "trace_id": trace_id.to_string(),
+            "name": span_name,
+            "kind": serde_json::to_value(kind).unwrap_or(serde_json::json!({"type": "llm_call"})),
+            "input": input_payload,
+        }))
+        .send()
+        .await;
+}
+
+async fn bridge_complete_span(config: &EncoreBridgeConfig, client: &reqwest::Client, span_id: trace::SpanId, output_payload: Option<Value>) {
+    let _ = client
+        .post(format!("{}/spans/{}/complete", config.base_url, span_id))
+        .header("x-traceway-control-token", &config.control_token)
+        .header("x-traceway-org-id", &config.org_id)
+        .header("x-traceway-project-id", &config.project_id)
+        .json(&serde_json::json!({"output": output_payload}))
+        .send()
+        .await;
+}
+
+async fn bridge_fail_span(config: &EncoreBridgeConfig, client: &reqwest::Client, span_id: trace::SpanId, error: String) {
+    let _ = client
+        .post(format!("{}/spans/{}/fail", config.base_url, span_id))
+        .header("x-traceway-control-token", &config.control_token)
+        .header("x-traceway-org-id", &config.org_id)
+        .header("x-traceway-project-id", &config.project_id)
+        .json(&serde_json::json!({"error": error}))
+        .send()
+        .await;
 }
 
 /// Detect provider from target URL
@@ -210,6 +310,28 @@ async fn proxy_handler(State(state): State<ProxyState>, req: Request<Body>) -> R
         }
     }
 
+    if let Some(config) = &state.encore_bridge {
+        bridge_create_trace(config, &state.client, trace_id, &span_name).await;
+        bridge_create_span(
+            config,
+            &state.client,
+            span_id,
+            trace_id,
+            &span_name,
+            &SpanKind::LlmCall {
+                model: model.clone(),
+                provider: provider.clone(),
+                input_tokens: None,
+                output_tokens: None,
+                cost: None,
+                input_preview: input_preview.clone(),
+                output_preview: None,
+            },
+            req_json.clone(),
+        )
+        .await;
+    }
+
     tracing::info!(%trace_id, %span_id, %span_name, %model, "proxying request");
 
     // Build target URL and request
@@ -275,7 +397,7 @@ async fn proxy_handler(State(state): State<ProxyState>, req: Request<Body>) -> R
                         let mut store = state.store.write().await;
                         if status.is_success() {
                             if let Err(e) = store
-                                .complete_span_with_kind(span_id, updated_kind, output_payload)
+                                .complete_span_with_kind(span_id, updated_kind, output_payload.clone())
                                 .await
                             {
                                 tracing::error!(%span_id, "failed to complete proxy span: {e}");
@@ -287,6 +409,14 @@ async fn proxy_handler(State(state): State<ProxyState>, req: Request<Body>) -> R
                             {
                                 tracing::error!(%span_id, "failed to fail proxy span: {e}");
                             }
+                        }
+                    }
+
+                    if let Some(config) = &state.encore_bridge {
+                        if status.is_success() {
+                            bridge_complete_span(config, &state.client, span_id, output_payload.clone()).await;
+                        } else {
+                            bridge_fail_span(config, &state.client, span_id, format!("HTTP {}", status)).await;
                         }
                     }
 
@@ -343,6 +473,7 @@ pub fn router(store: SharedStore, target_url: String) -> Router {
         target_url,
         client: reqwest::Client::new(),
         capture_mode: CaptureMode::default(),
+        encore_bridge: EncoreBridgeConfig::from_env(),
     };
 
     Router::new().fallback(proxy_handler).with_state(state)

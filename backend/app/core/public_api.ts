@@ -3,6 +3,12 @@ import { IncomingMessage, ServerResponse } from "node:http";
 import { meFromSessionToken, parseCookie } from "../auth/service";
 
 type Session = NonNullable<Awaited<ReturnType<typeof meFromSessionToken>>>;
+export type RequestScope = {
+  org_id: string;
+  project_id: string;
+  user_id?: string;
+  principal: "session" | "daemon";
+};
 
 function allowOrigin(origin: string | undefined): string | null {
   if (!origin) return null;
@@ -68,6 +74,41 @@ export async function requireSession(req: IncomingMessage, res: ServerResponse):
     return null;
   }
   return session;
+}
+
+export async function requireScope(req: IncomingMessage, res: ServerResponse): Promise<RequestScope | null> {
+  const expected = process.env.TRACEWAY_BACKEND_TOKEN ?? process.env.TRACEWAY_CONTROL_PLANE_TOKEN ?? "";
+  const provided = req.headers["x-traceway-control-token"];
+  const token = typeof provided === "string" ? provided.trim() : Array.isArray(provided) ? (provided[0] ?? "").trim() : "";
+
+  if (expected && token && token === expected) {
+    const orgHeader = req.headers["x-traceway-org-id"];
+    const projectHeader = req.headers["x-traceway-project-id"];
+    const orgId = (typeof orgHeader === "string" ? orgHeader : Array.isArray(orgHeader) ? orgHeader[0] : undefined) ?? process.env.TRACEWAY_DEFAULT_ORG_ID;
+    const projectId =
+      (typeof projectHeader === "string" ? projectHeader : Array.isArray(projectHeader) ? projectHeader[0] : undefined) ??
+      process.env.TRACEWAY_DEFAULT_PROJECT_ID;
+
+    if (!orgId || !projectId) {
+      json(res, 401, { error: "Daemon auth missing org/project scope" });
+      return null;
+    }
+
+    return {
+      org_id: orgId,
+      project_id: projectId,
+      principal: "daemon",
+    };
+  }
+
+  const session = await requireSession(req, res);
+  if (!session) return null;
+  return {
+    org_id: session.org_id,
+    project_id: session.project_id,
+    user_id: session.user_id,
+    principal: "session",
+  };
 }
 
 export function page<T>(items: T[]): { items: T[]; total: number; next_cursor: null; has_more: false } {
