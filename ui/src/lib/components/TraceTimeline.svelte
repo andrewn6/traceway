@@ -354,28 +354,28 @@
 	});
 </script>
 
-<div class="flex flex-col h-full min-h-0 bg-bg-secondary border-r border-border">
+<div class="flex flex-col h-full min-h-0 bg-transparent">
 	<!-- Toolbar -->
-	<div class="flex items-center gap-2 px-3 py-1.5 border-b border-border shrink-0">
+	<div class="flex items-center gap-2 px-3 py-2 border-b border-border/55 shrink-0 bg-bg-secondary/30 backdrop-blur-sm">
 		{#if viewMode === 'tree' || viewMode === 'flat'}
-			<span class="text-[11px] text-text-muted">{flatTree.filter(n => n.type === 'span').length} spans</span>
+			<span class="text-[10px] uppercase tracking-[0.12em] text-text-muted">{flatTree.filter(n => n.type === 'span').length} spans</span>
 		{/if}
 
 		<div class="flex-1"></div>
 
 		{#if viewMode === 'tree'}
-			<div class="flex items-center gap-0.5 text-[10px] text-text-muted">
-				<button class="hover:text-text transition-colors px-1" onclick={expandAll}>expand</button>
+			<div class="flex items-center gap-0.5 text-[10px] text-text-muted bg-bg-tertiary/35 border border-border/50 rounded-md px-1 py-0.5">
+				<button class="hover:text-text transition-colors duration-150 px-1" onclick={expandAll}>expand</button>
 				<span class="text-border">/</span>
-				<button class="hover:text-text transition-colors px-1" onclick={collapseAll}>collapse</button>
+				<button class="hover:text-text transition-colors duration-150 px-1" onclick={collapseAll}>collapse</button>
 			</div>
 		{/if}
 
 		<!-- View mode toggle -->
-		<div class="flex items-center bg-bg-tertiary rounded text-[10px]">
+		<div class="flex items-center bg-bg-tertiary/45 border border-border/55 rounded-md text-[10px] p-0.5 backdrop-blur-sm">
 			{#each (['tree', 'flat', 'timeline', 'reader'] as const) as mode}
 				<button
-					class="px-2 py-0.5 rounded transition-colors capitalize {viewMode === mode ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text'}"
+					class="px-2 py-0.5 rounded transition-colors duration-150 capitalize {viewMode === mode ? 'bg-accent/20 text-accent border border-accent/35' : 'text-text-muted hover:text-text'}"
 					onclick={() => viewMode = mode}
 				>{mode}</button>
 			{/each}
@@ -403,11 +403,12 @@
 					{#if node.type === 'preview'}
 						<!-- Content preview block -->
 						<div
-							class="absolute left-0 right-0 cursor-pointer
-								{selectedId === s.id ? 'bg-accent/5 border-l-2 border-l-accent' : 'border-l-2 border-l-transparent hover:bg-bg-tertiary/50'}"
+							class="absolute left-0 right-0 cursor-pointer transition-colors duration-150
+								{selectedId === s.id ? 'bg-accent/8 border-l-2 border-l-accent' : 'border-l-2 border-l-transparent hover:bg-bg-tertiary/50'}"
 							style="top: {topPx}px; height: {node.height}px"
 							role="button"
-							tabindex={-1}
+							tabindex={0}
+							aria-label={`Select span ${s.name}`}
 							onclick={() => onSelect?.(s)}
 							onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') onSelect?.(s); }}
 						>
@@ -423,11 +424,15 @@
 						{@const tokens = tokenCount(s)}
 						{@const cost = costBadge(s)}
 						{@const bytes = bytesBadge(s)}
-						<button
-							class="absolute left-0 right-0 flex items-center text-xs transition-colors group
-								{selectedId === s.id ? 'bg-accent/10 border-l-2 border-l-accent' : 'hover:bg-bg-tertiary border-l-2 border-l-transparent'}"
+						<div
+							class="absolute left-0 right-0 flex items-center text-xs transition-all duration-150 group
+								{selectedId === s.id ? 'bg-accent/12 border-l-2 border-l-accent shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-accent)_22%,transparent)]' : 'hover:bg-bg-tertiary/75 border-l-2 border-l-transparent'}"
 							style="top: {topPx}px; height: {node.height}px"
+							role="button"
+							tabindex={0}
+							aria-label={`Select span ${s.name}`}
 							onclick={() => onSelect?.(s)}
+							onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect?.(s); } }}
 						>
 							<!-- Span info -->
 							<div class="flex items-center gap-1.5 flex-1 px-2 overflow-hidden min-w-0">
@@ -436,22 +441,20 @@
 									<div class="flex items-center shrink-0" style="width: {node.depth * INDENT_PX + 20}px">
 										<div style="width: {node.depth * INDENT_PX}px"></div>
 										{#if node.hasChildren}
-											<!-- svelte-ignore a11y_click_events_have_key_events -->
-											<span
-												role="switch"
-												aria-checked={!collapsed.has(s.id)}
-												tabindex={-1}
-												class="w-5 h-5 flex items-center justify-center text-text-muted hover:text-text transition-colors cursor-pointer"
-												onclick={(e: MouseEvent) => { e.stopPropagation(); toggleCollapse(s.id); }}
-											>
+										<button
+											type="button"
+											aria-label={collapsed.has(s.id) ? `Expand ${s.name}` : `Collapse ${s.name}`}
+											class="w-5 h-5 flex items-center justify-center text-text-muted hover:text-text transition-colors duration-150 rounded-sm hover:bg-bg-tertiary/80"
+											onclick={(e: MouseEvent) => { e.stopPropagation(); toggleCollapse(s.id); }}
+										>
 												{#if collapsed.has(s.id)}
 													<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M4 2l6 4-6 4V2z"/></svg>
 												{:else}
 													<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M2 4l4 6 4-6H2z"/></svg>
 												{/if}
-											</span>
-										{:else}
-											<div class="w-5"></div>
+										</button>
+									{:else}
+										<div class="w-5"></div>
 										{/if}
 									</div>
 								{/if}
@@ -469,16 +472,16 @@
 
 								<!-- Inline badges -->
 								{#if model}
-									<span class="shrink-0 text-purple-400 text-[10px] bg-purple-400/10 rounded px-1 py-px">{model}</span>
+									<span class="shrink-0 text-purple-400 text-[10px] bg-purple-400/10 border border-purple-400/25 rounded px-1 py-px">{model}</span>
 								{/if}
 								{#if tokens}
-									<span class="shrink-0 text-text-muted text-[10px]">{tokens}tok</span>
+									<span class="shrink-0 text-text-muted text-[10px] bg-bg-tertiary/45 border border-border/45 rounded px-1 py-px">{tokens}tok</span>
 								{/if}
 								{#if cost}
 									<span class="shrink-0 text-success text-[10px]">{cost}</span>
 								{/if}
 								{#if bytes}
-									<span class="shrink-0 text-text-muted text-[10px]">{bytes}</span>
+									<span class="shrink-0 text-text-muted text-[10px] bg-bg-tertiary/45 border border-border/45 rounded px-1 py-px">{bytes}</span>
 								{/if}
 
 								<!-- Collapsed count -->
@@ -492,7 +495,7 @@
 								<span class="text-xs text-text-secondary font-mono">{formatDuration(duration)}</span>
 								<span class="text-[10px] text-text-muted font-mono">{relativeOffset(s)}</span>
 							</div>
-						</button>
+						</div>
 					{/if}
 				{/each}
 			</div>

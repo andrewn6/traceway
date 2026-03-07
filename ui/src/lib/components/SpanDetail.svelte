@@ -341,16 +341,16 @@
 
 	<div class="flex flex-col h-full min-h-0">
 		<!-- Header -->
-		<div class="px-4 py-3 border-b border-border shrink-0 space-y-2">
+		<div class="px-4 py-3 border-b border-border/55 shrink-0 space-y-3 bg-bg-secondary/20 backdrop-blur-sm">
 			<!-- Row 1: name + status -->
 			<div class="flex items-center gap-2">
 				<SpanKindIcon {span} />
-				<h2 class="text-text font-semibold text-base flex-1 truncate">{span.name}</h2>
+				<h2 class="text-text font-semibold text-base flex-1 truncate tracking-tight">{span.name}</h2>
 				<StatusBadge {status} />
 			</div>
 
 			<!-- Row 2: metadata badges -->
-			<div class="flex items-center gap-2 flex-wrap">
+			<div class="flex items-center gap-2 flex-wrap bg-bg-tertiary/30 rounded-xl border border-border/45 px-2.5 py-2">
 				<!-- Duration badge -->
 				<span class="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] bg-bg-tertiary border border-border text-text-secondary">
 					<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
@@ -358,12 +358,12 @@
 				</span>
 
 				<!-- Started at -->
-				<span class="text-[11px] text-text-muted font-mono">
+				<span class="text-[11px] text-text-muted font-mono bg-bg/35 rounded px-1.5 py-0.5 border border-border/30">
 					{new Date(spanStartedAt(span)).toLocaleTimeString()}
 				</span>
 
 				<!-- Span ID -->
-				<span class="text-[11px] text-text-muted font-mono">
+				<span class="text-[11px] text-text-muted font-mono bg-bg/35 rounded px-1.5 py-0.5 border border-border/30">
 					{shortId(span.id)}
 				</span>
 
@@ -385,7 +385,7 @@
 						</span>
 					{/if}
 					{#if span.kind.provider}
-						<span class="text-[11px] text-text-muted">{span.kind.provider}</span>
+						<span class="text-[11px] text-text-muted bg-bg/35 rounded px-1.5 py-0.5 border border-border/30">{span.kind.provider}</span>
 					{/if}
 				{:else if span.kind?.type === 'fs_read' || span.kind?.type === 'fs_write'}
 					<span class="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] bg-bg-tertiary border border-border text-text-secondary font-mono truncate max-w-64">
@@ -395,14 +395,14 @@
 			</div>
 
 			<!-- Row 3: action buttons -->
-			<div class="flex items-center gap-2">
+			<div class="flex items-center gap-2 flex-wrap rounded-xl border border-border/50 bg-bg-tertiary/25 px-2 py-2">
 				{#if status === 'running'}
 					<button
-						class="px-2.5 py-1 text-[11px] bg-success/10 text-success border border-success/20 rounded hover:bg-success/20 transition-colors"
+						class="px-2.5 py-1 text-[11px] bg-success/10 text-success border border-success/20 rounded-lg hover:bg-success/20 transition-colors duration-150"
 						onclick={() => { showCompleteForm = !showCompleteForm; showFailForm = false; }}
 					>Complete</button>
 					<button
-						class="px-2.5 py-1 text-[11px] bg-danger/10 text-danger border border-danger/20 rounded hover:bg-danger/20 transition-colors"
+						class="px-2.5 py-1 text-[11px] bg-danger/10 text-danger border border-danger/20 rounded-lg hover:bg-danger/20 transition-colors duration-150"
 						onclick={() => { showFailForm = !showFailForm; showCompleteForm = false; }}
 					>Fail</button>
 				{/if}
@@ -410,17 +410,17 @@
 				<!-- Export to Dataset -->
 				<div class="relative">
 					<button
-						class="px-2.5 py-1 text-[11px] bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded hover:bg-amber-400/20 transition-colors"
+						class="px-2.5 py-1 text-[11px] bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded-lg hover:bg-amber-400/20 transition-colors duration-150"
 						onclick={openExportDropdown}
 					>Add to dataset</button>
 					{#if showExportDropdown}
-						<div class="absolute left-0 top-full mt-1 w-56 bg-bg-secondary border border-border rounded shadow-lg z-10">
+						<div class="absolute left-0 top-full mt-1 w-56 bg-bg-secondary/95 border border-border/70 rounded-lg shadow-[0_24px_36px_-30px_rgba(0,0,0,0.9)] z-10 backdrop-blur-md overflow-hidden">
 							{#if exportDatasets.length === 0}
 								<div class="px-3 py-2 text-xs text-text-muted">No datasets. Create one first.</div>
 							{:else}
 								{#each exportDatasets as ds (ds.id)}
 									<button
-										class="w-full text-left px-3 py-2 text-xs hover:bg-bg-tertiary transition-colors text-text-secondary"
+										class="w-full text-left px-3 py-2 text-xs hover:bg-bg-tertiary/75 transition-colors duration-150 text-text-secondary"
 										disabled={exportLoading}
 										onclick={() => doExport(ds.id)}
 									>
@@ -436,17 +436,17 @@
 			<!-- Send to Review -->
 				<div class="relative">
 					<button
-						class="px-2.5 py-1 text-[11px] bg-warning/10 text-warning border border-warning/20 rounded hover:bg-warning/20 transition-colors"
+						class="px-2.5 py-1 text-[11px] bg-warning/10 text-warning border border-warning/20 rounded-lg hover:bg-warning/20 transition-colors duration-150"
 						onclick={openReviewDropdown}
 					>Send to review</button>
 					{#if showReviewDropdown}
-						<div class="absolute left-0 top-full mt-1 w-56 bg-bg-secondary border border-border rounded shadow-lg z-10">
+						<div class="absolute left-0 top-full mt-1 w-56 bg-bg-secondary/95 border border-border/70 rounded-lg shadow-[0_24px_36px_-30px_rgba(0,0,0,0.9)] z-10 backdrop-blur-md overflow-hidden">
 							{#if reviewDatasets.length === 0}
 								<div class="px-3 py-2 text-xs text-text-muted">No datasets. Create one first.</div>
 							{:else}
 								{#each reviewDatasets as ds (ds.id)}
 									<button
-										class="w-full text-left px-3 py-2 text-xs hover:bg-bg-tertiary transition-colors text-text-secondary"
+										class="w-full text-left px-3 py-2 text-xs hover:bg-bg-tertiary/75 transition-colors duration-150 text-text-secondary"
 										disabled={reviewLoading}
 										onclick={() => doReview(ds.id)}
 									>
@@ -469,14 +469,14 @@
 				<div class="flex-1"></div>
 
 				<button
-					class="px-2.5 py-1 text-[11px] transition-colors border rounded {confirmDeleteSpan ? 'bg-danger/10 text-danger border-danger/30 font-semibold' : 'text-text-muted border-border hover:text-danger hover:border-danger/30'}"
+					class="px-2.5 py-1 text-[11px] transition-colors duration-150 border rounded-lg {confirmDeleteSpan ? 'bg-danger/10 text-danger border-danger/30 font-semibold' : 'text-text-muted border-border hover:text-danger hover:border-danger/30'}"
 					onclick={handleDeleteSpan}
 				>{confirmDeleteSpan ? 'Confirm?' : 'Delete span'}</button>
 			</div>
 
 			<!-- Complete/Fail forms -->
 			{#if showCompleteForm}
-				<form class="bg-bg-tertiary rounded p-3 space-y-2" onsubmit={(e) => { e.preventDefault(); handleComplete(); }}>
+				<form class="glass-soft rounded-xl p-3 space-y-2 border border-border/55" onsubmit={(e) => { e.preventDefault(); handleComplete(); }}>
 					<label for="complete-output" class="block text-xs text-text-muted">Output (optional JSON)</label>
 					<textarea id="complete-output" bind:value={completeOutput} rows={2} placeholder={'{"result": "success"}'}
 						class="w-full bg-bg border border-border rounded px-2 py-1.5 text-xs text-text font-mono placeholder:text-text-muted"></textarea>
@@ -488,7 +488,7 @@
 			{/if}
 
 			{#if showFailForm}
-				<form class="bg-bg-tertiary rounded p-3 space-y-2" onsubmit={(e) => { e.preventDefault(); handleFail(); }}>
+				<form class="glass-soft rounded-xl p-3 space-y-2 border border-border/55" onsubmit={(e) => { e.preventDefault(); handleFail(); }}>
 					<label for="fail-error" class="block text-xs text-text-muted">Error message</label>
 					<input id="fail-error" type="text" bind:value={failError} placeholder="What went wrong?"
 						class="w-full bg-bg border border-border rounded px-2 py-1.5 text-xs text-text placeholder:text-text-muted" />
@@ -508,36 +508,38 @@
 		{/if}
 
 		<!-- Tabs -->
-		<div class="flex border-b border-border shrink-0">
+		<div class="border-b border-border/55 shrink-0 px-3 py-2 bg-bg-secondary/20">
+			<div class="inline-flex items-center gap-1 bg-bg-tertiary/35 border border-border/50 rounded-xl p-1">
 			{#if isFileSpan}
 				<button
-					class="px-4 py-2 text-xs transition-colors border-b-2
-						{activeTab === 'file' ? 'border-accent text-text font-medium' : 'border-transparent text-text-muted hover:text-text-secondary'}"
+					class="px-3 py-1.5 text-xs rounded-lg transition-all duration-150
+						{activeTab === 'file' ? 'bg-accent/15 text-text font-medium border border-accent/35' : 'text-text-muted hover:text-text-secondary'}"
 					onclick={() => { activeTab = 'file'; loadFileContent(); }}
 				>File</button>
 			{/if}
 			<button
-				class="px-4 py-2 text-xs transition-colors border-b-2
-					{activeTab === 'input' ? 'border-accent text-text font-medium' : 'border-transparent text-text-muted hover:text-text-secondary'}"
+				class="px-3 py-1.5 text-xs rounded-lg transition-all duration-150
+					{activeTab === 'input' ? 'bg-accent/15 text-text font-medium border border-accent/35' : 'text-text-muted hover:text-text-secondary'}"
 				onclick={() => activeTab = 'input'}
 			>Input</button>
 			<button
-				class="px-4 py-2 text-xs transition-colors border-b-2
-					{activeTab === 'output' ? 'border-accent text-text font-medium' : 'border-transparent text-text-muted hover:text-text-secondary'}"
+				class="px-3 py-1.5 text-xs rounded-lg transition-all duration-150
+					{activeTab === 'output' ? 'bg-accent/15 text-text font-medium border border-accent/35' : 'text-text-muted hover:text-text-secondary'}"
 				onclick={() => activeTab = 'output'}
 			>Output</button>
 			<button
-				class="px-4 py-2 text-xs transition-colors border-b-2
-					{activeTab === 'attributes' ? 'border-accent text-text font-medium' : 'border-transparent text-text-muted hover:text-text-secondary'}"
+				class="px-3 py-1.5 text-xs rounded-lg transition-all duration-150
+					{activeTab === 'attributes' ? 'bg-accent/15 text-text font-medium border border-accent/35' : 'text-text-muted hover:text-text-secondary'}"
 				onclick={() => activeTab = 'attributes'}
 			>Attributes</button>
 			{#if childSpans.length > 0}
 				<button
-					class="px-4 py-2 text-xs transition-colors border-b-2
-						{activeTab === 'events' ? 'border-accent text-text font-medium' : 'border-transparent text-text-muted hover:text-text-secondary'}"
+					class="px-3 py-1.5 text-xs rounded-lg transition-all duration-150
+						{activeTab === 'events' ? 'bg-accent/15 text-text font-medium border border-accent/35' : 'text-text-muted hover:text-text-secondary'}"
 					onclick={() => activeTab = 'events'}
 				>Children <span class="text-text-muted">({childSpans.length})</span></button>
 			{/if}
+			</div>
 		</div>
 
 		<!-- Tab content -->
@@ -545,7 +547,7 @@
 			{#if activeTab === 'file' && isFileSpan}
 				<div class="p-4 space-y-3">
 					<!-- File header -->
-					<div class="flex items-center justify-between">
+					<div class="flex items-center justify-between glass-soft rounded-xl border border-border/50 px-3 py-2">
 						<div class="flex items-center gap-2 text-xs min-w-0">
 							<svg class="w-4 h-4 shrink-0 {span?.kind?.type === 'fs_read' ? 'text-accent' : 'text-success'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
 								<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
@@ -554,7 +556,7 @@
 						</div>
 						{#if fileContentLoaded}
 							<button
-								class="shrink-0 px-2 py-1 text-[11px] bg-bg-tertiary text-text-secondary border border-border rounded hover:bg-bg-secondary transition-colors"
+								class="shrink-0 px-2 py-1 text-[11px] bg-bg-tertiary text-text-secondary border border-border rounded-lg hover:bg-bg-secondary transition-colors duration-150"
 								onclick={() => {
 									const blob = new Blob([fileContent], { type: 'text/plain' });
 									const url = URL.createObjectURL(blob);
@@ -569,7 +571,7 @@
 					</div>
 
 					<!-- Metadata badges -->
-					<div class="flex items-center gap-2 flex-wrap text-[11px]">
+					<div class="flex items-center gap-2 flex-wrap text-[11px] glass-soft rounded-xl border border-border/50 px-3 py-2">
 						{#if fileHash}
 							<span class="inline-flex items-center rounded px-2 py-0.5 bg-bg-tertiary border border-border text-accent font-mono">{fileHash.slice(0, 12)}</span>
 						{/if}
@@ -590,15 +592,15 @@
 					{#if fileContentLoading}
 						<div class="text-text-muted text-xs text-center py-8">Loading file content...</div>
 					{:else if fileContentError}
-						<div class="bg-bg-tertiary border border-border rounded p-4 text-center">
+						<div class="glass-soft border border-border/55 rounded-xl p-4 text-center">
 							<p class="text-text-muted text-xs">{fileContentError}</p>
 						</div>
 					{:else if !fileHash}
-						<div class="bg-bg-tertiary border border-border rounded p-4 text-center">
+						<div class="glass-soft border border-border/55 rounded-xl p-4 text-center">
 							<p class="text-text-muted text-xs">No file version hash available</p>
 						</div>
 					{:else if fileContentLoaded}
-						<div class="bg-bg-tertiary border border-border rounded overflow-hidden">
+						<div class="glass-soft border border-border/55 rounded-xl overflow-hidden">
 							<pre class="p-3 text-xs font-mono text-text overflow-x-auto max-h-[60vh] overflow-y-auto whitespace-pre">{fileContent}</pre>
 						</div>
 					{/if}
@@ -610,9 +612,9 @@
 						<!-- Chat message view -->
 						<div class="space-y-2">
 							{#each inputMessages as msg, idx}
-								<div class="border rounded {roleBgColor(msg.role)}">
+								<div class="border rounded-xl {roleBgColor(msg.role)} transition-colors duration-150">
 									<button
-										class="w-full flex items-center gap-2 px-3 py-1.5 text-left"
+										class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-bg-secondary/25 transition-colors duration-150 rounded-t-xl"
 										onclick={() => toggleMessage(idx)}
 									>
 										<span class="text-[10px] font-bold uppercase tracking-wider {roleColor(msg.role)}">{msg.role}</span>
@@ -632,18 +634,18 @@
 						<!-- Raw JSON view -->
 						<div class="flex items-center justify-between mb-2">
 							<span class="text-[10px] text-text-muted uppercase tracking-wider">Span Input</span>
-							<div class="flex items-center bg-bg-tertiary rounded text-[10px]">
+							<div class="flex items-center bg-bg-tertiary/45 border border-border/55 rounded-md text-[10px] p-0.5">
 								<button
-									class="px-2 py-0.5 rounded transition-colors {inputViewMode === 'formatted' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text'}"
+									class="px-2 py-0.5 rounded transition-colors duration-150 {inputViewMode === 'formatted' ? 'bg-accent/20 text-accent border border-accent/30' : 'text-text-muted hover:text-text'}"
 									onclick={() => inputViewMode = 'formatted'}
 								>Formatted</button>
 								<button
-									class="px-2 py-0.5 rounded transition-colors {inputViewMode === 'raw' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text'}"
+									class="px-2 py-0.5 rounded transition-colors duration-150 {inputViewMode === 'raw' ? 'bg-accent/20 text-accent border border-accent/30' : 'text-text-muted hover:text-text'}"
 									onclick={() => inputViewMode = 'raw'}
 								>Raw</button>
 							</div>
 						</div>
-						<pre class="text-xs text-text bg-bg-tertiary rounded p-3 overflow-x-auto whitespace-pre-wrap font-mono break-words">{inputViewMode === 'formatted' ? formatJson(span.input) : formatJsonRaw(span.input)}</pre>
+						<pre class="text-xs text-text glass-soft rounded-xl border border-border/55 p-3 overflow-x-auto whitespace-pre-wrap font-mono break-words">{inputViewMode === 'formatted' ? formatJson(span.input) : formatJsonRaw(span.input)}</pre>
 					{:else}
 						<div class="text-text-muted text-xs text-center py-8">No input data</div>
 					{/if}
@@ -656,9 +658,9 @@
 						<div class="space-y-2">
 							{#each outputMessages as msg, idx}
 								{@const msgIdx = 1000 + idx}
-								<div class="border rounded {roleBgColor(msg.role)}">
+								<div class="border rounded-xl {roleBgColor(msg.role)} transition-colors duration-150">
 									<button
-										class="w-full flex items-center gap-2 px-3 py-1.5 text-left"
+										class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-bg-secondary/25 transition-colors duration-150 rounded-t-xl"
 										onclick={() => toggleMessage(msgIdx)}
 									>
 										<span class="text-[10px] font-bold uppercase tracking-wider {roleColor(msg.role)}">{msg.role}</span>
@@ -678,27 +680,27 @@
 						<!-- Raw JSON view -->
 						<div class="flex items-center justify-between mb-2">
 							<span class="text-[10px] text-text-muted uppercase tracking-wider">Span Output</span>
-							<div class="flex items-center bg-bg-tertiary rounded text-[10px]">
+							<div class="flex items-center bg-bg-tertiary/45 border border-border/55 rounded-md text-[10px] p-0.5">
 								<button
-									class="px-2 py-0.5 rounded transition-colors {outputViewMode === 'formatted' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text'}"
+									class="px-2 py-0.5 rounded transition-colors duration-150 {outputViewMode === 'formatted' ? 'bg-accent/20 text-accent border border-accent/30' : 'text-text-muted hover:text-text'}"
 									onclick={() => outputViewMode = 'formatted'}
 								>Formatted</button>
 								<button
-									class="px-2 py-0.5 rounded transition-colors {outputViewMode === 'raw' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text'}"
+									class="px-2 py-0.5 rounded transition-colors duration-150 {outputViewMode === 'raw' ? 'bg-accent/20 text-accent border border-accent/30' : 'text-text-muted hover:text-text'}"
 									onclick={() => outputViewMode = 'raw'}
 								>Raw</button>
 							</div>
 						</div>
-						<pre class="text-xs text-text bg-bg-tertiary rounded p-3 overflow-x-auto whitespace-pre-wrap font-mono break-words">{outputViewMode === 'formatted' ? formatJson(span.output) : formatJsonRaw(span.output)}</pre>
+						<pre class="text-xs text-text glass-soft rounded-xl border border-border/55 p-3 overflow-x-auto whitespace-pre-wrap font-mono break-words">{outputViewMode === 'formatted' ? formatJson(span.output) : formatJsonRaw(span.output)}</pre>
 					{:else}
 						<div class="text-text-muted text-xs text-center py-8">No output data</div>
 					{/if}
 				</div>
 
 			{:else if activeTab === 'attributes'}
-				<div class="p-4 space-y-4">
+				<div class="p-4 space-y-3">
 					<!-- Span identifiers -->
-					<div>
+					<div class="glass-soft rounded-xl border border-border/55 p-3">
 						<div class="text-[10px] text-text-muted uppercase tracking-wider mb-2">Identifiers</div>
 						<div class="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
 							<div>
@@ -721,7 +723,7 @@
 					</div>
 
 					<!-- Timing -->
-					<div>
+					<div class="glass-soft rounded-xl border border-border/55 p-3">
 						<div class="text-[10px] text-text-muted uppercase tracking-wider mb-2">Timing</div>
 						<div class="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
 							<div>
@@ -745,7 +747,7 @@
 
 					<!-- Kind metadata -->
 					{#if Object.keys(meta).length > 0}
-						<div>
+						<div class="glass-soft rounded-xl border border-border/55 p-3">
 							<div class="text-[10px] text-text-muted uppercase tracking-wider mb-2">{spanKindLabel(span)}</div>
 							<div class="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
 								{#each Object.entries(meta) as [key, value]}
@@ -760,9 +762,9 @@
 
 					<!-- Custom kind attributes -->
 					{#if span.kind?.type === 'custom' && span.kind.attributes && Object.keys(span.kind.attributes).length > 0}
-						<div>
+						<div class="glass-soft rounded-xl border border-border/55 p-3">
 							<div class="text-[10px] text-text-muted uppercase tracking-wider mb-2">Custom Attributes</div>
-							<pre class="text-xs text-text bg-bg-tertiary rounded p-3 overflow-x-auto whitespace-pre-wrap font-mono">{JSON.stringify(span.kind.attributes, null, 2)}</pre>
+							<pre class="text-xs text-text bg-bg-tertiary/55 border border-border/45 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap font-mono">{JSON.stringify(span.kind.attributes, null, 2)}</pre>
 						</div>
 					{/if}
 				</div>
@@ -774,7 +776,7 @@
 							{#each childSpans as child (child.id)}
 								{@const cStatus = spanStatus(child)}
 								{@const cDuration = spanDurationMs(child)}
-								<div class="flex items-center gap-2 px-3 py-2 rounded bg-bg-tertiary text-xs">
+								<div class="flex items-center gap-2 px-3 py-2 rounded-lg bg-bg-tertiary/60 border border-border/45 text-xs hover:bg-bg-tertiary/80 transition-colors duration-150">
 									<SpanKindIcon span={child} />
 									<span class="text-text font-medium truncate flex-1">{child.name}</span>
 									{#if child.kind?.type === 'llm_call'}

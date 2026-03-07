@@ -310,9 +310,9 @@
 	const parentOptions = $derived(spans.map((s) => ({ id: s.id, name: s.name })));
 </script>
 
-<div class="h-[calc(100vh-5rem)] flex flex-col">
+<div class="h-[calc(100vh-8rem)] flex flex-col gap-3">
 	<!-- Header -->
-	<div class="flex items-center gap-3 px-4 py-2 shrink-0 border-b border-border">
+	<div class="flex items-center gap-3 px-4 py-2.5 shrink-0 glass-surface rounded-2xl border border-border/70 shadow-[0_24px_44px_-34px_rgba(5,14,32,0.9)]">
 		<a href="/traces" class="text-text-secondary hover:text-text text-sm">&larr; Traces</a>
 		<span class="text-text-muted">/</span>
 		<h1 class="text-sm font-bold font-mono">{shortId(traceId)}</h1>
@@ -326,7 +326,7 @@
 			</span>
 
 			<!-- Summary stats -->
-			<div class="flex items-center gap-1.5 text-xs text-text-secondary font-mono">
+			<div class="flex items-center gap-1.5 text-xs text-text-secondary font-mono bg-bg-tertiary/35 rounded-lg px-2.5 py-1 border border-border/45">
 				{#if totalDuration !== null}
 					<span class="inline-flex items-center gap-1">
 						<svg class="w-3.5 h-3.5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
@@ -353,17 +353,17 @@
 
 			<div class="flex-1"></div>
 			<button
-				class="px-3 py-1 text-xs bg-accent/10 text-accent border border-accent/20 rounded hover:bg-accent/20 transition-colors"
+				class="px-3 py-1 text-xs bg-accent/10 text-accent border border-accent/20 rounded-lg hover:bg-accent/20 transition-colors duration-150"
 				onclick={() => { showAddSpan = !showAddSpan; if (!showAddSpan) newSpanParent = ''; }}
 			>
 				{showAddSpan ? 'Cancel' : '+ Span'}
 			</button>
 			<button
-				class="px-3 py-1 text-xs bg-bg-tertiary text-text-secondary border border-border rounded hover:text-text transition-colors"
+				class="px-3 py-1 text-xs bg-bg-tertiary/70 text-text-secondary border border-border rounded-lg hover:text-text hover:bg-bg-tertiary transition-colors duration-150"
 				onclick={handleExportTrace}
 			>Export</button>
 			<button
-				class="px-3 py-1 text-xs transition-colors border rounded {confirmDeleteTrace ? 'bg-danger/10 text-danger border-danger/30 font-semibold' : 'bg-bg-tertiary text-text-muted border-border hover:text-danger hover:border-danger/30'}"
+				class="px-3 py-1 text-xs transition-colors duration-150 border rounded-lg {confirmDeleteTrace ? 'bg-danger/10 text-danger border-danger/30 font-semibold' : 'bg-bg-tertiary/70 text-text-muted border-border hover:text-danger hover:border-danger/30'}"
 				onclick={handleDeleteTrace}
 			>{confirmDeleteTrace ? 'Confirm?' : 'Delete'}</button>
 		{/if}
@@ -372,7 +372,7 @@
 	<!-- Add span form (slides down) -->
 	{#if showAddSpan}
 		<form
-			class="px-4 py-3 bg-bg-secondary border-b border-border space-y-3 shrink-0"
+			class="px-4 py-3 glass-soft rounded-2xl space-y-3 shrink-0"
 			onsubmit={(e) => { e.preventDefault(); handleAddSpan(); }}
 		>
 			<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -443,13 +443,16 @@
 		<!-- Split panel: tree left, detail right -->
 		<div
 			bind:this={containerEl}
-			class="flex-1 min-h-0 flex"
+			class="flex-1 min-h-0 flex gap-3"
 			class:select-none={isDragging}
 		>
 			<!-- Left panel: search + span tree -->
-			<div class="min-h-0 overflow-hidden flex flex-col" style="width: {splitPercent}%">
+			<div class="min-h-0 overflow-hidden flex flex-col glass-surface rounded-2xl border border-border/60 shadow-[0_28px_56px_-36px_rgba(5,14,32,0.9)]" style="width: {splitPercent}%">
+				<div class="px-3 py-2 border-b border-border/55 bg-gradient-to-r from-bg-secondary/70 via-bg-secondary/45 to-transparent">
+					<p class="text-[10px] uppercase tracking-[0.16em] text-text-muted">Trace timeline</p>
+				</div>
 				<!-- Search bar -->
-				<div class="relative shrink-0 border-b border-border bg-bg-secondary">
+				<div class="relative shrink-0 border-b border-border/55 bg-bg-secondary/25">
 					<div class="flex items-center px-3 py-1.5 gap-2">
 						<svg class="w-3.5 h-3.5 text-text-muted shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 							<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
@@ -465,9 +468,9 @@
 						/>
 						{#if searchQuery}
 							<button
-								class="text-text-muted hover:text-text text-xs shrink-0"
-								onclick={() => { searchQuery = ''; searchInputEl?.focus(); }}
-								aria-label="Clear search"
+							class="text-text-muted hover:text-text text-xs shrink-0 transition-colors duration-150"
+							onclick={() => { searchQuery = ''; searchInputEl?.focus(); }}
+							aria-label="Clear search"
 							>
 								<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 									<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -478,10 +481,10 @@
 
 					<!-- Autocomplete suggestions -->
 					{#if searchFocused && searchQuery.trim() && searchSuggestions.length > 0}
-						<div class="absolute left-0 right-0 top-full z-20 bg-bg-secondary border border-border border-t-0 rounded-b-lg shadow-lg overflow-hidden">
+						<div class="absolute left-0 right-0 top-full z-20 bg-bg-secondary/95 border border-border border-t-0 rounded-b-lg shadow-[0_20px_36px_-30px_rgba(0,0,0,0.9)] overflow-hidden backdrop-blur-sm">
 							{#each searchSuggestions as suggestion}
 								<button
-									class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-bg-tertiary transition-colors"
+									class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-bg-tertiary/85 transition-colors duration-150"
 									onmousedown={() => applySuggestion(suggestion.label)}
 								>
 									<span class="text-[10px] uppercase tracking-wider text-text-muted/60 w-12 shrink-0">{suggestion.category}</span>
@@ -503,17 +506,20 @@
 			<!-- Resizable divider -->
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
-				class="w-1 shrink-0 cursor-col-resize relative group"
+				class="w-1.5 shrink-0 cursor-col-resize relative group"
 				onpointerdown={onDividerPointerDown}
 				onpointermove={onDividerPointerMove}
 				onpointerup={onDividerPointerUp}
 			>
-				<div class="absolute inset-y-0 -left-0.5 -right-0.5 bg-border group-hover:bg-accent/50 transition-colors"
+				<div class="absolute inset-y-1 -left-0.5 -right-0.5 bg-border/45 rounded-full group-hover:bg-accent/55 transition-colors duration-150"
 					class:bg-accent={isDragging}></div>
 			</div>
 
 			<!-- Right panel: span detail -->
-			<div class="flex-1 min-h-0 overflow-y-auto bg-bg">
+			<div class="flex-1 min-h-0 overflow-y-auto glass-surface rounded-2xl border border-border/60 shadow-[0_28px_56px_-36px_rgba(5,14,32,0.9)]">
+				<div class="px-3 py-2 border-b border-border/55 bg-gradient-to-r from-bg-secondary/70 via-bg-secondary/45 to-transparent sticky top-0 z-10 backdrop-blur-md">
+					<p class="text-[10px] uppercase tracking-[0.16em] text-text-muted">Span inspection</p>
+				</div>
 				{#if selectedSpan}
 					<SpanDetail span={selectedSpan} {onSpanAction} allSpans={spans} />
 				{:else}

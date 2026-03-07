@@ -10,7 +10,7 @@
 
 	let stats: Stats = $state({ trace_count: 0, span_count: 0 });
 	let connected = $state(false);
-	let authConfig: AuthConfig = $state({ mode: 'local', features: [] });
+	let authConfig: AuthConfig = $state({ mode: 'cloud', features: [] });
 	let authMe: AuthMe | null = $state(null);
 	let authChecked = $state(false);
 	let apiUnreachable = $state(false);
@@ -31,19 +31,38 @@
 
 	// Cmd+K search modal
 	let searchOpen = $state(false);
+	let mobileNavOpen = $state(false);
+	let navCollapsed = $state(false);
+	type ThemeMode = 'dark' | 'light';
+	let theme: ThemeMode = $state('dark');
+
+	const THEME_KEY = 'traceway:theme';
 
 	function handleGlobalKeydown(e: KeyboardEvent) {
 		if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
 			e.preventDefault();
 			searchOpen = !searchOpen;
 		}
+		if (e.key === 'Escape') {
+			mobileNavOpen = false;
+		}
+	}
+
+	function applyTheme(nextTheme: ThemeMode) {
+		theme = nextTheme;
+		document.documentElement.dataset.theme = nextTheme;
+		localStorage.setItem(THEME_KEY, nextTheme);
+	}
+
+	function toggleTheme() {
+		applyTheme(theme === 'dark' ? 'light' : 'dark');
 	}
 
 	// Auth pages don't need sidebar or auth check
 	const authPages = ['/login', '/signup', '/accept-invite', '/forgot-password', '/reset-password'];
 	const isAuthPage = $derived(authPages.includes(page.url.pathname));
 	const isCloudMode = $derived(authConfig.mode === 'cloud');
-	const isAuthenticated = $derived(authMe !== null || authConfig.mode === 'local');
+	const isAuthenticated = $derived(authMe !== null);
 	const needsLogin = $derived(authChecked && isCloudMode && !isAuthPage && !isAuthenticated && !apiUnreachable);
 
 	$effect(() => {
@@ -55,12 +74,20 @@
 	onMount(() => {
 		document.addEventListener('keydown', handleGlobalKeydown);
 
-		// Load auth config first, then conditionally check auth
+		const savedTheme = localStorage.getItem(THEME_KEY);
+		if (savedTheme === 'light' || savedTheme === 'dark') {
+			applyTheme(savedTheme);
+		} else {
+			const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+			applyTheme(prefersLight ? 'light' : 'dark');
+		}
+
+		// Load auth config first, then check auth for non-auth pages
 		getAuthConfig()
 			.then(async (c) => {
 				authConfig = c;
 
-				if (c.mode === 'cloud' && !isAuthPage) {
+				if (!isAuthPage) {
 					try {
 						authMe = await getAuthMe();
 						// Load projects for the org
@@ -79,11 +106,8 @@
 				authChecked = true;
 			})
 			.catch(() => {
-				// If VITE_API_URL was explicitly set (deployed platform), show error
-				// instead of silently falling through to local mode
-				if (import.meta.env.VITE_API_URL) {
-					apiUnreachable = true;
-				}
+				// Fail closed: never fall through into an unauthenticated app shell.
+				apiUnreachable = true;
 				authChecked = true;
 			});
 
@@ -202,7 +226,7 @@
 				label: 'Observe',
 				items: [
 					{ href: '/traces', label: 'Traces', icon: 'trace' },
-					{ href: '/query', label: 'Query', icon: 'query' },
+					{ href: '/query', label: 'Search', icon: 'query' },
 					{ href: '/analytics', label: 'Analytics', icon: 'analysis' },
 				]
 			},
@@ -262,35 +286,70 @@
 		<div class="text-text-muted text-sm">Redirecting to login...</div>
 	</div>
 {:else}
-	<div class="min-h-screen flex">
+	<div class="min-h-screen relative">
+		{#if mobileNavOpen}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				class="fixed inset-0 z-40 bg-black/45 backdrop-blur-[1px] transition-opacity duration-250 lg:hidden"
+				onclick={() => (mobileNavOpen = false)}
+				onkeydown={(e) => e.key === 'Escape' && (mobileNavOpen = false)}
+				aria-label="Close navigation overlay"
+			></div>
+		{/if}
+
 		<!-- Left sidebar -->
-		<aside class="w-48 shrink-0 border-r border-border bg-bg-secondary flex flex-col">
+		<aside class="fixed z-50 left-3 top-3 bottom-3 w-72 max-w-[calc(100vw-1.5rem)] glass-surface rounded-2xl flex flex-col shadow-2xl shadow-black/25 transition-[transform,width] duration-300 ease-out lg:translate-x-0 {mobileNavOpen ? 'translate-x-0' : '-translate-x-[120%]'} {navCollapsed ? 'lg:w-20' : 'lg:w-60'}">
 			<!-- Logo -->
-			<div class="px-4 py-4 border-b border-border">
-				<a href="/" class="text-text font-bold text-base tracking-tight hover:text-accent transition-colors">
+			<div class="px-4 py-3 border-b border-border/60 flex items-center gap-2">
+				<a href="/" class="text-text font-bold text-base tracking-tight hover:text-accent transition-colors flex-1">
 					Traceway
 				</a>
+				<button
+					onclick={() => (navCollapsed = !navCollapsed)}
+					class="hidden lg:flex w-7 h-7 items-center justify-center rounded-md text-text-muted hover:text-text hover:bg-bg-tertiary/50 motion-safe:transition-colors motion-safe:duration-200"
+					title={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+					aria-label={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+				>
+					<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+					</svg>
+				</button>
+				<button
+					onclick={() => (mobileNavOpen = false)}
+					class="lg:hidden px-2.5 h-8 flex items-center justify-center gap-1 rounded-md border border-border/60 bg-bg-tertiary/40 text-text-muted hover:text-text hover:border-border motion-safe:transition-colors motion-safe:duration-200"
+					aria-label="Close navigation"
+					title="Close navigation"
+				>
+					<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+					</svg>
+					<span class="text-[11px] font-medium">Close</span>
+				</button>
 			</div>
 
 			<!-- Nav items -->
-			<nav class="flex-1 py-2 px-2">
+			<nav class="flex-1 py-2 px-2 overflow-y-auto">
 				{#each navSections() as section, sIdx}
 					{#if sIdx > 0}
 						<div class="my-2"></div>
 					{/if}
 
-					{#if section.label}
-						<div class="px-3 pt-2 pb-1 text-[10px] font-semibold text-text-muted/50 uppercase tracking-widest">{section.label}</div>
+					{#if section.label && !navCollapsed}
+						<div class="px-3 pt-2 pb-1 text-[10px] font-semibold text-text-muted/50 uppercase tracking-[0.18em]">{section.label}</div>
 					{/if}
 
 					<div class="space-y-0.5">
 						{#each section.items as item}
 							<a
 								href={item.href}
-								class="flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] transition-colors
+								data-active={isActive(item.href)}
+								class="sidebar-link flex items-center min-h-9 rounded-lg text-[13px] border hover-lift
+									{navCollapsed ? 'justify-center px-2.5' : 'gap-2.5 px-3'}
 									{isActive(item.href)
-										? 'bg-bg-tertiary text-text'
-										: 'text-text-secondary hover:text-text hover:bg-bg-tertiary/50'}"
+										? 'bg-bg-tertiary/75 text-text border-border/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]'
+										: 'text-text-secondary border-transparent hover:text-text hover:bg-bg-tertiary/40'}"
+								title={navCollapsed ? item.label : undefined}
+								aria-label={item.label}
 							>
 							<!-- Icons -->
 							{#if item.icon === 'dashboard'}
@@ -339,9 +398,14 @@
 								<path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15a2.25 2.25 0 0 1 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" />
 							</svg>
 						{/if}
-							{item.label}
-							{#if item.icon === 'review' && pendingReviewCount > 0}
+							{#if !navCollapsed}
+								{item.label}
+							{/if}
+							{#if item.icon === 'review' && pendingReviewCount > 0 && !navCollapsed}
 								<span class="ml-auto px-1.5 py-0.5 rounded bg-warning/20 text-warning text-[10px] leading-none">{pendingReviewCount}</span>
+							{/if}
+							{#if item.icon === 'review' && pendingReviewCount > 0 && navCollapsed}
+								<span class="absolute top-1 right-1.5 min-w-4 h-4 px-1 rounded-full bg-warning/20 text-warning text-[9px] leading-4 text-center">{pendingReviewCount}</span>
 							{/if}
 							</a>
 						{/each}
@@ -350,21 +414,29 @@
 			</nav>
 
 			<!-- Status footer -->
-			<div class="px-3 py-3 border-t border-border space-y-2.5">
+			<div class="px-3 py-3 border-t border-border/60 space-y-2.5">
 				{#if isCloudMode && projects.length > 0}
 					<!-- Project switcher -->
 					<div class="relative">
 						<button
 							onclick={() => projectDropdownOpen = !projectDropdownOpen}
-							class="w-full flex items-center justify-between gap-1.5 px-2 py-1.5 rounded border border-border bg-bg text-left text-xs hover:border-text-muted/40 transition-colors cursor-pointer"
+							class="w-full flex items-center {navCollapsed ? 'justify-center' : 'justify-between'} gap-1.5 px-2 py-1.5 rounded border border-border bg-bg text-left text-xs hover:border-text-muted/40 motion-safe:transition-colors motion-safe:duration-200 cursor-pointer"
+							title={navCollapsed ? (currentProject?.name ?? 'Select project') : undefined}
+							aria-label="Project switcher"
 						>
 							<div class="flex items-center gap-1.5 min-w-0">
 								<span class="w-2 h-2 rounded-sm bg-accent shrink-0"></span>
-								<span class="truncate text-text">{currentProject?.name ?? 'Select project'}</span>
+								{#if !navCollapsed}
+									<span class="truncate text-text">{currentProject?.name ?? 'Select project'}</span>
+								{:else}
+									<span class="text-text text-[10px] font-semibold tracking-wide">{(currentProject?.name ?? 'Project').slice(0, 2).toUpperCase()}</span>
+								{/if}
 							</div>
-							<svg class="w-3 h-3 shrink-0 text-text-muted transition-transform {projectDropdownOpen ? 'rotate-180' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-								<path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-							</svg>
+							{#if !navCollapsed}
+								<svg class="w-3 h-3 shrink-0 text-text-muted transition-transform {projectDropdownOpen ? 'rotate-180' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+									<path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+								</svg>
+							{/if}
 						</button>
 
 						{#if projectDropdownOpen}
@@ -391,11 +463,12 @@
 												<span class="truncate">{project.name}</span>
 											</button>
 											{#if project.slug !== 'default'}
-												<button
-													onclick={(e) => { e.stopPropagation(); handleDeleteProject(project.id, project.name); }}
-													class="px-2 py-1.5 text-text-muted/0 group-hover:text-text-muted hover:!text-error transition-colors cursor-pointer"
-													title="Delete project"
-												>
+										<button
+											onclick={(e) => { e.stopPropagation(); handleDeleteProject(project.id, project.name); }}
+											class="px-2 py-1.5 text-text-muted/0 group-hover:text-text-muted hover:!text-error transition-colors cursor-pointer"
+											title="Delete project"
+											aria-label={`Delete project ${project.name}`}
+										>
 													<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
 														<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
 													</svg>
@@ -422,57 +495,91 @@
 				{/if}
 
 				<!-- Stats -->
-				<div class="flex items-center gap-2 text-[11px] text-text-muted">
+				<div class="flex items-center gap-2 text-[11px] text-text-muted {navCollapsed ? 'justify-center' : ''}" title={navCollapsed ? `${stats.trace_count} traces / ${stats.span_count} spans` : undefined}>
 					<span class="w-1.5 h-1.5 rounded-full {connected ? 'bg-success' : 'bg-text-muted'}"></span>
-					<span>{stats.trace_count} traces</span>
-					<span class="text-text-muted/40">/</span>
-					<span>{stats.span_count} spans</span>
+					{#if !navCollapsed}
+						<span>{stats.trace_count} traces</span>
+						<span class="text-text-muted/40">/</span>
+						<span>{stats.span_count} spans</span>
+					{:else}
+						<span class="text-[10px] text-text-secondary">{connected ? 'Live' : 'Idle'}</span>
+					{/if}
 				</div>
 
 				<!-- Docs & Support -->
-				<div class="flex items-center gap-3">
+				<div class="flex items-center {navCollapsed ? 'justify-center gap-1.5' : 'gap-3'}">
 					<a
 						href="https://docs.traceway.ai"
 						target="_blank"
 						rel="noopener noreferrer"
-						class="flex items-center gap-1.5 text-[11px] text-text-muted hover:text-accent transition-colors"
+						class="flex items-center {navCollapsed ? 'justify-center w-7 h-7 rounded-md hover:bg-bg-tertiary/45' : 'gap-1.5'} text-[11px] text-text-muted hover:text-accent motion-safe:transition-colors motion-safe:duration-200"
+						title="Docs"
+						aria-label="Documentation"
 					>
 						<svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
 							<path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
 						</svg>
-						Docs
+						{#if !navCollapsed}Docs{/if}
 					</a>
 					<a
 						href="mailto:support@traceway.ai"
-						class="flex items-center gap-1.5 text-[11px] text-text-muted hover:text-accent transition-colors"
+						class="flex items-center {navCollapsed ? 'justify-center w-7 h-7 rounded-md hover:bg-bg-tertiary/45' : 'gap-1.5'} text-[11px] text-text-muted hover:text-accent motion-safe:transition-colors motion-safe:duration-200"
+						title="Support"
+						aria-label="Support"
 					>
 						<svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
 							<path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />
 						</svg>
-						Support
+						{#if !navCollapsed}Support{/if}
 					</a>
 				</div>
 
 				{#if isCloudMode && authMe}
 					<button
 						onclick={handleLogout}
-						class="w-full px-2 py-1.5 rounded border border-border bg-bg text-[11px] text-text-muted hover:text-text hover:border-text-muted/40 transition-colors cursor-pointer text-left"
+					class="w-full px-2 py-1.5 rounded-lg border border-border bg-bg/70 text-[11px] text-text-muted hover:text-text hover:border-text-muted/40 motion-safe:transition-colors motion-safe:duration-200 cursor-pointer text-left {navCollapsed ? 'text-center' : ''}"
+					title="Sign out"
+					aria-label="Sign out"
 					>
-						Sign out
+						{navCollapsed ? 'Out' : 'Sign out'}
 					</button>
 				{/if}
 
 				<!-- Branding -->
-				<div class="text-[10px] text-text-muted/40 tracking-wide">
-					TracewayAI &middot; 2026
+				<div class="text-[10px] text-text-muted/40 tracking-wide {navCollapsed ? 'text-center' : ''}">
+					{navCollapsed ? 'TW 2026' : 'TracewayAI \u00b7 2026'}
 				</div>
 			</div>
 		</aside>
 
 		<!-- Main content -->
-		<main class="flex-1 min-w-0 overflow-auto">
-			<div class="p-6">
-				{@render children()}
+		<main class="min-h-screen min-w-0 overflow-auto pl-0 lg:pl-64 transition-[padding] duration-200 {navCollapsed ? 'lg:pl-24' : 'lg:pl-64'}">
+			<div class="p-3 lg:p-4 space-y-3">
+				<div class="glass-surface rounded-2xl px-2.5 sm:px-3.5 py-2 flex items-center gap-2 sm:gap-2.5 sticky top-3 z-30">
+					<button
+						onclick={() => (mobileNavOpen = true)}
+						class="lg:hidden w-8 h-8 rounded-lg border border-border/60 bg-bg-tertiary/60 text-text-muted hover:text-text hover:border-border motion-safe:transition-colors motion-safe:duration-200"
+						aria-label="Open navigation"
+						title="Open navigation"
+					>
+						<svg class="w-4 h-4 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5m-16.5 5.25h16.5m-16.5 5.25h16.5" />
+						</svg>
+					</button>
+					<div class="text-[11px] sm:text-xs text-text-muted hidden sm:block tracking-wide">{page.url.pathname === '/' ? 'Dashboard' : page.url.pathname}</div>
+					<div class="flex-1"></div>
+					<button
+						onclick={toggleTheme}
+						class="px-2.5 py-1.5 rounded-lg border border-border/60 bg-bg-tertiary/50 text-xs text-text-secondary hover:text-text hover:border-border motion-safe:transition-[color,border-color,background-color,transform] motion-safe:duration-200 motion-safe:hover:-translate-y-[1px]"
+						aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+						title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+					>
+						{theme === 'dark' ? 'Light mode' : 'Dark mode'}
+					</button>
+				</div>
+				<div class="glass-soft rounded-2xl p-4 lg:p-5">
+					{@render children()}
+				</div>
 			</div>
 		</main>
 	</div>
