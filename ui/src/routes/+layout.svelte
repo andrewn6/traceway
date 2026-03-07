@@ -586,7 +586,7 @@
 		<!-- Main content -->
 		<main class="min-h-screen min-w-0 overflow-auto pl-0 lg:pl-[17.25rem] transition-[padding] duration-200 {navCollapsed ? 'lg:pl-[7.25rem]' : 'lg:pl-[17.25rem]'}">
 			<div class="p-3 lg:p-4 space-y-3">
-				<div class="glass-surface rounded-2xl px-2.5 sm:px-3.5 py-2 flex items-center gap-2 sm:gap-2.5 sticky top-3 z-30">
+				<div class="app-toolbar-shell rounded-2xl px-2.5 sm:px-3.5 py-2 flex items-center gap-2 sm:gap-2.5 sticky top-3 z-30">
 					<button
 						onclick={() => (mobileNavOpen = true)}
 						class="lg:hidden w-8 h-8 rounded-lg border border-border/60 bg-bg-tertiary/60 text-text-muted hover:text-text hover:border-border motion-safe:transition-colors motion-safe:duration-200"
@@ -608,7 +608,7 @@
 						{theme === 'system' ? 'Theme: System' : theme === 'dark' ? 'Theme: Dark' : 'Theme: Light'}
 					</button>
 				</div>
-				<div class="rounded-2xl p-3 lg:p-4">
+				<div class="app-page-shell rounded-2xl p-3 lg:p-4">
 					{@render children()}
 				</div>
 			</div>

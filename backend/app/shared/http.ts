@@ -1,14 +1,22 @@
 import { IncomingMessage, ServerResponse } from "node:http";
 
-import { meFromSessionToken, parseCookie } from "../auth/service";
+import { defaultScopeForLocal, meFromSessionToken, parseCookie, scopeFromApiKey } from "../auth/service";
 
 type Session = NonNullable<Awaited<ReturnType<typeof meFromSessionToken>>>;
 export type RequestScope = {
   org_id: string;
   project_id: string;
   user_id?: string;
-  principal: "session" | "daemon";
+  principal: "session" | "daemon" | "api_key";
 };
+
+function bearerToken(req: IncomingMessage): string | undefined {
+  const auth = req.headers.authorization;
+  const raw = typeof auth === "string" ? auth : Array.isArray(auth) ? auth[0] : undefined;
+  if (!raw) return undefined;
+  const m = raw.match(/^Bearer\s+(.+)$/i);
+  return m?.[1]?.trim();
+}
 
 function allowOrigin(origin: string | undefined): string | null {
   if (!origin) return null;
@@ -80,6 +88,30 @@ export async function requireSession(req: IncomingMessage, res: ServerResponse):
 }
 
 export async function requireScope(req: IncomingMessage, res: ServerResponse): Promise<RequestScope | null> {
+  const bearer = bearerToken(req);
+  const apiKeyScope = await scopeFromApiKey(bearer);
+  if (apiKeyScope) {
+    return {
+      org_id: apiKeyScope.org_id,
+      project_id: apiKeyScope.project_id,
+      principal: "api_key",
+    };
+  }
+
+  const bootstrapApiKey = process.env.TRACEWAY_API_KEY?.trim();
+  if (bootstrapApiKey && bearer && bearer === bootstrapApiKey) {
+    const scope = await defaultScopeForLocal();
+    if (!scope) {
+      json(res, 401, { error: "No project scope available for TRACEWAY_API_KEY" });
+      return null;
+    }
+    return {
+      org_id: scope.org_id,
+      project_id: scope.project_id,
+      principal: "api_key",
+    };
+  }
+
   const expected = process.env.TRACEWAY_BACKEND_TOKEN ?? process.env.TRACEWAY_CONTROL_PLANE_TOKEN ?? "";
   const provided = req.headers["x-traceway-control-token"];
   const token = typeof provided === "string" ? provided.trim() : Array.isArray(provided) ? (provided[0] ?? "").trim() : "";

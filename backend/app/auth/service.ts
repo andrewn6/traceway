@@ -457,6 +457,79 @@ export async function deleteApiKey(token: string | undefined, id: string): Promi
   return deleted.length > 0;
 }
 
+export async function scopeFromApiKey(rawToken: string | undefined): Promise<{ org_id: string; project_id: string } | null> {
+  const token = rawToken?.trim();
+  if (!token) return null;
+
+  const [apiKey] = await db
+    .select({ id: apiKeys.id, orgId: apiKeys.orgId })
+    .from(apiKeys)
+    .where(eq(apiKeys.keyHash, hashToken(token)))
+    .limit(1);
+
+  if (!apiKey) return null;
+
+  await db
+    .update(apiKeys)
+    .set({ lastUsedAt: new Date() })
+    .where(eq(apiKeys.id, apiKey.id));
+
+  const [defaultProject] = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(and(eq(projects.orgId, apiKey.orgId), eq(projects.isDefault, true)))
+    .limit(1);
+
+  if (defaultProject) {
+    return { org_id: apiKey.orgId, project_id: defaultProject.id };
+  }
+
+  const [anyProject] = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(eq(projects.orgId, apiKey.orgId))
+    .limit(1);
+
+  if (!anyProject) return null;
+  return { org_id: apiKey.orgId, project_id: anyProject.id };
+}
+
+export async function defaultScopeForLocal(): Promise<{ org_id: string; project_id: string } | null> {
+  const envOrgId = process.env.TRACEWAY_ORG_ID?.trim();
+  const envProjectId = process.env.TRACEWAY_PROJECT_ID?.trim();
+
+  if (envOrgId && envProjectId) {
+    return { org_id: envOrgId, project_id: envProjectId };
+  }
+
+  if (envOrgId) {
+    const [projectInOrg] = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.orgId, envOrgId))
+      .limit(1);
+    if (projectInOrg) return { org_id: envOrgId, project_id: projectInOrg.id };
+  }
+
+  const [defaultProject] = await db
+    .select({ id: projects.id, orgId: projects.orgId })
+    .from(projects)
+    .where(eq(projects.isDefault, true))
+    .limit(1);
+
+  if (defaultProject) {
+    return { org_id: defaultProject.orgId, project_id: defaultProject.id };
+  }
+
+  const [firstProject] = await db
+    .select({ id: projects.id, orgId: projects.orgId })
+    .from(projects)
+    .limit(1);
+
+  if (!firstProject) return null;
+  return { org_id: firstProject.orgId, project_id: firstProject.id };
+}
+
 export async function createInvite(token: string | undefined, email: string, role?: string): Promise<InviteInfo | null> {
   const me = await meFromSessionToken(token);
   if (!me || !me.user_id) return null;
