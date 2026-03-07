@@ -14,13 +14,14 @@
 	--color-warning: #f59e0b;
 	--color-danger: #ef4444;
 	--color-purple-400: #a78bfa;
+	--font-sans: 'SF Pro Text', 'Avenir Next', 'Segoe UI Variable', 'Segoe UI', 'Helvetica Neue', sans-serif;
 	--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
 }
 
 html {
 	background-color: var(--color-bg);
 	color: var(--color-text);
-	font-family: var(--font-mono);
+	font-family: var(--font-sans);
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
 }
@@ -59,11 +60,11 @@ body::before {
 }
 
 .glass-surface {
-	background: color-mix(in oklab, var(--color-bg-secondary) 72%, transparent);
-	backdrop-filter: blur(16px);
-	-webkit-backdrop-filter: blur(16px);
-	border: 1px solid color-mix(in oklab, var(--color-border) 80%, transparent);
-	box-shadow: 0 18px 46px -30px rgba(3, 11, 28, 0.65);
+	background: color-mix(in oklab, var(--color-bg-secondary) 66%, transparent);
+	backdrop-filter: blur(18px);
+	-webkit-backdrop-filter: blur(18px);
+	border: 1px solid color-mix(in oklab, var(--color-border) 68%, transparent);
+	box-shadow: 0 20px 44px -32px rgba(3, 11, 28, 0.7);
 }
 
 html[data-theme='light'] .glass-surface {
@@ -71,8 +72,10 @@ html[data-theme='light'] .glass-surface {
 }
 
 .glass-soft {
-	background: color-mix(in oklab, var(--color-bg-secondary) 84%, transparent);
-	border: 1px solid color-mix(in oklab, var(--color-border) 65%, transparent);
+	background: color-mix(in oklab, var(--color-bg-secondary) 50%, transparent);
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
+	border: 1px solid color-mix(in oklab, var(--color-border) 42%, transparent);
 }
 
 .query-float {
@@ -93,12 +96,46 @@ html[data-theme='light'] .glass-surface {
 	box-shadow: 0 22px 52px -32px rgba(4, 14, 38, 0.78);
 }
 
+.query-command-shell {
+	background:
+		linear-gradient(180deg, color-mix(in oklab, var(--color-accent) 8%, transparent), transparent 34%),
+		color-mix(in oklab, var(--color-bg-secondary) 74%, transparent);
+	backdrop-filter: blur(18px);
+	-webkit-backdrop-filter: blur(18px);
+	border: 1px solid color-mix(in oklab, var(--color-border) 84%, transparent);
+	box-shadow:
+		0 20px 44px -30px rgba(4, 14, 38, 0.9),
+		0 2px 0 0 color-mix(in oklab, var(--color-accent) 18%, transparent) inset;
+}
+
 .query-result-shell {
 	background: color-mix(in oklab, var(--color-bg) 52%, transparent);
 	border: 1px solid color-mix(in oklab, var(--color-border) 72%, transparent);
 	border-radius: 1rem;
 	backdrop-filter: blur(12px);
 	-webkit-backdrop-filter: blur(12px);
+}
+
+.table-float {
+	background: color-mix(in oklab, var(--color-bg-secondary) 76%, transparent);
+	border: 1px solid color-mix(in oklab, var(--color-border) 60%, transparent);
+	border-radius: 0.9rem;
+	overflow: hidden;
+	backdrop-filter: blur(12px);
+	-webkit-backdrop-filter: blur(12px);
+}
+
+.table-float thead tr {
+	background: color-mix(in oklab, var(--color-bg-secondary) 84%, transparent);
+	border-bottom: 1px solid color-mix(in oklab, var(--color-border) 72%, transparent);
+}
+
+.table-float tbody tr {
+	border-bottom: 1px solid color-mix(in oklab, var(--color-border) 36%, transparent);
+}
+
+.table-float tbody tr:hover {
+	background: color-mix(in oklab, var(--color-bg-tertiary) 44%, transparent);
 }
 
 .query-chip {
@@ -157,7 +194,8 @@ html[data-theme='light'] .glass-surface {
 
 html[data-theme='light'] .query-float,
 html[data-theme='light'] .query-float-strong,
-html[data-theme='light'] .query-result-shell {
+html[data-theme='light'] .query-result-shell,
+html[data-theme='light'] .query-command-shell {
 	box-shadow: 0 18px 34px -30px rgba(18, 46, 109, 0.4);
 }
 

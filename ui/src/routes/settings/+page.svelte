@@ -104,8 +104,8 @@
 	}
 </script>
 
-<div class="max-w-3xl space-y-6">
-	<h1 class="text-xl font-bold">Settings</h1>
+<div class="max-w-4xl space-y-5">
+	<h1 class="text-xl font-semibold tracking-tight">Settings</h1>
 
 	{#if loading}
 		<div class="text-text-muted text-sm py-8 text-center">Loading...</div>
@@ -113,7 +113,7 @@
 
 		<!-- Account (cloud mode) -->
 		{#if isCloudMode && (currentUser || org)}
-			<section class="bg-bg-secondary border border-border rounded p-4 space-y-3">
+			<section class="glass-surface rounded-2xl p-5 space-y-3">
 				<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Account</h2>
 				<div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
 					{#if currentUser}
@@ -149,7 +149,7 @@
 		{/if}
 
 		<!-- Usage -->
-		<section class="bg-bg-secondary border border-border rounded p-4 space-y-4">
+		<section class="glass-surface rounded-2xl p-5 space-y-4">
 			<div class="flex items-center justify-between">
 				<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Usage</h2>
 				{#if isCloudMode}
@@ -183,7 +183,7 @@
 			</div>
 
 			<!-- Traces & other stats -->
-			<div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pt-2 border-t border-border">
+			<div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pt-2 border-t border-border/60">
 				<div>
 					<span class="text-text-muted text-xs">Traces</span>
 					<div class="text-text font-bold mt-0.5">{stats.trace_count.toLocaleString()}</div>
@@ -206,7 +206,7 @@
 		</section>
 
 		<!-- Server -->
-		<section class="bg-bg-secondary border border-border rounded p-4 space-y-3">
+		<section class="glass-surface rounded-2xl p-5 space-y-3">
 			<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Server</h2>
 			{#if health}
 				<div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -241,7 +241,7 @@
 		</section>
 
 		<!-- Danger Zone -->
-		<section class="border border-danger/30 rounded p-4 space-y-4">
+		<section class="glass-surface border-danger/30 rounded-2xl p-5 space-y-4">
 			<h2 class="text-sm font-semibold text-danger uppercase tracking-wide">Danger Zone</h2>
 			<div class="space-y-2">
 				<p class="text-text-secondary text-sm">Clear all traces, spans, and file history.</p>
