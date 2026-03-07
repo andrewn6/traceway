@@ -33,8 +33,8 @@
 	let searchOpen = $state(false);
 	let mobileNavOpen = $state(false);
 	let navCollapsed = $state(false);
-	type ThemeMode = 'dark' | 'light';
-	let theme: ThemeMode = $state('dark');
+	type ThemeMode = 'dark' | 'light' | 'system';
+	let theme: ThemeMode = $state('system');
 
 	const THEME_KEY = 'traceway:theme';
 
@@ -48,14 +48,25 @@
 		}
 	}
 
+	function resolveSystemTheme(): 'dark' | 'light' {
+		return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+	}
+
 	function applyTheme(nextTheme: ThemeMode) {
 		theme = nextTheme;
-		document.documentElement.dataset.theme = nextTheme;
+		const effectiveTheme = nextTheme === 'system' ? resolveSystemTheme() : nextTheme;
+		document.documentElement.dataset.theme = effectiveTheme;
 		localStorage.setItem(THEME_KEY, nextTheme);
 	}
 
 	function toggleTheme() {
-		applyTheme(theme === 'dark' ? 'light' : 'dark');
+		if (theme === 'system') {
+			applyTheme('light');
+		} else if (theme === 'light') {
+			applyTheme('dark');
+		} else {
+			applyTheme('system');
+		}
 	}
 
 	// Auth pages don't need sidebar or auth check
@@ -76,12 +87,19 @@
 		document.addEventListener('keydown', handleGlobalKeydown);
 
 		const savedTheme = localStorage.getItem(THEME_KEY);
-		if (savedTheme === 'light' || savedTheme === 'dark') {
+		if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
 			applyTheme(savedTheme);
 		} else {
-			const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
-			applyTheme(prefersLight ? 'light' : 'dark');
+			applyTheme('system');
 		}
+
+		const media = window.matchMedia('(prefers-color-scheme: light)');
+		const onSystemThemeChange = () => {
+			if (theme === 'system') {
+				document.documentElement.dataset.theme = resolveSystemTheme();
+			}
+		};
+		media.addEventListener('change', onSystemThemeChange);
 
 		// Load auth config first, then check auth for non-auth pages
 		getAuthConfig()
@@ -143,6 +161,7 @@
 			unsub();
 			clearInterval(interval);
 			document.removeEventListener('keydown', handleGlobalKeydown);
+			media.removeEventListener('change', onSystemThemeChange);
 		};
 	});
 
@@ -300,11 +319,15 @@
 		{/if}
 
 		<!-- Left sidebar -->
-		<aside class="fixed z-50 left-3 top-3 bottom-3 w-72 max-w-[calc(100vw-1.5rem)] glass-surface rounded-2xl flex flex-col shadow-2xl shadow-black/25 transition-[transform,width] duration-300 ease-out lg:translate-x-0 {mobileNavOpen ? 'translate-x-0' : '-translate-x-[120%]'} {navCollapsed ? 'lg:w-20' : 'lg:w-60'}">
+		<aside class="fixed z-50 left-3 top-3 bottom-3 w-72 max-w-[calc(100vw-1.5rem)] glass-surface rounded-2xl flex flex-col shadow-2xl shadow-black/25 transition-[transform,width] duration-300 ease-out lg:translate-x-0 {mobileNavOpen ? 'translate-x-0' : '-translate-x-[120%]'} {navCollapsed ? 'lg:w-[5.5rem]' : 'lg:w-64'}">
 			<!-- Logo -->
-			<div class="px-4 py-3 border-b border-border/60 flex items-center gap-2">
-				<a href="/" class="text-text font-bold text-base tracking-tight hover:text-accent transition-colors flex-1">
-					Traceway
+			<div class="px-3 py-3 border-b border-border/60 flex items-center gap-2">
+				<a href="/" class="text-text font-semibold text-[1.03rem] tracking-tight hover:text-accent transition-colors flex-1 flex items-center gap-2 {navCollapsed ? 'justify-center' : ''}">
+					{#if navCollapsed}
+						<span class="inline-flex w-8 h-8 items-center justify-center rounded-lg border border-border/60 bg-bg-tertiary/45 text-[11px] font-mono text-accent">TW</span>
+					{:else}
+						Traceway
+					{/if}
 				</a>
 				<button
 					onclick={() => (navCollapsed = !navCollapsed)}
@@ -340,15 +363,15 @@
 						<div class="px-3 pt-2 pb-1 text-[10px] font-semibold text-text-muted/50 uppercase tracking-[0.18em]">{section.label}</div>
 					{/if}
 
-					<div class="space-y-0.5">
+					<div class="space-y-1">
 						{#each section.items as item}
 							<a
 								href={item.href}
 								data-active={isActive(item.href)}
-								class="sidebar-link flex items-center min-h-9 rounded-lg text-[13px] border hover-lift
-									{navCollapsed ? 'justify-center px-2.5' : 'gap-2.5 px-3'}
+								class="sidebar-link flex items-center min-h-9 rounded-xl text-[13.5px] border hover-lift
+									{navCollapsed ? 'justify-center h-10 px-0 mx-0.5' : 'gap-2.5 px-3'}
 									{isActive(item.href)
-										? 'bg-bg-tertiary/75 text-text border-border/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]'
+										? 'bg-bg-tertiary/75 text-text border-border/70 shadow-[0_10px_20px_-16px_rgba(8,18,40,0.9)]'
 										: 'text-text-secondary border-transparent hover:text-text hover:bg-bg-tertiary/40'}"
 								title={navCollapsed ? item.label : undefined}
 								aria-label={item.label}
@@ -497,7 +520,7 @@
 				{/if}
 
 				<!-- Stats -->
-				<div class="flex items-center gap-2 text-[11px] text-text-muted {navCollapsed ? 'justify-center' : ''}" title={navCollapsed ? `${stats.trace_count} traces / ${stats.span_count} spans` : undefined}>
+				<div class="flex items-center gap-2 text-xs text-text-muted {navCollapsed ? 'justify-center' : ''}" title={navCollapsed ? `${stats.trace_count} traces / ${stats.span_count} spans` : undefined}>
 					<span class="w-1.5 h-1.5 rounded-full {connected ? 'bg-success' : 'bg-text-muted'}"></span>
 					{#if !navCollapsed}
 						<span>{stats.trace_count} traces</span>
@@ -514,7 +537,7 @@
 						href="https://docs.traceway.ai"
 						target="_blank"
 						rel="noopener noreferrer"
-						class="flex items-center {navCollapsed ? 'justify-center w-7 h-7 rounded-md hover:bg-bg-tertiary/45' : 'gap-1.5'} text-[11px] text-text-muted hover:text-accent motion-safe:transition-colors motion-safe:duration-200"
+					class="flex items-center {navCollapsed ? 'justify-center w-7 h-7 rounded-md hover:bg-bg-tertiary/45' : 'gap-1.5'} text-xs text-text-muted hover:text-accent motion-safe:transition-colors motion-safe:duration-200"
 						title="Docs"
 						aria-label="Documentation"
 					>
@@ -525,7 +548,7 @@
 					</a>
 					<a
 						href="mailto:support@traceway.ai"
-						class="flex items-center {navCollapsed ? 'justify-center w-7 h-7 rounded-md hover:bg-bg-tertiary/45' : 'gap-1.5'} text-[11px] text-text-muted hover:text-accent motion-safe:transition-colors motion-safe:duration-200"
+					class="flex items-center {navCollapsed ? 'justify-center w-7 h-7 rounded-md hover:bg-bg-tertiary/45' : 'gap-1.5'} text-xs text-text-muted hover:text-accent motion-safe:transition-colors motion-safe:duration-200"
 						title="Support"
 						aria-label="Support"
 					>
@@ -539,23 +562,29 @@
 				{#if isCloudMode && authMe}
 					<button
 						onclick={handleLogout}
-					class="w-full px-2 py-1.5 rounded-lg border border-border bg-bg/70 text-[11px] text-text-muted hover:text-text hover:border-text-muted/40 motion-safe:transition-colors motion-safe:duration-200 cursor-pointer text-left {navCollapsed ? 'text-center' : ''}"
+					class="w-full px-2 py-1.5 rounded-xl border border-border bg-bg/70 text-xs text-text-muted hover:text-text hover:border-text-muted/40 motion-safe:transition-colors motion-safe:duration-200 cursor-pointer text-left {navCollapsed ? 'text-center flex items-center justify-center' : ''}"
 					title="Sign out"
 					aria-label="Sign out"
 					>
-						{navCollapsed ? 'Out' : 'Sign out'}
+						{#if navCollapsed}
+							<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-7.5a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 6 21h7.5a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" />
+							</svg>
+						{:else}
+							Sign out
+						{/if}
 					</button>
 				{/if}
 
 				<!-- Branding -->
-				<div class="text-[10px] text-text-muted/40 tracking-wide {navCollapsed ? 'text-center' : ''}">
+				<div class="text-[11px] text-text-muted/45 tracking-wide {navCollapsed ? 'text-center' : ''}">
 					{navCollapsed ? 'TW 2026' : 'TracewayAI \u00b7 2026'}
 				</div>
 			</div>
 		</aside>
 
 		<!-- Main content -->
-		<main class="min-h-screen min-w-0 overflow-auto pl-0 lg:pl-64 transition-[padding] duration-200 {navCollapsed ? 'lg:pl-24' : 'lg:pl-64'}">
+		<main class="min-h-screen min-w-0 overflow-auto pl-0 lg:pl-[17.25rem] transition-[padding] duration-200 {navCollapsed ? 'lg:pl-[7.25rem]' : 'lg:pl-[17.25rem]'}">
 			<div class="p-3 lg:p-4 space-y-3">
 				<div class="glass-surface rounded-2xl px-2.5 sm:px-3.5 py-2 flex items-center gap-2 sm:gap-2.5 sticky top-3 z-30">
 					<button
@@ -568,18 +597,18 @@
 							<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5m-16.5 5.25h16.5m-16.5 5.25h16.5" />
 						</svg>
 					</button>
-					<div class="text-[11px] sm:text-xs text-text-muted hidden sm:block tracking-wide">{page.url.pathname === '/' ? 'Dashboard' : page.url.pathname}</div>
+					<div class="text-xs sm:text-[13px] text-text-muted hidden sm:block tracking-wide">{page.url.pathname === '/' ? 'Dashboard' : page.url.pathname}</div>
 					<div class="flex-1"></div>
 					<button
 						onclick={toggleTheme}
 						class="px-2.5 py-1.5 rounded-lg border border-border/60 bg-bg-tertiary/50 text-xs text-text-secondary hover:text-text hover:border-border motion-safe:transition-[color,border-color,background-color,transform] motion-safe:duration-200 motion-safe:hover:-translate-y-[1px]"
-						aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-						title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+						aria-label="Cycle theme: system, light, dark"
+						title="Cycle theme: system, light, dark"
 					>
-						{theme === 'dark' ? 'Light mode' : 'Dark mode'}
+						{theme === 'system' ? 'Theme: System' : theme === 'dark' ? 'Theme: Dark' : 'Theme: Light'}
 					</button>
 				</div>
-				<div class="glass-soft rounded-2xl p-4 lg:p-5">
+				<div class="rounded-2xl p-3 lg:p-4">
 					{@render children()}
 				</div>
 			</div>

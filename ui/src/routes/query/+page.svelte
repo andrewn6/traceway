@@ -282,6 +282,82 @@
 		applyDsl();
 	}
 
+	// ─── Floating filter picker ────────────────────────────────────────
+
+	type FilterPicker = 'kind' | 'status' | 'time' | 'duration' | 'tokens' | 'cost' | 'model' | 'provider';
+	let activePicker: FilterPicker | null = $state(null);
+	let pickerSearch = $state('');
+
+	interface PickerOption {
+		label: string;
+		token: string;
+		note?: string;
+	}
+
+	const pickerOptions = $derived.by((): PickerOption[] => {
+		const q = pickerSearch.toLowerCase().trim();
+		const filter = (items: PickerOption[]) =>
+			items.filter((item) =>
+				!q || item.label.toLowerCase().includes(q) || item.token.toLowerCase().includes(q) || item.note?.toLowerCase().includes(q)
+			);
+
+		switch (activePicker) {
+			case 'kind':
+				return filter([
+					{ label: 'LLM Calls', token: 'kind:llm_call' },
+					{ label: 'File Reads', token: 'kind:fs_read' },
+					{ label: 'File Writes', token: 'kind:fs_write' },
+					{ label: 'Custom Spans', token: 'kind:custom' }
+				]);
+			case 'status':
+				return filter([
+					{ label: 'Running', token: 'status:running' },
+					{ label: 'Completed', token: 'status:completed' },
+					{ label: 'Failed', token: 'status:failed' }
+				]);
+			case 'time':
+				return filter([
+					{ label: 'Last 5 minutes', token: 'since:5m' },
+					{ label: 'Last 1 hour', token: 'since:1h' },
+					{ label: 'Last 6 hours', token: 'since:6h' },
+					{ label: 'Last 24 hours', token: 'since:24h' },
+					{ label: 'Last 7 days', token: 'since:7d' }
+				]);
+			case 'duration':
+				return filter([
+					{ label: 'Over 200ms', token: 'duration:>200ms' },
+					{ label: 'Over 1 second', token: 'duration:>1s' },
+					{ label: 'Over 5 seconds', token: 'duration:>5s' },
+					{ label: 'Under 100ms', token: 'duration:<100ms' }
+				]);
+			case 'tokens':
+				return filter([
+					{ label: 'Over 1K tokens', token: 'tokens:>1000' },
+					{ label: 'Over 5K tokens', token: 'tokens:>5000' },
+					{ label: 'Over 10K tokens', token: 'tokens:>10000' }
+				]);
+			case 'cost':
+				return filter([
+					{ label: 'Over $0.001', token: 'cost:>0.001' },
+					{ label: 'Over $0.01', token: 'cost:>0.01' },
+					{ label: 'Over $0.10', token: 'cost:>0.10' }
+				]);
+			case 'model':
+				return filter((summary?.models_used ?? []).map((m: string) => ({ label: m, token: `model:${m}` })));
+			case 'provider':
+				return filter((summary?.providers_used ?? []).map((p: string) => ({ label: p, token: `provider:${p}` })));
+			default:
+				return [];
+		}
+	});
+
+	function appendToken(token: string) {
+		dslInput = `${dslInput.trim()} ${token}`.trim();
+		activePicker = null;
+		pickerSearch = '';
+		applyDsl();
+	}
+
 	// ─── Grouped view ──────────────────────────────────────────────────
 
 	interface TraceGroup {
@@ -556,6 +632,8 @@
 			e.preventDefault();
 			selectedSuggestionIdx = Math.max(selectedSuggestionIdx - 1, -1);
 		} else if (e.key === 'Escape') {
+			activePicker = null;
+			pickerSearch = '';
 			searchFocused = false;
 			searchInputEl?.blur();
 		} else {
@@ -669,192 +747,9 @@
 	<title>Query | Traceway</title>
 </svelte:head>
 
-<div class="h-[calc(100vh-8rem)] flex flex-col gap-4">
-	<!-- Search bar area -->
-	<div class="shrink-0 px-1 pt-1 pb-1 space-y-3 sticky top-[4.3rem] z-20">
-		<!-- Search input -->
-		<div class="relative query-float-strong rounded-2xl p-2" role="search" aria-label="Trace query search">
-			<div class="flex items-center rounded-xl border border-border/40 bg-bg/20 transition-all duration-200 focus-within:border-accent/55 focus-within:bg-bg/35 focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--color-accent)_28%,transparent)]">
-				<div class="pl-3 pr-2 text-text-muted/80">
-					<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-						<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-					</svg>
-				</div>
-				<input
-					bind:this={searchInputEl}
-					bind:value={dslInput}
-					onfocus={() => { searchFocused = true; selectedSuggestionIdx = -1; }}
-					onblur={() => setTimeout(() => searchFocused = false, 150)}
-					onkeydown={handleKeydown}
-					type="text"
-					placeholder="Search spans... kind:llm_call model:gpt-4 since:1h  (press / to focus)"
-					aria-label="Query spans"
-					class="flex-1 bg-transparent py-3 text-[13px] font-mono text-text placeholder:text-text-muted/45 focus:outline-none"
-				/>
-				{#if dslInput}
-					<button
-						class="px-2 text-text-muted hover:text-text transition-colors"
-						onclick={() => { dslInput = ''; filter = {}; searchInputEl?.focus(); }}
-						aria-label="Clear search"
-					>
-						<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-							<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-						</svg>
-					</button>
-				{/if}
-				<button
-					onclick={applyDsl}
-					disabled={loading}
-					class="px-4 py-2 m-1.5 bg-accent text-bg rounded-lg text-xs font-semibold tracking-wide hover:bg-accent/90 disabled:opacity-50 transition-colors"
-				>
-					{loading ? '...' : 'Run'}
-				</button>
-			</div>
-			<div class="px-1 pt-2 text-[10px] text-text-muted/70 font-mono">Use key:value filters, press <kbd class="query-kbd">Enter</kbd> to run, <kbd class="query-kbd">/</kbd> to focus.</div>
-
-			<!-- Autocomplete dropdown -->
-			{#if searchFocused && suggestions.length > 0}
-				<div class="absolute left-0 right-0 top-full mt-2 z-30 query-float-strong rounded-xl shadow-xl overflow-hidden">
-					{#each suggestions as s, i}
-						<button
-							class="w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors
-								{i === selectedSuggestionIdx ? 'bg-accent/14' : 'hover:bg-bg-tertiary/70'}"
-							onmousedown={() => applySuggestion(s)}
-							onmouseenter={() => selectedSuggestionIdx = i}
-						>
-							<span class="text-[10px] uppercase tracking-wider text-text-muted/65 w-14 shrink-0 text-right">{s.category}</span>
-							<span class="text-sm font-mono text-text">{s.label}</span>
-							{#if s.description}
-								<span class="text-xs text-text-muted/90 ml-auto">{s.description}</span>
-							{/if}
-						</button>
-					{/each}
-				</div>
-			{/if}
-
-			<!-- History dropdown (shown when focused with empty input) -->
-			{#if searchFocused && !dslInput.trim() && history.length > 0 && suggestions.length === 0}
-				<div class="absolute left-0 right-0 top-full mt-2 z-30 query-float-strong rounded-xl shadow-xl overflow-hidden">
-					<div class="px-3 py-1.5 border-b border-border/70 flex items-center justify-between">
-						<span class="text-[10px] uppercase tracking-wider text-text-muted">Recent queries</span>
-						<button class="text-[10px] text-text-muted hover:text-danger transition-colors" onmousedown={clearHistory}>clear</button>
-					</div>
-					{#each history.slice(0, 8) as entry}
-						<button
-							class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-bg-tertiary/75 transition-colors"
-							onmousedown={() => loadHistory(entry)}
-						>
-							<span class="text-xs font-mono text-text truncate">{entry.dsl}</span>
-							<span class="text-[10px] text-text-muted shrink-0 ml-3">{entry.resultCount} results &middot; {timeAgo(entry.timestamp)}</span>
-						</button>
-					{/each}
-				</div>
-			{/if}
-		</div>
-
-		<!-- Active filter pills + controls row -->
-		<div class="query-float rounded-xl px-3 py-2.5 flex items-center gap-2.5 flex-wrap min-h-[42px]">
-			{#if activePills.length > 0}
-				{#each activePills as pill}
-					<button
-						onclick={() => removePill(pill)}
-						class="query-chip query-chip-active"
-					>
-						<span class="font-mono">{pill.display}</span>
-						<svg class="w-3 h-3 text-accent/55 group-hover:text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-							<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-						</svg>
-					</button>
-				{/each}
-				<button onclick={clearAllFilters} class="query-chip text-text-muted hover:text-text">Clear all</button>
-			{:else if !hasQueried}
-				<!-- Quick filter presets -->
-				{#each presets as preset}
-					<button
-						onclick={() => applyPreset(preset)}
-						class="query-chip text-text-secondary hover:text-text"
-					>
-						{#if preset.icon === 'slow'}
-							<svg class="w-3 h-3 text-warning" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
-						{:else if preset.icon === 'error'}
-							<svg class="w-3 h-3 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" /></svg>
-						{:else if preset.icon === 'cost'}
-							<svg class="w-3 h-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
-						{:else if preset.icon === 'tokens'}
-							<svg class="w-3 h-3 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" /></svg>
-						{:else}
-							<svg class="w-3 h-3 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
-						{/if}
-						{preset.label}
-					</button>
-				{/each}
-			{/if}
-
-			<div class="flex-1"></div>
-
-			{#if hasQueried}
-				<!-- Results meta + view mode + actions -->
-				<div class="flex items-center gap-3 text-xs text-text-muted shrink-0">
-					<span>{resultCount.toLocaleString()} span{resultCount !== 1 ? 's' : ''} &middot; {queryTimeMs}ms</span>
-
-					<!-- View mode toggle -->
-					<div class="flex items-center rounded-lg border border-border/65 bg-bg-secondary/70 p-0.5 text-[10px]">
-						<button
-							class="px-2.5 py-1 rounded-md transition-colors {viewMode === 'table' ? 'bg-accent/18 text-accent' : 'text-text-muted hover:text-text'}"
-							onclick={() => { viewMode = 'table'; writeUrlState(); }}
-							title="Table view"
-							aria-label="Switch to table view"
-						>
-							<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 0 1-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0 1 12 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m17.25-3.75h-7.5c-.621 0-1.125.504-1.125 1.125m8.625-1.125c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M12 10.875v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125M12 12h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125M20.625 12c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5M12 14.625v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 14.625c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125m0 0v.75" /></svg>
-						</button>
-						<button
-							class="px-2.5 py-1 rounded-md transition-colors {viewMode === 'grouped' ? 'bg-accent/18 text-accent' : 'text-text-muted hover:text-text'}"
-							onclick={() => { viewMode = 'grouped'; writeUrlState(); }}
-							title="Grouped by trace"
-							aria-label="Switch to grouped trace view"
-						>
-							<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 7.125C2.25 6.504 2.754 6 3.375 6h6c.621 0 1.125.504 1.125 1.125v3.75c0 .621-.504 1.125-1.125 1.125h-6a1.125 1.125 0 0 1-1.125-1.125v-3.75ZM14.25 8.625c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v8.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 0 1-1.125-1.125v-8.25ZM3.75 16.125c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v2.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 0 1-1.125-1.125v-2.25Z" /></svg>
-						</button>
-						<button
-							class="px-2.5 py-1 rounded-md transition-colors {viewMode === 'scatter' ? 'bg-accent/18 text-accent' : 'text-text-muted hover:text-text'}"
-							onclick={() => { viewMode = 'scatter'; writeUrlState(); }}
-							title="Performance insights"
-							aria-label="Switch to performance insights view"
-						>
-							<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" /></svg>
-						</button>
-					</div>
-
-					<button
-						onclick={copyShareUrl}
-						class="query-icon-button"
-						title="Copy shareable URL"
-						aria-label="Copy shareable URL"
-					>
-						<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-							<path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m9.86-2.54a4.5 4.5 0 0 0-1.242-7.244l-4.5-4.5a4.5 4.5 0 0 0-6.364 6.364L4.343 8.28" />
-						</svg>
-					</button>
-
-					{#if results.length > 0}
-						<button
-							onclick={exportResults}
-							class="query-icon-button"
-							title="Export results as JSON"
-							aria-label="Export results as JSON"
-						>
-							<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-								<path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-							</svg>
-						</button>
-					{/if}
-				</div>
-			{/if}
-		</div>
-	</div>
-
+<div class="h-[calc(100vh-8rem)] relative flex flex-col gap-4">
 	<!-- Results area -->
-	<div class="flex-1 min-h-0 overflow-y-auto px-1 pb-1">
+	<div class="flex-1 min-h-0 overflow-y-auto px-1 pb-44">
 		{#if hasQueried}
 			<div class="query-result-shell p-3 sm:p-4">
 			{#if results.length === 0 && !loading}
@@ -868,7 +763,7 @@
 
 			{:else if viewMode === 'table'}
 				<!-- Table view -->
-				<div class="query-float rounded-xl overflow-hidden">
+				<div class="table-float">
 					<div class="overflow-x-auto">
 						<table class="w-full text-sm">
 							<thead>
@@ -903,10 +798,10 @@
 							<tbody>
 								{#each results as span}
 									<tr
-										class="border-b border-border/30 hover:bg-bg-secondary/55 cursor-pointer transition-colors"
+										class="cursor-pointer transition-colors"
 										onclick={() => goto(`/traces/${span.trace_id}`)}
 									>
-										<td class="px-3 py-1.5 font-mono text-xs text-text truncate max-w-[200px]">{span.name}</td>
+										<td class="px-3 py-2 text-xs text-text truncate max-w-[240px] font-medium">{span.name}</td>
 										<td class="px-3 py-1.5">
 											{#if span.kind}
 												<span class="inline-flex items-center gap-1">
@@ -917,11 +812,11 @@
 												<span class="text-text-muted">-</span>
 											{/if}
 										</td>
-										<td class="px-3 py-1.5 text-text-secondary font-mono text-xs">{span.kind?.type === 'llm_call' ? span.kind.model : '-'}</td>
+										<td class="px-3 py-1.5 text-text-secondary text-xs">{span.kind?.type === 'llm_call' ? span.kind.model : '-'}</td>
 										<td class="px-3 py-1.5">
 											<StatusBadge status={spanStatus(span)} />
 										</td>
-										<td class="px-3 py-1.5 font-mono text-xs text-accent">{shortId(span.trace_id)}</td>
+										<td class="px-3 py-1.5 text-xs text-accent">{shortId(span.trace_id)}</td>
 										<td class="px-3 py-1.5 text-right text-text-secondary font-mono text-xs tabular-nums">{formatTokens(span)}</td>
 										<td class="px-3 py-1.5 text-right text-text-secondary font-mono text-xs tabular-nums">{formatCost(span)}</td>
 										<td class="px-3 py-1.5 text-right text-text-secondary font-mono text-xs tabular-nums">{formatDuration(spanDurationMs(span))}</td>
@@ -937,7 +832,7 @@
 				<!-- Grouped by trace view -->
 				<div class="space-y-3">
 					{#each groupedByTrace as group}
-						<div class="query-float rounded-xl overflow-hidden">
+						<div class="table-float">
 							<!-- Trace header -->
 							<button
 								onclick={() => goto(`/traces/${group.traceId}`)}
@@ -1151,12 +1046,12 @@
 										{@const dur = spanDurationMs(span) ?? 0}
 										{@const isOutlier = dur >= insightsData.p95}
 										<tr
-											class="border-b border-border/30 cursor-pointer transition-colors
+											class="cursor-pointer transition-colors
 												{isOutlier ? 'hover:bg-warning/5 bg-warning/[0.02]' : 'hover:bg-bg-secondary/50'}"
 											onclick={() => goto(`/traces/${span.trace_id}`)}
 										>
-											<td class="px-3 py-1.5 font-mono text-xs text-text truncate max-w-[200px]">{span.name}</td>
-											<td class="px-3 py-1.5 text-text-secondary font-mono text-xs">{span.kind?.type === 'llm_call' ? span.kind.model : '-'}</td>
+											<td class="px-3 py-2 text-xs text-text truncate max-w-[240px] font-medium">{span.name}</td>
+											<td class="px-3 py-1.5 text-text-secondary text-xs">{span.kind?.type === 'llm_call' ? span.kind.model : '-'}</td>
 											<td class="px-3 py-1.5"><StatusBadge status={spanStatus(span)} /></td>
 											<td class="px-3 py-1.5 text-right text-text-secondary font-mono text-xs tabular-nums">{formatTokens(span)}</td>
 											<td class="px-3 py-1.5 text-right text-text-secondary font-mono text-xs tabular-nums">{formatCost(span)}</td>
@@ -1183,7 +1078,7 @@
 				<h2 class="text-sm font-medium text-text mb-1">Query your spans</h2>
 				<p class="text-xs text-text-muted mb-4 max-w-sm">
 					Search across all traces to find specific LLM calls, debug errors, or analyze costs.
-					Use the search bar above or click a preset to get started.
+					Use the floating query bar below or click a preset to get started.
 				</p>
 				<div class="flex flex-col gap-1 text-xs text-text-muted/60 font-mono">
 					<span>kind:llm_call model:gpt-4 since:1h</span>
@@ -1192,5 +1087,170 @@
 				</div>
 			</div>
 		{/if}
+	</div>
+
+	<!-- Floating command bar -->
+	<div class="fixed left-1/2 bottom-4 -translate-x-1/2 z-40 w-[min(1080px,calc(100vw-1.25rem))]">
+		<div class="relative query-command-shell rounded-2xl p-2.5 sm:p-3" role="search" aria-label="Trace query command bar">
+			{#if activePicker}
+				<div class="absolute left-0 right-0 bottom-full mb-2 query-float-strong rounded-xl border border-border/70 shadow-xl overflow-hidden">
+					<div class="px-3 py-2 border-b border-border/60 flex items-center gap-2">
+						<input
+							bind:value={pickerSearch}
+							type="text"
+							placeholder={`Filter ${activePicker}...`}
+							class="w-full bg-transparent text-xs text-text placeholder:text-text-muted/50 focus:outline-none font-mono"
+						/>
+						<button class="text-xs text-text-muted hover:text-text" onclick={() => { activePicker = null; pickerSearch = ''; }}>close</button>
+					</div>
+					<div class="max-h-56 overflow-y-auto">
+						{#if pickerOptions.length === 0}
+							<div class="px-3 py-3 text-xs text-text-muted">No matches</div>
+						{:else}
+							{#each pickerOptions as option}
+								<button
+									class="w-full px-3 py-2 text-left hover:bg-bg-tertiary/70 transition-colors flex items-center gap-3"
+									onmousedown={() => appendToken(option.token)}
+								>
+									<span class="text-xs text-text font-mono">{option.label}</span>
+									<span class="text-[10px] text-text-muted ml-auto">{option.token}</span>
+								</button>
+							{/each}
+						{/if}
+					</div>
+				</div>
+			{/if}
+
+			{#if searchFocused && suggestions.length > 0}
+				<div class="absolute left-0 right-0 bottom-full mb-2 z-30 query-float-strong rounded-xl shadow-xl overflow-hidden">
+					{#each suggestions as s, i}
+						<button
+							class="w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors
+								{i === selectedSuggestionIdx ? 'bg-accent/14' : 'hover:bg-bg-tertiary/70'}"
+							onmousedown={() => applySuggestion(s)}
+							onmouseenter={() => selectedSuggestionIdx = i}
+						>
+							<span class="text-[10px] uppercase tracking-wider text-text-muted/65 w-14 shrink-0 text-right">{s.category}</span>
+							<span class="text-sm font-mono text-text">{s.label}</span>
+							{#if s.description}
+								<span class="text-xs text-text-muted/90 ml-auto">{s.description}</span>
+							{/if}
+						</button>
+					{/each}
+				</div>
+			{/if}
+
+			{#if searchFocused && !dslInput.trim() && history.length > 0 && suggestions.length === 0}
+				<div class="absolute left-0 right-0 bottom-full mb-2 z-30 query-float-strong rounded-xl shadow-xl overflow-hidden">
+					<div class="px-3 py-1.5 border-b border-border/70 flex items-center justify-between">
+						<span class="text-[10px] uppercase tracking-wider text-text-muted">Recent queries</span>
+						<button class="text-[10px] text-text-muted hover:text-danger transition-colors" onmousedown={clearHistory}>clear</button>
+					</div>
+					{#each history.slice(0, 8) as entry}
+						<button
+							class="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-bg-tertiary/75 transition-colors"
+							onmousedown={() => loadHistory(entry)}
+						>
+							<span class="text-xs font-mono text-text truncate">{entry.dsl}</span>
+							<span class="text-[10px] text-text-muted shrink-0 ml-3">{entry.resultCount} results &middot; {timeAgo(entry.timestamp)}</span>
+						</button>
+					{/each}
+				</div>
+			{/if}
+
+			<div class="flex items-center gap-2 flex-wrap">
+				<button class="query-chip" onclick={() => (activePicker = 'kind')}>Kind</button>
+				<button class="query-chip" onclick={() => (activePicker = 'status')}>Status</button>
+				<button class="query-chip" onclick={() => (activePicker = 'time')}>Time</button>
+				<button class="query-chip hidden sm:inline-flex" onclick={() => (activePicker = 'model')}>Model</button>
+				<button class="query-chip hidden sm:inline-flex" onclick={() => (activePicker = 'provider')}>Provider</button>
+				<button class="query-chip hidden md:inline-flex" onclick={() => (activePicker = 'duration')}>Latency</button>
+				<button class="query-chip hidden md:inline-flex" onclick={() => (activePicker = 'tokens')}>Tokens</button>
+				<button class="query-chip hidden md:inline-flex" onclick={() => (activePicker = 'cost')}>Cost</button>
+
+				<div class="flex items-center flex-1 rounded-xl border border-border/40 bg-bg/30 min-w-[240px] transition-all duration-200 focus-within:border-accent/55 focus-within:bg-bg/40">
+					<div class="pl-3 pr-2 text-text-muted/80">
+						<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+							<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+						</svg>
+					</div>
+					<input
+						bind:this={searchInputEl}
+						bind:value={dslInput}
+						onfocus={() => { searchFocused = true; selectedSuggestionIdx = -1; }}
+						onblur={() => setTimeout(() => searchFocused = false, 150)}
+						onkeydown={handleKeydown}
+						type="text"
+						placeholder="Filter spans... kind:llm_call since:1h"
+						aria-label="Query spans"
+						class="flex-1 bg-transparent py-2 text-[12px] sm:text-[13px] font-mono text-text placeholder:text-text-muted/45 focus:outline-none"
+					/>
+					{#if dslInput}
+						<button
+							class="px-2 text-text-muted hover:text-text transition-colors"
+							onclick={() => { dslInput = ''; filter = {}; activePicker = null; pickerSearch = ''; searchInputEl?.focus(); }}
+							aria-label="Clear search"
+						>
+							<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+							</svg>
+						</button>
+					{/if}
+				</div>
+
+				<button
+					onclick={applyDsl}
+					disabled={loading}
+					class="px-4 py-2 bg-accent text-bg rounded-lg text-xs font-semibold tracking-wide hover:bg-accent/90 disabled:opacity-50 transition-colors"
+				>
+					{loading ? '...' : 'Query'}
+				</button>
+			</div>
+
+			<div class="mt-2 flex items-center gap-2.5 flex-wrap min-h-[34px]">
+				{#if activePills.length > 0}
+					{#each activePills as pill}
+						<button onclick={() => removePill(pill)} class="query-chip query-chip-active">
+							<span class="font-mono">{pill.display}</span>
+							<svg class="w-3 h-3 text-accent/55" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+							</svg>
+						</button>
+					{/each}
+					<button onclick={clearAllFilters} class="query-chip text-text-muted hover:text-text">Clear all</button>
+				{:else if !hasQueried}
+					{#each presets.slice(0, 4) as preset}
+						<button onclick={() => applyPreset(preset)} class="query-chip text-text-secondary hover:text-text">{preset.label}</button>
+					{/each}
+				{/if}
+
+				<div class="flex-1"></div>
+
+				{#if hasQueried}
+					<div class="flex items-center gap-2 text-[11px] text-text-muted shrink-0">
+						<span>{resultCount.toLocaleString()} spans</span>
+						<span>&middot;</span>
+						<span>{queryTimeMs}ms</span>
+					</div>
+					<div class="flex items-center rounded-lg border border-border/65 bg-bg-secondary/70 p-0.5 text-[10px]">
+						<button class="px-2 py-1 rounded-md transition-colors {viewMode === 'table' ? 'bg-accent/18 text-accent' : 'text-text-muted hover:text-text'}" onclick={() => { viewMode = 'table'; writeUrlState(); }}>Table</button>
+						<button class="px-2 py-1 rounded-md transition-colors {viewMode === 'grouped' ? 'bg-accent/18 text-accent' : 'text-text-muted hover:text-text'}" onclick={() => { viewMode = 'grouped'; writeUrlState(); }}>Grouped</button>
+						<button class="px-2 py-1 rounded-md transition-colors {viewMode === 'scatter' ? 'bg-accent/18 text-accent' : 'text-text-muted hover:text-text'}" onclick={() => { viewMode = 'scatter'; writeUrlState(); }}>Insights</button>
+					</div>
+					<button onclick={copyShareUrl} class="query-icon-button" title="Copy shareable URL" aria-label="Copy shareable URL">
+						<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m9.86-2.54a4.5 4.5 0 0 0-1.242-7.244l-4.5-4.5a4.5 4.5 0 0 0-6.364 6.364L4.343 8.28" />
+						</svg>
+					</button>
+					{#if results.length > 0}
+						<button onclick={exportResults} class="query-icon-button" title="Export results as JSON" aria-label="Export results as JSON">
+							<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+							</svg>
+						</button>
+					{/if}
+				{/if}
+			</div>
+		</div>
 	</div>
 </div>
