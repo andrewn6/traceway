@@ -43,7 +43,7 @@
 			]);
 			summary = summaryRes;
 			recentSpans = spanRes.items
-				.sort((a, b) => new Date(spanStartedAt(b)).getTime() - new Date(spanStartedAt(a)).getTime())
+				.sort((a: Span, b: Span) => new Date(spanStartedAt(b)).getTime() - new Date(spanStartedAt(a)).getTime())
 				.slice(0, 20);
 		} catch {
 			// API not available
@@ -87,27 +87,27 @@
 	});
 </script>
 
-<div class="max-w-6xl mx-auto space-y-6">
-	<h1 class="text-xl font-bold">Dashboard</h1>
+<div class="max-w-[1160px] mx-auto space-y-5">
+	<h1 class="text-xl font-semibold tracking-tight">Dashboard</h1>
 
 	{#if !loaded}
 		<div class="text-text-muted text-sm py-8 text-center">Loading...</div>
 	{:else}
 		<!-- Stats cards — always visible -->
-		<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-			<div class="bg-bg-secondary border border-border rounded p-4">
+		<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+			<div class="table-float p-4">
 				<div class="text-text-muted text-xs uppercase">Traces</div>
 				<div class="text-2xl font-bold text-text mt-1">{s.total_traces}</div>
 			</div>
-			<div class="bg-bg-secondary border border-border rounded p-4">
+			<div class="table-float p-4">
 				<div class="text-text-muted text-xs uppercase">Spans</div>
 				<div class="text-2xl font-bold text-text mt-1">{s.total_spans}</div>
 			</div>
-			<div class="bg-bg-secondary border border-border rounded p-4">
+			<div class="table-float p-4">
 				<div class="text-text-muted text-xs uppercase">Avg Latency</div>
 				<div class="text-2xl font-bold text-text mt-1">{Math.round(s.avg_latency_ms)}ms</div>
 			</div>
-			<div class="bg-bg-secondary border border-border rounded p-4">
+			<div class="table-float p-4">
 				<div class="text-text-muted text-xs uppercase">Error Rate</div>
 				<div class="text-2xl font-bold {parseFloat(errorRate) > 0 ? 'text-danger' : 'text-success'} mt-1">
 					{errorRate}%
@@ -116,23 +116,23 @@
 		</div>
 
 		<!-- LLM metrics row — always visible -->
-		<div class="grid grid-cols-3 gap-4">
-			<div class="bg-bg-secondary border border-border rounded p-4">
+		<div class="grid grid-cols-3 gap-3">
+			<div class="table-float p-4">
 				<div class="text-text-muted text-xs uppercase">LLM Calls</div>
 				<div class="text-xl font-bold text-text mt-1">{s.total_llm_calls}</div>
 			</div>
-			<div class="bg-bg-secondary border border-border rounded p-4">
+			<div class="table-float p-4">
 				<div class="text-text-muted text-xs uppercase">Total Tokens</div>
 				<div class="text-xl font-bold text-text mt-1">{s.total_tokens.toLocaleString()}</div>
 			</div>
-			<div class="bg-bg-secondary border border-border rounded p-4">
+			<div class="table-float p-4">
 				<div class="text-text-muted text-xs uppercase">Total Cost</div>
 				<div class="text-xl font-bold text-text mt-1">${s.total_cost.toFixed(4)}</div>
 			</div>
 		</div>
 
 		<!-- Models -->
-		<div class="bg-bg-secondary border border-border rounded p-4">
+		<div class="table-float p-4">
 			<div class="text-text-muted text-xs uppercase mb-2">Models</div>
 			{#if s.cost_by_model.length > 0}
 				<div class="flex flex-wrap gap-2">
@@ -152,12 +152,12 @@
 		</div>
 
 		<!-- Tokens by model -->
-		<div class="bg-bg-secondary border border-border rounded p-4">
+		<div class="table-float p-4">
 			<div class="text-text-muted text-xs uppercase mb-3">Tokens by Model</div>
 			{#if s.tokens_by_model.length > 0}
 				<div class="space-y-2">
 					{#each s.tokens_by_model as item}
-						{@const maxTokens = Math.max(...s.tokens_by_model.map(t => t.total_tokens))}
+						{@const maxTokens = Math.max(...s.tokens_by_model.map((t: any) => t.total_tokens))}
 						<div class="flex items-center gap-3 text-sm">
 							<span class="text-text w-40 truncate font-mono text-xs">{item.model}</span>
 							<div class="flex-1 bg-bg-tertiary rounded-full h-2 overflow-hidden">
@@ -172,9 +172,9 @@
 			{/if}
 		</div>
 
-		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+		<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
 			<!-- Recent spans -->
-			<div class="bg-bg-secondary border border-border rounded p-4">
+			<div class="table-float p-4">
 				<div class="text-text-muted text-xs uppercase mb-3">Recent Spans</div>
 				<div class="space-y-1 max-h-80 overflow-y-auto">
 					{#each recentSpans as span (span.id)}
@@ -195,7 +195,7 @@
 			</div>
 
 			<!-- Activity feed -->
-			<div class="bg-bg-secondary border border-border rounded p-4">
+			<div class="table-float p-4">
 				<div class="text-text-muted text-xs uppercase mb-3">Activity Feed</div>
 				<div class="space-y-1 max-h-80 overflow-y-auto">
 					{#each activity as item}

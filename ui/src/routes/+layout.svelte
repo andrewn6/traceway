@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { getStats, getAuthConfig, getAuthMe, getProjects, createProject, deleteProject, switchProject, logout, subscribeEvents, getAllQueueItems, type Stats, type AuthConfig, type AuthMe, type Project } from '$lib/api';
 	import SearchModal from '$lib/components/SearchModal.svelte';
+	import TracewayWordmark from '$lib/components/TracewayWordmark.svelte';
 	import { onMount } from 'svelte';
 
 	let { children } = $props();
@@ -31,6 +32,8 @@
 
 	// Cmd+K search modal
 	let searchOpen = $state(false);
+	let globalQueryText = $state('');
+	let showCommandHelp = $state(false);
 	let mobileNavOpen = $state(false);
 	let navCollapsed = $state(false);
 	type ThemeMode = 'dark' | 'light' | 'system';
@@ -68,6 +71,35 @@
 			applyTheme('system');
 		}
 	}
+
+	function runGlobalQuery() {
+		const q = globalQueryText.trim();
+		if (q) {
+			goto(`/query?q=${encodeURIComponent(q)}`);
+		} else {
+			goto('/query');
+		}
+	}
+
+	function isSectionActive(href: string): boolean {
+		if (href === '/traces') return page.url.pathname === '/traces' || page.url.pathname.startsWith('/traces/');
+		if (href === '/settings') return page.url.pathname === '/settings' || page.url.pathname.startsWith('/settings/');
+		if (href === '/datasets') return page.url.pathname === '/datasets' || page.url.pathname.startsWith('/datasets/');
+		if (href === '/analytics') return page.url.pathname === '/analytics' || page.url.pathname.startsWith('/analytics/');
+		if (href === '/query') return page.url.pathname === '/query';
+		return page.url.pathname === href;
+	}
+
+	const commandPlaceholder = $derived.by(() => {
+		if (page.url.pathname.startsWith('/traces/')) return 'Search this trace context... status:failed model:gpt-4o';
+		if (page.url.pathname.startsWith('/datasets')) return 'Search datasets... model:gpt-4o score:<0.8';
+		if (page.url.pathname.startsWith('/settings')) return 'Jump into query... status:failed provider:openai';
+		return 'Search traces... model:gpt-4o status:failed';
+	});
+
+	const railWidthClass = $derived.by(() =>
+		page.url.pathname.startsWith('/traces/') ? 'w-[min(1120px,calc(100vw-1.25rem))]' : 'w-[min(980px,calc(100vw-1.25rem))]'
+	);
 
 	// Auth pages don't need sidebar or auth check
 	const authPages = ['/login', '/signup', '/accept-invite', '/forgot-password', '/reset-password'];
@@ -260,13 +292,7 @@
 			{
 				label: 'Configure',
 				items: [
-					{ href: '/settings/providers', label: 'Providers', icon: 'provider' },
 					{ href: '/settings', label: 'Settings', icon: 'settings' },
-					...(isCloudMode ? [
-						{ href: '/settings/team', label: 'Team', icon: 'team' },
-						{ href: '/settings/api-keys', label: 'API Keys', icon: 'key' },
-						{ href: '/settings/billing', label: 'Billing', icon: 'billing' },
-					] : []),
 				]
 			},
 		];
@@ -275,8 +301,7 @@
 
 	function isActive(href: string): boolean {
 		if (href === '/') return page.url.pathname === '/';
-		// For /settings, only exact match (not /settings/providers etc.)
-		if (href === '/settings') return page.url.pathname === '/settings';
+		if (href === '/settings') return page.url.pathname === '/settings' || page.url.pathname.startsWith('/settings/');
 		return page.url.pathname === href || page.url.pathname.startsWith(href + '/');
 	}
 </script>
@@ -326,7 +351,7 @@
 					{#if navCollapsed}
 						<span class="inline-flex w-8 h-8 items-center justify-center rounded-lg border border-border/60 bg-bg-tertiary/45 text-[11px] font-mono text-accent">TW</span>
 					{:else}
-						Traceway
+						<TracewayWordmark className="h-5 w-auto text-text" />
 					{/if}
 				</a>
 				<button
@@ -586,33 +611,64 @@
 		<!-- Main content -->
 		<main class="min-h-screen min-w-0 overflow-auto pl-0 lg:pl-[17.25rem] transition-[padding] duration-200 {navCollapsed ? 'lg:pl-[7.25rem]' : 'lg:pl-[17.25rem]'}">
 			<div class="p-3 lg:p-4 space-y-3">
-				<div class="app-toolbar-shell rounded-2xl px-2.5 sm:px-3.5 py-2 flex items-center gap-2 sm:gap-2.5 sticky top-3 z-30">
-					<button
-						onclick={() => (mobileNavOpen = true)}
-						class="lg:hidden w-8 h-8 rounded-lg border border-border/60 bg-bg-tertiary/60 text-text-muted hover:text-text hover:border-border motion-safe:transition-colors motion-safe:duration-200"
-						aria-label="Open navigation"
-						title="Open navigation"
-					>
-						<svg class="w-4 h-4 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-							<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5m-16.5 5.25h16.5m-16.5 5.25h16.5" />
-						</svg>
-					</button>
-					<div class="text-xs sm:text-[13px] text-text-muted hidden sm:block tracking-wide">{page.url.pathname === '/' ? 'Dashboard' : page.url.pathname}</div>
-					<div class="flex-1"></div>
-					<button
-						onclick={toggleTheme}
-						class="px-2.5 py-1.5 rounded-lg border border-border/60 bg-bg-tertiary/50 text-xs text-text-secondary hover:text-text hover:border-border motion-safe:transition-[color,border-color,background-color,transform] motion-safe:duration-200 motion-safe:hover:-translate-y-[1px]"
-						aria-label="Cycle theme: system, light, dark"
-						title="Cycle theme: system, light, dark"
-					>
-						{theme === 'system' ? 'Theme: System' : theme === 'dark' ? 'Theme: Dark' : 'Theme: Light'}
-					</button>
+				<div class="sticky top-3 z-30">
+					<div class="app-toolbar-shell rounded-xl px-2.5 py-1.5 flex items-center gap-2">
+						<button
+							onclick={() => (mobileNavOpen = true)}
+							class="lg:hidden w-7 h-7 rounded-md border border-border/60 bg-bg-tertiary/60 text-text-muted hover:text-text hover:border-border motion-safe:transition-colors motion-safe:duration-200"
+							aria-label="Open navigation"
+							title="Open navigation"
+						>
+							<svg class="w-4 h-4 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5m-16.5 5.25h16.5m-16.5 5.25h16.5" />
+							</svg>
+						</button>
+						<div class="text-xs text-text-muted tracking-wide truncate">
+							<span class="text-text-secondary">/</span>{page.url.pathname === '/' ? 'dashboard' : page.url.pathname}
+						</div>
+					</div>
 				</div>
 				<div class="app-page-shell rounded-2xl p-3 lg:p-4">
 					{@render children()}
 				</div>
 			</div>
 		</main>
+
+		{#if authChecked && !isAuthPage && !apiUnreachable && isAuthenticated && page.url.pathname !== '/query'}
+			<div class="fixed left-1/2 bottom-3 -translate-x-1/2 z-40 {railWidthClass} command-rail-anim">
+				<div class="query-command-shell rounded-xl p-2">
+					<div class="flex items-center gap-1.5 flex-wrap">
+						<button class="query-chip {isSectionActive('/query') ? 'query-chip-active' : ''}" onclick={() => goto('/query')}>Query</button>
+						<button class="query-chip {isSectionActive('/traces') ? 'query-chip-active' : ''}" onclick={() => goto('/traces')}>Traces</button>
+						<button class="query-chip hidden sm:inline-flex {isSectionActive('/analytics') ? 'query-chip-active' : ''}" onclick={() => goto('/analytics')}>Analytics</button>
+						<button class="query-chip hidden sm:inline-flex {isSectionActive('/datasets') ? 'query-chip-active' : ''}" onclick={() => goto('/datasets')}>Datasets</button>
+						<button class="query-chip hidden md:inline-flex" onclick={openNewProjectModal}>New project</button>
+						<button class="query-chip hidden md:inline-flex" onclick={() => (searchOpen = true)}>Search</button>
+						<button class="query-chip hidden md:inline-flex" onclick={() => (showCommandHelp = true)}>Shortcuts</button>
+
+						<div class="flex items-center flex-1 rounded-lg border border-border/45 bg-bg/30 min-w-[220px] focus-within:border-accent/55 transition-colors">
+							<div class="pl-3 pr-2 text-text-muted/80">
+								<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+									<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+								</svg>
+							</div>
+							<input
+								type="text"
+								bind:value={globalQueryText}
+								onkeydown={(e) => e.key === 'Enter' && runGlobalQuery()}
+								placeholder={commandPlaceholder}
+								class="w-full bg-transparent py-1.5 text-[13px] text-text placeholder:text-text-muted/45 focus:outline-none"
+							/>
+						</div>
+
+						<button onclick={runGlobalQuery} class="px-3.5 py-1.5 bg-accent text-bg rounded-lg text-xs font-semibold tracking-wide hover:bg-accent/90 transition-colors">
+							Query
+						</button>
+						<div class="hidden lg:block text-[10px] text-text-muted/80 pl-0.5"><span class="query-kbd">Cmd</span> + <span class="query-kbd">K</span></div>
+					</div>
+				</div>
+			</div>
+		{/if}
 	</div>
 
 	<!-- New Project Modal -->
@@ -667,6 +723,27 @@
 						</button>
 					</div>
 				</form>
+			</div>
+		</div>
+	{/if}
+
+	{#if showCommandHelp}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="fixed inset-0 z-[100] flex items-center justify-center bg-black/45"
+			onclick={(e) => { if (e.target === e.currentTarget) showCommandHelp = false; }}
+			onkeydown={(e) => { if (e.key === 'Escape') showCommandHelp = false; }}
+		>
+			<div class="query-command-shell rounded-xl w-full max-w-md mx-4 p-4 space-y-3">
+				<div class="flex items-center justify-between">
+					<h3 class="text-sm font-semibold text-text">Shortcuts</h3>
+					<button class="text-xs text-text-muted hover:text-text" onclick={() => (showCommandHelp = false)}>Close</button>
+				</div>
+				<div class="space-y-2 text-xs">
+					<div class="flex items-center justify-between"><span class="text-text-secondary">Open search</span><kbd class="query-kbd">Cmd K</kbd></div>
+					<div class="flex items-center justify-between"><span class="text-text-secondary">Go to query</span><kbd class="query-kbd">/query</kbd></div>
+					<div class="flex items-center justify-between"><span class="text-text-secondary">Go to traces</span><kbd class="query-kbd">/traces</kbd></div>
+				</div>
 			</div>
 		</div>
 	{/if}

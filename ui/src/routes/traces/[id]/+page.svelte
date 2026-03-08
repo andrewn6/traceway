@@ -310,12 +310,12 @@
 	const parentOptions = $derived(spans.map((s) => ({ id: s.id, name: s.name })));
 </script>
 
-<div class="h-[calc(100vh-8rem)] flex flex-col gap-3">
+<div class="max-w-[1160px] mx-auto h-[calc(100vh-8rem)] flex flex-col gap-3">
 	<!-- Header -->
-	<div class="flex items-center gap-3 px-4 py-2.5 shrink-0 glass-surface rounded-2xl border border-border/70 shadow-[0_24px_44px_-34px_rgba(5,14,32,0.9)]">
+	<div class="flex items-center gap-3 px-3.5 py-2 shrink-0 app-toolbar-shell rounded-xl">
 		<a href="/traces" class="text-text-secondary hover:text-text text-sm">&larr; Traces</a>
 		<span class="text-text-muted">/</span>
-		<h1 class="text-sm font-bold font-mono">{shortId(traceId)}</h1>
+		<h1 class="text-sm font-semibold font-mono">{shortId(traceId)}</h1>
 
 		{#if !loading && spans.length > 0}
 			<span class="px-2 py-0.5 rounded text-xs border
@@ -326,7 +326,7 @@
 			</span>
 
 			<!-- Summary stats -->
-			<div class="flex items-center gap-1.5 text-xs text-text-secondary font-mono bg-bg-tertiary/35 rounded-lg px-2.5 py-1 border border-border/45">
+			<div class="flex items-center gap-1.5 text-xs text-text-secondary font-mono bg-bg-tertiary/35 rounded-md px-2 py-1 border border-border/45">
 				{#if totalDuration !== null}
 					<span class="inline-flex items-center gap-1">
 						<svg class="w-3.5 h-3.5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
@@ -372,7 +372,7 @@
 	<!-- Add span form (slides down) -->
 	{#if showAddSpan}
 		<form
-			class="px-4 py-3 glass-soft rounded-2xl space-y-3 shrink-0"
+			class="px-4 py-3 table-float rounded-xl space-y-3 shrink-0"
 			onsubmit={(e) => { e.preventDefault(); handleAddSpan(); }}
 		>
 			<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -447,7 +447,7 @@
 			class:select-none={isDragging}
 		>
 			<!-- Left panel: search + span tree -->
-			<div class="min-h-0 overflow-hidden flex flex-col glass-surface rounded-2xl border border-border/60 shadow-[0_28px_56px_-36px_rgba(5,14,32,0.9)]" style="width: {splitPercent}%">
+			<div class="min-h-0 overflow-hidden flex flex-col table-float rounded-xl" style="width: {splitPercent}%">
 				<div class="px-3 py-2 border-b border-border/55 bg-gradient-to-r from-bg-secondary/70 via-bg-secondary/45 to-transparent">
 					<p class="text-[10px] uppercase tracking-[0.16em] text-text-muted">Trace timeline</p>
 				</div>
@@ -516,7 +516,7 @@
 			</div>
 
 			<!-- Right panel: span detail -->
-			<div class="flex-1 min-h-0 overflow-y-auto glass-surface rounded-2xl border border-border/60 shadow-[0_28px_56px_-36px_rgba(5,14,32,0.9)]">
+			<div class="flex-1 min-h-0 overflow-y-auto table-float rounded-xl">
 				<div class="px-3 py-2 border-b border-border/55 bg-gradient-to-r from-bg-secondary/70 via-bg-secondary/45 to-transparent sticky top-0 z-10 backdrop-blur-md">
 					<p class="text-[10px] uppercase tracking-[0.16em] text-text-muted">Span inspection</p>
 				</div>
