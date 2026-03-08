@@ -16,9 +16,9 @@
 	} = $props();
 
 	// ── Constants ──────────────────────────────────────────────────────
-	const ROW_HEIGHT = 32;
+	const ROW_HEIGHT = 36;
 	const INDENT_PX = 16;
-	const LABEL_WIDTH = 200; // px for the left label column
+	const LABEL_WIDTH = 260; // px for the left label column
 	const MIN_BAR_PX = 3;
 
 	// ── Zoom ──────────────────────────────────────────────────────────
@@ -135,15 +135,15 @@
 
 	function barColor(s: Span): string {
 		const status = spanStatus(s);
-		if (status === 'failed') return 'bg-danger/70 border-danger';
-		if (status === 'running') return 'bg-warning/50 border-warning animate-pulse';
+		if (status === 'failed') return 'bg-danger/80 border-danger';
+		if (status === 'running') return 'bg-warning/65 border-warning animate-pulse';
 		if (!s.kind) return 'bg-text-muted/30 border-text-muted/50';
 		switch (s.kind.type) {
-			case 'llm_call': return 'bg-accent/60 border-accent';
-			case 'fs_read': return 'bg-emerald-500/40 border-emerald-500/70';
-			case 'fs_write': return 'bg-emerald-500/40 border-emerald-500/70';
-			case 'custom': return 'bg-text-muted/25 border-text-muted/40';
-			default: return 'bg-text-muted/25 border-text-muted/40';
+			case 'llm_call': return 'bg-accent/70 border-accent';
+			case 'fs_read': return 'bg-emerald-500/55 border-emerald-500/80';
+			case 'fs_write': return 'bg-emerald-500/55 border-emerald-500/80';
+			case 'custom': return 'bg-text-muted/35 border-text-muted/50';
+			default: return 'bg-text-muted/35 border-text-muted/50';
 		}
 	}
 
@@ -181,9 +181,9 @@
 	}
 </script>
 
-<div class="flex flex-col h-full min-h-0">
+<div class="flex flex-col h-full min-h-0 bg-bg/10">
 	<!-- Toolbar -->
-	<div class="flex items-center gap-2 px-3 py-1.5 border-b border-border shrink-0">
+	<div class="flex items-center gap-2 px-3 py-2 border-b border-border/70 shrink-0 bg-bg-secondary/45">
 		<span class="text-[11px] text-text-muted">{rows.length} spans</span>
 		<div class="flex-1"></div>
 		<div class="flex items-center gap-0.5 text-[10px]">
@@ -194,13 +194,13 @@
 	</div>
 
 	<!-- Time axis -->
-	<div class="flex shrink-0 border-b border-border" style="height: 24px">
-		<div class="shrink-0" style="width: {LABEL_WIDTH}px"></div>
+	<div class="flex shrink-0 border-b border-border/70 bg-bg-secondary/35" style="height: 26px">
+		<div class="shrink-0 sticky left-0 z-20 bg-bg-secondary/85 border-r border-border/60" style="width: {LABEL_WIDTH}px"></div>
 		<div class="flex-1 relative min-w-0 overflow-hidden">
 			<div class="relative h-full" style="width: {zoom * 100}%">
 				{#each ticks as tick}
-					<div class="absolute top-0 bottom-0 border-l border-border/30" style="left: {tick.pct}%">
-						<span class="absolute top-1 left-1 text-[9px] text-text-muted/60 whitespace-nowrap">{tick.label}</span>
+					<div class="absolute top-0 bottom-0 border-l border-border/40" style="left: {tick.pct}%">
+						<span class="absolute top-1 left-1 text-[9px] text-text-muted/80 whitespace-nowrap">{tick.label}</span>
 					</div>
 				{/each}
 			</div>
@@ -227,16 +227,20 @@
 				{@const tokens = tokenCount(s)}
 				{@const cost = costBadge(s)}
 				<button
-					class="flex items-center w-full transition-colors group
-						{selectedId === s.id ? 'bg-accent/10' : 'hover:bg-bg-tertiary/50'}"
+					class="flex items-center w-full transition-colors group border-b border-border/25
+						{selectedId === s.id ? 'bg-accent/10' : 'hover:bg-bg-tertiary/35'}"
 					style="height: {ROW_HEIGHT}px"
 					onclick={() => onSelect?.(s)}
 				>
 					<!-- Label column -->
-					<div class="shrink-0 flex items-center gap-1.5 px-2 overflow-hidden" style="width: {LABEL_WIDTH}px; padding-left: {row.depth * INDENT_PX + 8}px">
+					<div
+						class="shrink-0 sticky left-0 z-10 flex items-center gap-1.5 px-2 overflow-hidden border-r border-border/40
+							{selectedId === s.id ? 'bg-bg-secondary/95' : 'bg-bg/95 group-hover:bg-bg-secondary/88'}"
+						style="width: {LABEL_WIDTH}px; padding-left: {row.depth * INDENT_PX + 8}px"
+					>
 						<span class="w-1.5 h-1.5 rounded-full shrink-0 {statusDotClass(s)}"></span>
 						<div class="shrink-0 opacity-60"><SpanKindIcon span={s} /></div>
-						<span class="text-[11px] text-text truncate">{s.name}</span>
+						<span class="text-[11px] text-text truncate font-medium">{s.name}</span>
 					</div>
 
 					<!-- Bar area -->
@@ -244,7 +248,7 @@
 						<div class="relative h-full" style="width: {zoom * 100}%">
 							<!-- Grid lines -->
 							{#each ticks as tick}
-								<div class="absolute top-0 bottom-0 border-l border-border/10" style="left: {tick.pct}%"></div>
+								<div class="absolute top-0 bottom-0 border-l border-border/20" style="left: {tick.pct}%"></div>
 							{/each}
 
 							<!-- Bar -->

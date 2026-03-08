@@ -133,8 +133,17 @@
 	}
 </script>
 
-<div class="max-w-7xl mx-auto space-y-4">
-	<a href="/datasets/{datasetId}" class="text-text-secondary hover:text-text text-sm">&larr; Back to dataset</a>
+<div class="max-w-[1160px] mx-auto space-y-4">
+	<div class="grid grid-cols-1 lg:grid-cols-[170px_minmax(0,1fr)] gap-4 items-start">
+		<aside class="hidden lg:block">
+			<div class="app-toolbar-shell rounded-xl p-2 space-y-1 sticky top-18">
+				<a href="/datasets/{datasetId}" class="block px-2 py-1.5 text-xs rounded-lg border border-border/70 bg-bg-tertiary/60 text-text">Dataset</a>
+				<a href="/datasets/{datasetId}/compare" class="block px-2 py-1.5 text-xs rounded-lg text-text-muted hover:text-text hover:bg-bg-tertiary/35 transition-colors">Compare runs</a>
+			</div>
+		</aside>
+
+		<div class="space-y-4">
+			<a href="/datasets/{datasetId}" class="text-text-secondary hover:text-text text-sm">&larr; Back to dataset</a>
 
 	{#if loading}
 		<div class="text-text-muted text-sm text-center py-8">Loading comparison...</div>
@@ -175,31 +184,27 @@
 		</div>
 
 		<!-- Filter pills -->
-		<div class="flex items-center gap-2">
+		<div class="app-toolbar-shell rounded-xl p-2 flex items-center gap-1.5 flex-wrap">
 			<button
-				class="px-2 py-1 text-xs rounded border cursor-pointer transition-colors
-					{filterMode === 'all' ? 'bg-text-muted/20 text-text border-text-muted/30' : 'bg-transparent text-text-muted border-transparent hover:text-text'}"
+				class="query-chip {filterMode === 'all' ? 'query-chip-active' : ''}"
 				onclick={() => (filterMode = 'all')}
 			>All ({filterCounts.all})</button>
 			<button
-				class="px-2 py-1 text-xs rounded border cursor-pointer transition-colors
-					{filterMode === 'regressions' ? 'bg-danger/20 text-danger border-danger/30' : 'bg-transparent text-text-muted border-transparent hover:text-text'}"
+				class="query-chip {filterMode === 'regressions' ? 'query-chip-active' : ''}"
 				onclick={() => (filterMode = 'regressions')}
 			>Regressions ({filterCounts.regressions})</button>
 			<button
-				class="px-2 py-1 text-xs rounded border cursor-pointer transition-colors
-					{filterMode === 'improvements' ? 'bg-success/20 text-success border-success/30' : 'bg-transparent text-text-muted border-transparent hover:text-text'}"
+				class="query-chip {filterMode === 'improvements' ? 'query-chip-active' : ''}"
 				onclick={() => (filterMode = 'improvements')}
 			>Improvements ({filterCounts.improvements})</button>
 			<button
-				class="px-2 py-1 text-xs rounded border cursor-pointer transition-colors
-					{filterMode === 'disagreements' ? 'bg-warning/20 text-warning border-warning/30' : 'bg-transparent text-text-muted border-transparent hover:text-text'}"
+				class="query-chip {filterMode === 'disagreements' ? 'query-chip-active' : ''}"
 				onclick={() => (filterMode = 'disagreements')}
 			>Disagreements ({filterCounts.disagreements})</button>
 		</div>
 
 		<!-- Comparison table -->
-		<div class="overflow-x-auto">
+		<div class="table-float overflow-x-auto">
 			<div class="min-w-[800px]">
 				<!-- Header -->
 				<div class="grid gap-3 px-3 text-xs text-text-muted uppercase items-center"
@@ -229,7 +234,16 @@
 									{#if cell}
 										<div
 											class="text-xs p-1.5 rounded {runBgColors[i % runBgColors.length]} cursor-pointer"
+											role="button"
+											tabindex={0}
+											aria-label={`Toggle details for ${run.name ?? run.id}`}
 											onclick={() => (expandedCell = expandedCell === `${dp.datapoint_id}-${run.id}` ? null : `${dp.datapoint_id}-${run.id}`)}
+											onkeydown={(e) => {
+												if (e.key === 'Enter' || e.key === ' ') {
+													e.preventDefault();
+													expandedCell = expandedCell === `${dp.datapoint_id}-${run.id}` ? null : `${dp.datapoint_id}-${run.id}`;
+												}
+											}}
 										>
 											<div class="flex items-center gap-1 mb-0.5">
 												{#if cell.status === 'passed'}
@@ -261,5 +275,7 @@
 				{/if}
 			</div>
 		</div>
-	{/if}
+		{/if}
+		</div>
+	</div>
 </div>

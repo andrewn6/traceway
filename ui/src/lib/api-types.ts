@@ -1273,9 +1273,7 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         "core.JsonPrimitive": (string | number | boolean | (boolean | null)) | null;
-        "core.JsonValue": components["schemas"]["core.JsonPrimitive"] | components["schemas"]["core.JsonValue"][] | {
-            [key: string]: components["schemas"]["core.JsonValue"];
-        };
+        "core.JsonValue": any;
         "provider_connections.ProviderConnection": {
             api_key?: string;
             base_url?: string;

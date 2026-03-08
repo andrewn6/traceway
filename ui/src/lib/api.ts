@@ -6,60 +6,61 @@ export const API_BASE = (import.meta.env.VITE_API_URL as string) || '/api';
 // ─── Generated Types ─────────────────────────────────────────────────
 // Re-export types from the auto-generated OpenAPI types
 import type { components } from './api-types';
+type Schemas = Record<string, any> & components['schemas'];
 
 // Core types
-export type SpanKind = components['schemas']['SpanKind'];
-export type SpanStatus = components['schemas']['SpanStatus'];
-export type Span = components['schemas']['Span'];
-export type Trace = components['schemas']['Trace'];
-export type TraceListResponse = components['schemas']['TraceListResponse'];
-export type SpanList = components['schemas']['SpanList'];
-export type Stats = components['schemas']['Stats'];
-export type ExportData = components['schemas']['ExportData'];
+export type SpanKind = Schemas['SpanKind'];
+export type SpanStatus = Schemas['SpanStatus'];
+export type Span = Schemas['Span'];
+export type Trace = Schemas['Trace'];
+export type TraceListResponse = Schemas['TraceListResponse'];
+export type SpanList = Schemas['SpanList'];
+export type Stats = Schemas['Stats'];
+export type ExportData = Schemas['ExportData'];
 
 // File types
-export type FileVersion = components['schemas']['FileVersion'];
-export type FileListResponse = components['schemas']['FileListResponse'];
-export type FileVersionsResponse = components['schemas']['FileVersionsResponse'];
+export type FileVersion = Schemas['FileVersion'];
+export type FileListResponse = Schemas['FileListResponse'];
+export type FileVersionsResponse = Schemas['FileVersionsResponse'];
 
 // Health types
-export type HealthResponse = components['schemas']['HealthResponse'];
-export type StorageHealth = components['schemas']['StorageHealth'];
+export type HealthResponse = Schemas['HealthResponse'];
+export type StorageHealth = Schemas['StorageHealth'];
 
 // Dataset types
-export type DatapointKind = components['schemas']['DatapointKind'];
-export type DatapointSource = components['schemas']['DatapointSource'];
-export type Dataset = components['schemas']['Dataset'];
-export type DatasetResponse = components['schemas']['DatasetResponse'];
-export type DatasetListResponse = components['schemas']['DatasetListResponse'];
-export type Datapoint = components['schemas']['Datapoint'];
-export type DatapointListResponse = components['schemas']['DatapointListResponse'];
-export type QueueItem = components['schemas']['QueueItem'];
-export type QueueItemStatus = components['schemas']['QueueItemStatus'];
-export type QueueListResponse = components['schemas']['QueueListResponse'];
-export type QueueCounts = components['schemas']['QueueCounts'];
-export type Message = components['schemas']['Message'];
+export type DatapointKind = Schemas['DatapointKind'];
+export type DatapointSource = Schemas['DatapointSource'];
+export type Dataset = Schemas['Dataset'];
+export type DatasetResponse = Schemas['DatasetResponse'];
+export type DatasetListResponse = Schemas['DatasetListResponse'];
+export type Datapoint = Schemas['Datapoint'];
+export type DatapointListResponse = Schemas['DatapointListResponse'];
+export type QueueItem = Schemas['QueueItem'];
+export type QueueItemStatus = Schemas['QueueItemStatus'];
+export type QueueListResponse = Schemas['QueueListResponse'];
+export type QueueCounts = Schemas['QueueCounts'];
+export type Message = Schemas['Message'];
 
 // Analytics types
-export type AnalyticsSummary = components['schemas']['AnalyticsSummary'];
-export type AnalyticsQuery = components['schemas']['AnalyticsQuery'];
-export type AnalyticsResponse = components['schemas']['AnalyticsResponse'];
-export type AnalyticsFilter = components['schemas']['AnalyticsFilter'];
-export type AnalyticsMetric = components['schemas']['AnalyticsMetric'];
-export type GroupByField = components['schemas']['GroupByField'];
-export type MetricValues = components['schemas']['MetricValues'];
-export type ModelCost = components['schemas']['ModelCost'];
-export type ModelTokens = components['schemas']['ModelTokens'];
+export type AnalyticsSummary = Schemas['AnalyticsSummary'];
+export type AnalyticsQuery = Schemas['AnalyticsQuery'];
+export type AnalyticsResponse = Schemas['AnalyticsResponse'];
+export type AnalyticsFilter = Schemas['AnalyticsFilter'];
+export type AnalyticsMetric = Schemas['AnalyticsMetric'];
+export type GroupByField = Schemas['GroupByField'];
+export type MetricValues = Schemas['MetricValues'];
+export type ModelCost = Schemas['ModelCost'];
+export type ModelTokens = Schemas['ModelTokens'];
 
 // Request types
-export type CreateSpanRequest = components['schemas']['CreateSpanRequest'];
-export type CompleteSpanRequest = components['schemas']['CompleteSpanRequest'];
-export type FailSpanRequest = components['schemas']['FailSpanRequest'];
-export type SpanQueryParams = components['schemas']['SpanQueryParams'];
-export type CreateTraceRequest = components['schemas']['CreateTraceRequest'];
-export type CreateDatasetRequest = components['schemas']['CreateDatasetRequest'];
-export type UpdateDatasetRequest = components['schemas']['UpdateDatasetRequest'];
-export type CreateDatapointRequest = components['schemas']['CreateDatapointRequest'];
+export type CreateSpanRequest = Schemas['CreateSpanRequest'];
+export type CompleteSpanRequest = Schemas['CompleteSpanRequest'];
+export type FailSpanRequest = Schemas['FailSpanRequest'];
+export type SpanQueryParams = Schemas['SpanQueryParams'];
+export type CreateTraceRequest = Schemas['CreateTraceRequest'];
+export type CreateDatasetRequest = Schemas['CreateDatasetRequest'];
+export type UpdateDatasetRequest = Schemas['UpdateDatasetRequest'];
+export type CreateDatapointRequest = Schemas['CreateDatapointRequest'];
 
 // Paginated response type (matches backend Page<T>)
 export interface Page<T> {

@@ -79,11 +79,11 @@
 	}
 </script>
 
-<div class="max-w-6xl mx-auto space-y-4">
+<div class="max-w-[1160px] mx-auto space-y-4">
 	<div class="flex items-center justify-between">
-		<h1 class="text-xl font-bold">Datasets</h1>
+		<h1 class="text-xl font-semibold tracking-tight">Datasets</h1>
 		<button
-			class="px-3 py-1.5 text-xs bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded hover:bg-amber-400/20 transition-colors"
+			class="px-3 py-1.5 text-xs bg-accent/10 text-accent border border-accent/25 rounded-lg hover:bg-accent/20 transition-colors"
 			onclick={() => (showForm = !showForm)}
 		>
 			{showForm ? 'Cancel' : '+ New Dataset'}
@@ -93,7 +93,7 @@
 	<!-- Inline create form -->
 	{#if showForm}
 		<form
-			class="bg-bg-secondary border border-border rounded p-4 space-y-3"
+			class="table-float p-4 space-y-3"
 			onsubmit={(e) => { e.preventDefault(); handleCreate(); }}
 		>
 			<div>
@@ -103,7 +103,7 @@
 					type="text"
 					bind:value={newName}
 					placeholder="e.g. eval-gpt4-coding"
-					class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted"
+					class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-1.5 text-sm text-text placeholder:text-text-muted"
 				/>
 			</div>
 			<div>
@@ -113,13 +113,13 @@
 					type="text"
 					bind:value={newDescription}
 					placeholder="What is this dataset for?"
-					class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted"
+					class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-1.5 text-sm text-text placeholder:text-text-muted"
 				/>
 			</div>
 			<button
 				type="submit"
 				disabled={creating || !newName.trim()}
-				class="px-4 py-1.5 text-xs bg-amber-400 text-bg font-semibold rounded hover:bg-amber-300 transition-colors disabled:opacity-50"
+				class="px-4 py-1.5 text-xs bg-accent text-bg font-semibold rounded-lg hover:bg-accent/85 transition-colors disabled:opacity-50"
 			>
 				{creating ? 'Creating...' : 'Create Dataset'}
 			</button>
@@ -127,7 +127,7 @@
 	{/if}
 
 	<!-- Table header -->
-	<div class="grid grid-cols-[1fr_100px_140px_80px] gap-4 px-3 text-xs text-text-muted uppercase">
+	<div class="grid grid-cols-[1fr_100px_140px_80px] gap-4 px-3 py-2 text-xs text-text-muted uppercase">
 		<span>Name</span>
 		<span class="text-center">Datapoints</span>
 		<span>Created</span>
@@ -139,11 +139,11 @@
 	{:else if datasets.length === 0}
 		<div class="text-text-muted text-sm text-center py-8">No datasets yet</div>
 	{:else}
-		<div class="space-y-0">
+		<div class="table-float divide-y divide-border/35">
 			{#each datasets as ds (ds.id)}
 				<a
 					href="/datasets/{ds.id}"
-					class="grid grid-cols-[1fr_100px_140px_80px] gap-4 items-center px-3 py-2.5 text-sm hover:bg-bg-secondary rounded transition-colors border-b border-border/50"
+					class="grid grid-cols-[1fr_100px_140px_80px] gap-4 items-center px-3 py-2.5 text-sm hover:bg-bg-secondary/45 transition-colors"
 				>
 					<div>
 						<div class="text-text font-medium">{ds.name}</div>
@@ -153,7 +153,7 @@
 						<div class="text-text-muted text-xs font-mono">{shortId(ds.id)}</div>
 					</div>
 					<div class="text-center">
-						<span class="px-2 py-0.5 text-xs bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded">
+						<span class="px-2 py-0.5 text-xs bg-accent/10 text-accent border border-accent/20 rounded">
 							{ds.datapoint_count}
 						</span>
 					</div>

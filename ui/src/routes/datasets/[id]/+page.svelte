@@ -520,7 +520,7 @@
 	}
 </script>
 
-<div class="max-w-6xl mx-auto space-y-4">
+<div class="max-w-[1160px] mx-auto space-y-4">
 	<!-- Header -->
 	<div class="flex items-center gap-2">
 		<a href="/datasets" class="text-text-secondary hover:text-text text-sm">&larr; Datasets</a>
@@ -569,20 +569,18 @@
 		<div class="text-text-muted text-sm text-center py-8">Dataset not found</div>
 	{:else}
 		<!-- Tabs -->
-		<div class="flex gap-0 border-b border-border">
+		<div class="app-toolbar-shell rounded-xl p-2">
+		<div class="flex flex-wrap items-center gap-1.5">
 			<button
-				class="px-4 py-2 text-sm transition-colors border-b-2
-					{activeTab === 'datapoints' ? 'border-amber-400 text-text' : 'border-transparent text-text-secondary hover:text-text'}"
+				class="query-chip {activeTab === 'datapoints' ? 'query-chip-active' : ''}"
 				onclick={() => (activeTab = 'datapoints')}
 			>Datapoints</button>
 			<button
-				class="px-4 py-2 text-sm transition-colors border-b-2
-					{activeTab === 'import' ? 'border-amber-400 text-text' : 'border-transparent text-text-secondary hover:text-text'}"
+				class="query-chip {activeTab === 'import' ? 'query-chip-active' : ''}"
 				onclick={() => (activeTab = 'import')}
 			>Import</button>
 			<button
-				class="px-4 py-2 text-sm transition-colors border-b-2
-					{activeTab === 'queue' ? 'border-amber-400 text-text' : 'border-transparent text-text-secondary hover:text-text'}"
+				class="query-chip {activeTab === 'queue' ? 'query-chip-active' : ''}"
 				onclick={() => (activeTab = 'queue')}
 			>
 				Queue
@@ -591,8 +589,7 @@
 				{/if}
 			</button>
 			<button
-				class="px-4 py-2 text-sm transition-colors border-b-2
-					{activeTab === 'evals' ? 'border-amber-400 text-text' : 'border-transparent text-text-secondary hover:text-text'}"
+				class="query-chip {activeTab === 'evals' ? 'query-chip-active' : ''}"
 				onclick={() => (activeTab = 'evals')}
 			>
 				Evals
@@ -601,8 +598,7 @@
 				{/if}
 			</button>
 			<button
-				class="px-4 py-2 text-sm transition-colors border-b-2
-					{activeTab === 'rules' ? 'border-amber-400 text-text' : 'border-transparent text-text-secondary hover:text-text'}"
+				class="query-chip {activeTab === 'rules' ? 'query-chip-active' : ''}"
 				onclick={() => (activeTab = 'rules')}
 			>
 				Rules
@@ -610,6 +606,7 @@
 					<span class="ml-1 px-1.5 py-0.5 text-xs bg-amber-400/20 text-amber-400 rounded">{enabledRuleCount}</span>
 				{/if}
 			</button>
+		</div>
 		</div>
 
 		<!-- Tab: Datapoints -->
@@ -1071,21 +1068,34 @@
 							<span class="text-right">Actions</span>
 						</div>
 						<div class="space-y-0">
-							{#each evalRuns as run (run.id)}
-								<div
-									class="grid grid-cols-[1fr_120px_80px_80px_80px_100px_60px] gap-3 items-center px-3 py-2 text-sm border-b border-border/50 hover:bg-bg-secondary transition-colors cursor-pointer"
-									onclick={() => {
-										if (!evalCompareMode) goto(`/datasets/${datasetId}/eval/${run.id}`);
-									}}
-								>
-									<div class="flex items-center gap-2 min-w-0">
-										{#if evalCompareMode}
-											<!-- svelte-ignore a11y_click_events_have_key_events -->
-											<!-- svelte-ignore a11y_no_static_element_interactions -->
-											<span onclick={(e) => { e.stopPropagation(); toggleCompareSelect(run.id); }}>
+						{#each evalRuns as run (run.id)}
+							<div
+								class="grid grid-cols-[1fr_120px_80px_80px_80px_100px_60px] gap-3 items-center px-3 py-2 text-sm border-b border-border/50 hover:bg-bg-secondary transition-colors cursor-pointer"
+								role="button"
+								tabindex={evalCompareMode ? -1 : 0}
+								aria-label={`Open eval run ${run.name ?? run.id}`}
+								onclick={() => {
+									if (!evalCompareMode) goto(`/datasets/${datasetId}/eval/${run.id}`);
+								}}
+								onkeydown={(e) => {
+									if (evalCompareMode) return;
+									if (e.key === 'Enter' || e.key === ' ') {
+										e.preventDefault();
+										goto(`/datasets/${datasetId}/eval/${run.id}`);
+									}
+								}}
+							>
+								<div class="flex items-center gap-2 min-w-0">
+									{#if evalCompareMode}
+										<button
+											type="button"
+											class="inline-flex"
+											aria-label={`Toggle compare selection for ${run.name ?? run.id}`}
+											onclick={(e) => { e.stopPropagation(); toggleCompareSelect(run.id); }}
+										>
 												<input type="checkbox" checked={evalCompareSelected.has(run.id)} class="accent-purple-400" />
-											</span>
-										{/if}
+										</button>
+									{/if}
 										<span class="truncate text-text">{run.name ?? run.config.model}</span>
 										<span class="shrink-0 px-1.5 py-0.5 text-xs bg-purple-400/10 text-purple-400 rounded">{run.config.model}</span>
 									</div>
@@ -1242,11 +1252,13 @@
 						<div class="bg-bg-secondary border border-border rounded p-3">
 							<div class="flex items-center gap-2">
 								<span class="w-2 h-2 rounded-full {rule.enabled ? 'bg-success' : 'bg-text-muted'}"></span>
-								<span class="text-sm text-text font-medium flex-1">{rule.name}</span>
-								<button
-									class="w-9 h-5 rounded-full transition-colors relative {rule.enabled ? 'bg-success' : 'bg-bg-tertiary'}"
-									onclick={() => handleToggleRule(rule.id)}
-								>
+									<span class="text-sm text-text font-medium flex-1">{rule.name}</span>
+									<button
+										class="w-9 h-5 rounded-full transition-colors relative {rule.enabled ? 'bg-success' : 'bg-bg-tertiary'}"
+										aria-label={`Toggle rule ${rule.name}`}
+										title={`Toggle rule ${rule.name}`}
+										onclick={() => handleToggleRule(rule.id)}
+									>
 									<span class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform {rule.enabled ? 'translate-x-4' : ''}"></span>
 								</button>
 								<button

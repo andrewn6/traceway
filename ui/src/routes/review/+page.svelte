@@ -231,20 +231,19 @@
 	}
 </script>
 
-<div class="p-6 max-w-6xl mx-auto">
+<div class="max-w-[1160px] mx-auto space-y-4">
 	<!-- Header -->
-	<div class="flex items-center justify-between mb-6">
+	<div class="flex items-center justify-between">
 		<div>
-			<h1 class="text-lg font-bold text-text">Review</h1>
+			<h1 class="text-lg font-semibold text-text">Review</h1>
 			<p class="text-xs text-text-muted mt-0.5">Human annotation queue across all datasets</p>
 		</div>
 	</div>
 
 	<!-- Status filter tabs + counts -->
-	<div class="flex items-center gap-1 mb-4 border-b border-border">
+	<div class="app-toolbar-shell rounded-xl p-2 flex items-center gap-1.5 flex-wrap">
 		<button
-			class="px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px
-				{statusFilter === 'pending' ? 'border-warning text-warning' : 'border-transparent text-text-secondary hover:text-text'}"
+			class="query-chip {statusFilter === 'pending' ? 'query-chip-active' : ''}"
 			onclick={() => statusFilter = 'pending'}
 		>
 			Pending
@@ -253,8 +252,7 @@
 			{/if}
 		</button>
 		<button
-			class="px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px
-				{statusFilter === 'claimed' ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-text'}"
+			class="query-chip {statusFilter === 'claimed' ? 'query-chip-active' : ''}"
 			onclick={() => statusFilter = 'claimed'}
 		>
 			Claimed
@@ -263,8 +261,7 @@
 			{/if}
 		</button>
 		<button
-			class="px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px
-				{statusFilter === 'completed' ? 'border-success text-success' : 'border-transparent text-text-secondary hover:text-text'}"
+			class="query-chip {statusFilter === 'completed' ? 'query-chip-active' : ''}"
 			onclick={() => statusFilter = 'completed'}
 		>
 			Completed
@@ -273,8 +270,7 @@
 			{/if}
 		</button>
 		<button
-			class="px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px
-				{statusFilter === 'all' ? 'border-text text-text' : 'border-transparent text-text-secondary hover:text-text'}"
+			class="query-chip {statusFilter === 'all' ? 'query-chip-active' : ''}"
 			onclick={() => statusFilter = 'all'}
 		>
 			All
@@ -304,7 +300,7 @@
 	{:else}
 		<!-- Review detail panel (slides in when reviewing) -->
 		{#if reviewingItem}
-			<div class="mb-4 bg-bg-secondary border border-accent/20 rounded-lg overflow-hidden">
+			<div class="mb-4 table-float border-accent/20 overflow-hidden">
 				<!-- Review header -->
 				<div class="flex items-center justify-between px-4 py-3 border-b border-border">
 					<div class="flex items-center gap-3">
@@ -358,7 +354,7 @@
 				</div>
 
 				<!-- Actions -->
-				<div class="flex items-center gap-2 px-4 py-3 border-t border-border bg-bg-tertiary/30">
+				<div class="flex items-center gap-2 px-4 py-3 border-t border-border bg-bg-tertiary/20">
 					{#if reviewingItem.status === 'pending'}
 						<button
 							class="px-4 py-1.5 text-xs bg-accent text-bg font-semibold rounded hover:bg-accent/80 transition-colors"
@@ -385,13 +381,13 @@
 		{/if}
 
 		<!-- Item list -->
-		<div class="space-y-1">
+		<div class="table-float divide-y divide-border/35">
 			{#each filteredItems as item (item.id)}
 				<button
-					class="w-full flex items-center gap-3 px-4 py-2.5 rounded border transition-colors text-left
+					class="w-full flex items-center gap-3 px-4 py-2.5 transition-colors text-left
 						{reviewingItem?.id === item.id
-							? 'bg-accent/5 border-accent/30'
-							: 'bg-bg-secondary border-border/50 hover:border-border'}"
+							? 'bg-accent/5'
+							: 'hover:bg-bg-tertiary/20'}"
 					onclick={() => startReview(item)}
 				>
 					<!-- Status -->

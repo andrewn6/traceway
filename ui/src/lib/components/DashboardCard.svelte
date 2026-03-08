@@ -23,16 +23,17 @@
 </script>
 
 <div
-	class="dashboard-card bg-bg-secondary border border-border rounded-lg flex flex-col overflow-hidden transition-all duration-300"
+	class="dashboard-card table-float rounded-xl flex flex-col overflow-hidden transition-all duration-250"
 	style="grid-column: span {colSpan}; grid-row: span {rowSpan}; animation-delay: {index * 60}ms;
-		{hovered ? `border-color: ${accent}33; box-shadow: 0 0 20px ${accent}10, inset 0 1px 0 ${accent}15;` : ''}"
+		{hovered ? `border-color: ${accent}2e; box-shadow: 0 10px 22px -18px ${accent}22;` : ''}"
+	role="presentation"
 	onmouseenter={() => (hovered = true)}
 	onmouseleave={() => (hovered = false)}
 >
 	<!-- Top accent line -->
 	<div
-		class="h-[2px] transition-all duration-500"
-		style="background: linear-gradient(90deg, transparent, {accent}{hovered ? '60' : '20'}, transparent);"
+		class="h-[1px] transition-all duration-500"
+		style="background: linear-gradient(90deg, transparent, {accent}{hovered ? '56' : '20'}, transparent);"
 	></div>
 
 	<!-- Card header -->

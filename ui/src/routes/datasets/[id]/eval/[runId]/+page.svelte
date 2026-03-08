@@ -136,7 +136,17 @@
 	}
 </script>
 
-<div class="max-w-6xl mx-auto space-y-4">
+<div class="max-w-[1160px] mx-auto space-y-4">
+	<div class="grid grid-cols-1 lg:grid-cols-[170px_minmax(0,1fr)] gap-4 items-start">
+		<aside class="hidden lg:block">
+			<div class="app-toolbar-shell rounded-xl p-2 space-y-1 sticky top-18">
+				<a href="/datasets/{datasetId}" class="block px-2 py-1.5 text-xs rounded-lg border border-border/70 bg-bg-tertiary/60 text-text">Dataset</a>
+				<a href="/datasets/{datasetId}?tab=evals" class="block px-2 py-1.5 text-xs rounded-lg text-text-muted hover:text-text hover:bg-bg-tertiary/35 transition-colors">Eval runs</a>
+				<div class="px-2 py-1.5 text-xs rounded-lg bg-bg-tertiary/40 text-text">Run details</div>
+			</div>
+		</aside>
+
+		<div class="space-y-4">
 	<!-- Header -->
 	<div class="flex items-center justify-between">
 		<a href="/datasets/{datasetId}" class="text-text-secondary hover:text-text text-sm">&larr; Back to dataset</a>
@@ -219,31 +229,28 @@
 		{/if}
 
 		<!-- Filter pills -->
-		<div class="flex items-center gap-2">
+		<div class="app-toolbar-shell rounded-xl p-2 flex items-center gap-1.5 flex-wrap">
 			<button
-				class="px-2 py-1 text-xs rounded border cursor-pointer transition-colors
-					{filterStatus === 'all' ? 'bg-text-muted/20 text-text border-text-muted/30' : 'bg-transparent text-text-muted border-transparent hover:text-text'}"
+				class="query-chip {filterStatus === 'all' ? 'query-chip-active' : ''}"
 				onclick={() => (filterStatus = 'all')}
 			>All ({statusCounts.all})</button>
 			<button
-				class="px-2 py-1 text-xs rounded border cursor-pointer transition-colors
-					{filterStatus === 'passed' ? 'bg-success/20 text-success border-success/30' : 'bg-transparent text-text-muted border-transparent hover:text-text'}"
+				class="query-chip {filterStatus === 'passed' ? 'query-chip-active' : ''}"
 				onclick={() => (filterStatus = 'passed')}
 			>Passed ({statusCounts.passed})</button>
 			<button
-				class="px-2 py-1 text-xs rounded border cursor-pointer transition-colors
-					{filterStatus === 'failed' ? 'bg-danger/20 text-danger border-danger/30' : 'bg-transparent text-text-muted border-transparent hover:text-text'}"
+				class="query-chip {filterStatus === 'failed' ? 'query-chip-active' : ''}"
 				onclick={() => (filterStatus = 'failed')}
 			>Failed ({statusCounts.failed})</button>
 			<button
-				class="px-2 py-1 text-xs rounded border cursor-pointer transition-colors
-					{filterStatus === 'errors' ? 'bg-warning/20 text-warning border-warning/30' : 'bg-transparent text-text-muted border-transparent hover:text-text'}"
+				class="query-chip {filterStatus === 'errors' ? 'query-chip-active' : ''}"
 				onclick={() => (filterStatus = 'errors')}
 			>Errors ({statusCounts.errors})</button>
 		</div>
 
 		<!-- Results table -->
-		<div class="grid grid-cols-[minmax(200px,1fr)_minmax(200px,1fr)_80px_80px] gap-3 px-3 text-xs text-text-muted uppercase items-center">
+		<div class="table-float">
+		<div class="grid grid-cols-[minmax(200px,1fr)_minmax(200px,1fr)_80px_80px] gap-3 px-3 py-2 text-xs text-text-muted uppercase items-center">
 			<span>Input</span>
 			<span>Output</span>
 			<span>Score</span>
@@ -256,11 +263,20 @@
 			</div>
 		{:else}
 			<div class="space-y-0">
-				{#each filteredResults as result (result.id)}
-					<div
-						class="border-b border-border/50 hover:bg-bg-secondary transition-colors cursor-pointer"
-						onclick={() => (expandedRow = expandedRow === result.id ? null : result.id)}
-					>
+			{#each filteredResults as result (result.id)}
+				<div
+					class="border-b border-border/50 hover:bg-bg-secondary transition-colors cursor-pointer"
+					role="button"
+					tabindex={0}
+					aria-label={`Toggle eval result ${shortId(result.id)}`}
+					onclick={() => (expandedRow = expandedRow === result.id ? null : result.id)}
+					onkeydown={(e) => {
+						if (e.key === 'Enter' || e.key === ' ') {
+							e.preventDefault();
+							expandedRow = expandedRow === result.id ? null : result.id;
+						}
+					}}
+				>
 						<div class="grid grid-cols-[minmax(200px,1fr)_minmax(200px,1fr)_80px_80px] gap-3 items-center px-3 py-2 text-sm">
 							<span class="text-text-secondary text-xs truncate font-mono">{truncate(formatJson(result.actual_output), 100)}</span>
 							<div class="text-xs">
@@ -305,5 +321,8 @@
 				{/each}
 			</div>
 		{/if}
+		</div>
 	{/if}
+		</div>
+	</div>
 </div>

@@ -1090,8 +1090,8 @@
 	</div>
 
 	<!-- Floating command bar -->
-	<div class="fixed left-1/2 bottom-4 -translate-x-1/2 z-40 w-[min(1080px,calc(100vw-1.25rem))]">
-		<div class="relative query-command-shell rounded-2xl p-2.5 sm:p-3" role="search" aria-label="Trace query command bar">
+	<div class="fixed left-1/2 bottom-3 -translate-x-1/2 z-40 w-[min(1080px,calc(100vw-1.25rem))]">
+		<div class="relative query-command-shell rounded-xl p-2 sm:p-2.5" role="search" aria-label="Trace query command bar">
 			{#if activePicker}
 				<div class="absolute left-0 right-0 bottom-full mb-2 query-float-strong rounded-xl border border-border/70 shadow-xl overflow-hidden">
 					<div class="px-3 py-2 border-b border-border/60 flex items-center gap-2">
@@ -1158,7 +1158,7 @@
 				</div>
 			{/if}
 
-			<div class="flex items-center gap-2 flex-wrap">
+			<div class="flex items-center gap-1.5 flex-wrap">
 				<button class="query-chip" onclick={() => (activePicker = 'kind')}>Kind</button>
 				<button class="query-chip" onclick={() => (activePicker = 'status')}>Status</button>
 				<button class="query-chip" onclick={() => (activePicker = 'time')}>Time</button>
@@ -1168,7 +1168,7 @@
 				<button class="query-chip hidden md:inline-flex" onclick={() => (activePicker = 'tokens')}>Tokens</button>
 				<button class="query-chip hidden md:inline-flex" onclick={() => (activePicker = 'cost')}>Cost</button>
 
-				<div class="flex items-center flex-1 rounded-xl border border-border/40 bg-bg/30 min-w-[240px] transition-all duration-200 focus-within:border-accent/55 focus-within:bg-bg/40">
+				<div class="flex items-center flex-1 rounded-lg border border-border/40 bg-bg/30 min-w-[240px] transition-all duration-200 focus-within:border-accent/55 focus-within:bg-bg/40">
 					<div class="pl-3 pr-2 text-text-muted/80">
 						<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 							<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
@@ -1183,7 +1183,7 @@
 						type="text"
 						placeholder="Filter spans... kind:llm_call since:1h"
 						aria-label="Query spans"
-						class="flex-1 bg-transparent py-2 text-[12px] sm:text-[13px] font-mono text-text placeholder:text-text-muted/45 focus:outline-none"
+						class="flex-1 bg-transparent py-1.5 text-[12px] sm:text-[13px] font-mono text-text placeholder:text-text-muted/45 focus:outline-none"
 					/>
 					{#if dslInput}
 						<button
@@ -1201,13 +1201,13 @@
 				<button
 					onclick={applyDsl}
 					disabled={loading}
-					class="px-4 py-2 bg-accent text-bg rounded-lg text-xs font-semibold tracking-wide hover:bg-accent/90 disabled:opacity-50 transition-colors"
+					class="px-3.5 py-1.5 bg-accent text-bg rounded-lg text-xs font-semibold tracking-wide hover:bg-accent/90 disabled:opacity-50 transition-colors"
 				>
 					{loading ? '...' : 'Query'}
 				</button>
 			</div>
 
-			<div class="mt-2 flex items-center gap-2.5 flex-wrap min-h-[34px]">
+			<div class="mt-1.5 flex items-center gap-2 flex-wrap min-h-[30px]">
 				{#if activePills.length > 0}
 					{#each activePills as pill}
 						<button onclick={() => removePill(pill)} class="query-chip query-chip-active">

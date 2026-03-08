@@ -92,20 +92,20 @@
 
 				// Filter traces client-side by name
 				const matchedTraces = tracesRes.items
-					.filter((t) => t.name?.toLowerCase().includes(q) || t.id.toLowerCase().includes(q))
+					.filter((t: Trace) => t.name?.toLowerCase().includes(q) || t.id.toLowerCase().includes(q))
 					.slice(0, 5)
-					.map((t): TraceResult => ({ type: 'trace', trace: t }));
+					.map((t: Trace): TraceResult => ({ type: 'trace', trace: t }));
 
 				// Filter datasets client-side by name
 				const matchedDatasets = datasetsRes.datasets
-					.filter((d) => d.name.toLowerCase().includes(q) || d.id.toLowerCase().includes(q))
+					.filter((d: DatasetWithCount) => d.name.toLowerCase().includes(q) || d.id.toLowerCase().includes(q))
 					.slice(0, 3)
-					.map((d): DatasetResult => ({ type: 'dataset', dataset: d }));
+					.map((d: DatasetWithCount): DatasetResult => ({ type: 'dataset', dataset: d }));
 
 				// Span results from text search
 				const matchedSpans = spansRes.items
 					.slice(0, 8)
-					.map((s): SpanResult => ({ type: 'span', span: s }));
+					.map((s: Span): SpanResult => ({ type: 'span', span: s }));
 
 				dataResults.push(...matchedTraces, ...matchedDatasets, ...matchedSpans);
 				results = dataResults;

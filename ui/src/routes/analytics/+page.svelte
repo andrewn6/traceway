@@ -254,8 +254,8 @@
 <svelte:window onclick={() => { showIntervalDropdown = false; }} />
 
 <!-- Dashboard header bar -->
-<div class="flex items-center gap-3 mb-5 flex-wrap">
-	<div class="flex items-center gap-2 bg-bg-secondary border border-border rounded-lg px-3 py-1.5">
+<div class="max-w-[1160px] mx-auto app-toolbar-shell rounded-xl p-2 flex items-center gap-2 mb-5 flex-wrap">
+	<div class="flex items-center gap-2 px-2 py-1 rounded-md bg-bg-tertiary/35 border border-border/55">
 		<svg class="w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
 			<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
 		</svg>
@@ -263,12 +263,12 @@
 	</div>
 
 	<!-- Time range buttons -->
-	<div class="flex items-center bg-bg-secondary border border-border rounded-lg p-0.5">
+	<div class="flex items-center bg-bg-tertiary/35 border border-border/55 rounded-md p-0.5">
 		{#each timeRangeOptions as opt}
 			<button
 				class="px-2.5 py-1 rounded-md text-xs font-medium transition-all duration-200 cursor-pointer
 					{timeRange === opt.key
-						? 'bg-accent/15 text-accent shadow-sm'
+						? 'bg-bg-tertiary text-text border border-border/60'
 						: 'text-text-muted hover:text-text-secondary'}"
 				onclick={() => (timeRange = opt.key)}
 			>
@@ -278,7 +278,7 @@
 	</div>
 
 	<!-- Date display -->
-	<div class="flex items-center gap-1.5 bg-bg-secondary border border-border rounded-lg px-3 py-1.5 text-xs text-text-secondary">
+	<div class="flex items-center gap-1.5 bg-bg-tertiary/35 border border-border/55 rounded-md px-3 py-1.5 text-xs text-text-secondary">
 		<svg class="w-3.5 h-3.5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
 			<path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
 		</svg>
@@ -288,7 +288,7 @@
 	<!-- Interval selector -->
 	<div class="relative">
 		<button
-			class="flex items-center gap-1.5 bg-bg-secondary border border-border rounded-lg px-3 py-1.5 text-xs text-text-secondary hover:text-text transition-colors cursor-pointer"
+			class="flex items-center gap-1.5 bg-bg-tertiary/35 border border-border/55 rounded-md px-3 py-1.5 text-xs text-text-secondary hover:text-text transition-colors cursor-pointer"
 			onclick={(e) => { e.stopPropagation(); showIntervalDropdown = !showIntervalDropdown; }}
 		>
 			{intervalOptions.find((o) => o.key === interval)?.label ?? 'By hour'}
@@ -321,10 +321,10 @@
 
 	<!-- Layout config button -->
 	<button
-		class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition-all duration-200 cursor-pointer
+		class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-all duration-200 cursor-pointer
 			{showLayoutEditor
-				? 'bg-accent/15 text-accent border border-accent/30'
-				: 'bg-bg-secondary border border-border text-text-secondary hover:text-text hover:border-text-muted'}"
+				? 'bg-bg-tertiary text-text border border-border/65'
+				: 'bg-bg-tertiary/35 border border-border/55 text-text-secondary hover:text-text hover:border-text-muted'}"
 		onclick={() => (showLayoutEditor = !showLayoutEditor)}
 	>
 		<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -336,7 +336,7 @@
 
 <!-- Layout editor panel -->
 {#if showLayoutEditor}
-	<div class="bg-bg-secondary border border-border rounded-lg p-4 mb-5 space-y-3 animate-slide-down">
+	<div class="max-w-[1160px] mx-auto bg-bg-secondary border border-border rounded-lg p-4 mb-5 space-y-3 animate-slide-down">
 		<div class="flex items-center justify-between">
 			<span class="text-text text-sm font-medium">Configure Layout</span>
 			<button
@@ -415,24 +415,24 @@
 {/if}
 
 {#if loading}
-	<div class="text-text-muted text-sm py-16 text-center">
+	<div class="max-w-[1160px] mx-auto text-text-muted text-sm py-16 text-center">
 		<div class="inline-flex items-center gap-2">
 			<div class="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin"></div>
 			Loading analytics...
 		</div>
 	</div>
 {:else if error}
-	<div class="bg-bg-secondary border border-border rounded-lg p-8 text-center">
+	<div class="max-w-[1160px] mx-auto bg-bg-secondary border border-border rounded-lg p-8 text-center">
 		<p class="text-text-muted text-sm">{error}</p>
 	</div>
 {:else if !summary || summary.total_spans === 0}
-	<div class="bg-bg-secondary border border-border rounded-lg p-8 text-center space-y-2">
+	<div class="max-w-[1160px] mx-auto bg-bg-secondary border border-border rounded-lg p-8 text-center space-y-2">
 		<div class="text-text-muted text-sm">No data yet</div>
 		<div class="text-text-muted/60 text-xs">Create some traces to see analytics.</div>
 	</div>
 {:else}
 	<!-- Dashboard grid -->
-	<div class="grid grid-cols-6 gap-4 auto-rows-auto">
+	<div class="max-w-[1160px] mx-auto grid grid-cols-6 gap-4 auto-rows-auto">
 		{#each visibleCards as card, idx (card.id)}
 			{#if card.id === 'top_model_tokens'}
 				<DashboardCard title="Top model tokens" colSpan={card.col} rowSpan={card.row} accent={cardAccents[card.id]} index={idx}>
@@ -441,7 +441,7 @@
 					</div>
 					<HorizontalBarList
 						accentColor={cardAccents[card.id]}
-						items={summary.tokens_by_model.map((t) => ({
+						items={summary.tokens_by_model.map((t: any) => ({
 							label: t.model,
 							value: t.total_tokens,
 						}))}
@@ -454,7 +454,7 @@
 					</div>
 					<HorizontalBarList
 						accentColor={cardAccents[card.id]}
-						items={summary.cost_by_model.map((c) => ({
+						items={summary.cost_by_model.map((c: any) => ({
 							label: c.model,
 							value: c.span_count,
 						}))}
@@ -467,7 +467,7 @@
 					</div>
 					<HorizontalBarList
 						accentColor={cardAccents[card.id]}
-						items={summary.tokens_by_model.map((t) => ({
+						items={summary.tokens_by_model.map((t: any) => ({
 							label: t.model,
 							value: t.total_tokens,
 						}))}
@@ -485,7 +485,7 @@
 				<DashboardCard title="Tokens by model (sum)" colSpan={card.col} rowSpan={card.row} accent={cardAccents[card.id]} index={idx}>
 					<div class="h-44 flex items-end justify-center gap-3 pt-4 relative">
 						{#each summary.tokens_by_model as item, bi}
-							{@const maxTokens = Math.max(...summary.tokens_by_model.map((t) => t.total_tokens))}
+							{@const maxTokens = Math.max(...summary.tokens_by_model.map((t: any) => t.total_tokens))}
 							<div
 								class="flex flex-col items-center gap-1 flex-1 max-w-20 group/bar"
 								role="listitem"
@@ -545,7 +545,7 @@
 					</div>
 					<HorizontalBarList
 						accentColor={cardAccents[card.id]}
-						items={summary.cost_by_model.map((c) => ({
+						items={summary.cost_by_model.map((c: any) => ({
 							label: c.model,
 							value: c.cost,
 						}))}

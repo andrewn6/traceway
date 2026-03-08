@@ -69,18 +69,18 @@
 	const statusTone = $derived.by(() => {
 		if (status === 'failed') {
 			return {
-				row: 'border-danger/30 bg-danger/[0.04] hover:bg-danger/[0.08] hover:border-danger/45',
+				row: 'hover:bg-danger/[0.05]',
 				traceId: 'text-danger'
 			};
 		}
 		if (status === 'running') {
 			return {
-				row: 'border-warning/25 bg-warning/[0.03] hover:bg-warning/[0.08] hover:border-warning/40',
+				row: 'hover:bg-warning/[0.05]',
 				traceId: 'text-warning'
 			};
 		}
 		return {
-			row: 'border-border/60 bg-bg-secondary/30 hover:bg-success/[0.05] hover:border-success/30',
+			row: 'hover:bg-bg-tertiary/22',
 			traceId: 'text-accent'
 		};
 	});
@@ -88,10 +88,10 @@
 
 <a
 	href="/traces/{traceId}"
-	class="group grid grid-cols-[1fr_140px_80px_80px_80px_80px_80px_60px] gap-3 items-center py-3 px-3.5 rounded-xl text-sm transition-colors border glass-soft hover-lift {statusTone.row} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+	class="group grid grid-cols-[1fr_140px_80px_80px_80px_80px_80px_60px] gap-3 items-center py-2.5 px-3.5 text-sm transition-colors border-b border-border/35 {statusTone.row} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
 >
 	<div class="min-w-0">
-		<div class="font-mono text-xs truncate transition-colors {statusTone.traceId}">{shortId(traceId)}</div>
+		<div class="font-mono text-[12px] truncate transition-colors {statusTone.traceId}">{shortId(traceId)}</div>
 		{#if rootSpanName}
 			<div class="text-text-muted text-[11px] truncate group-hover:text-text-secondary transition-colors">{rootSpanName}</div>
 		{/if}
