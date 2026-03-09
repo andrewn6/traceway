@@ -1,0 +1,30 @@
+# Traceway Encore API container
+# - Docker context: repository root
+# - Service source: backend/app
+
+FROM node:20-bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Encore CLI
+RUN curl -L https://encore.dev/install.sh | bash
+ENV PATH="/root/.encore/bin:${PATH}"
+
+WORKDIR /app/backend/app
+
+# Install dependencies first for better layer caching
+COPY backend/app/package.json backend/app/bun.lock ./
+RUN npm install
+
+# Copy app source
+COPY backend/app/ ./
+
+EXPOSE 4000 9400
+
+# Local Encore API runtime inside container
+# Uses --listen when available, and falls back for older CLI variants.
+CMD ["sh", "-lc", "encore run --listen 0.0.0.0:4000 || encore run"]
