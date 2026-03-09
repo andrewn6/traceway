@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getApiKeys, createApiKey, deleteApiKey, type ApiKeyInfo, type ApiKeyCreated } from '$lib/api';
+	import FloatingInspector from '$lib/components/FloatingInspector.svelte';
 	import { onMount } from 'svelte';
 
 	let keys: ApiKeyInfo[] = $state([]);
@@ -10,6 +11,7 @@
 	let showCreate = $state(false);
 	let newKeyName = $state('');
 	let creating = $state(false);
+	let createPanelWidth: 'compact' | 'default' | 'wide' = $state('default');
 
 	// Newly created key (shown once)
 	let createdKey: ApiKeyCreated | null = $state(null);
@@ -73,7 +75,7 @@
 		</div>
 		<button
 			onclick={() => { showCreate = true; createdKey = null; }}
-			class="px-3 py-1.5 text-sm bg-accent text-bg font-semibold rounded-lg hover:bg-accent/80 transition-colors"
+			class="btn-primary"
 		>
 			Create key
 		</button>
@@ -85,7 +87,7 @@
 	</p>
 
 	{#if error}
-		<div class="bg-danger/10 border border-danger/30 rounded-xl px-3 py-2 text-danger text-sm">
+		<div class="alert-danger">
 			{error}
 		</div>
 	{/if}
@@ -110,38 +112,32 @@
 	{/if}
 
 	<!-- Create form -->
-	{#if showCreate}
-		<form onsubmit={handleCreate} class="glass-surface rounded-2xl p-4 space-y-3">
-			<h2 class="text-sm font-semibold text-text">New API Key</h2>
+	<FloatingInspector
+		open={showCreate}
+		title="New API key"
+		subtitle="Create an ingestion key"
+		width={createPanelWidth}
+		on:close={() => (showCreate = false)}
+		on:width={(e) => (createPanelWidth = e.detail.width)}
+	>
+		<form onsubmit={handleCreate} class="space-y-3">
 			<div>
-				<label for="key-name" class="block text-xs text-text-secondary mb-1">Key name</label>
+				<label for="key-name" class="label-micro block mb-1">Key name</label>
 				<input
 					id="key-name"
 					type="text"
 					bind:value={newKeyName}
 					required
 					placeholder="e.g. Production, CI/CD, Development"
-					class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
+					class="control-input"
 				/>
 			</div>
 			<div class="flex gap-2">
-				<button
-					type="submit"
-					disabled={creating}
-					class="px-4 py-1.5 text-sm bg-accent text-bg font-semibold rounded-lg hover:bg-accent/80 transition-colors disabled:opacity-50"
-				>
-					{creating ? 'Creating...' : 'Create'}
-				</button>
-				<button
-					type="button"
-					onclick={() => showCreate = false}
-					class="px-4 py-1.5 text-sm bg-bg-tertiary text-text rounded-lg hover:bg-bg-secondary transition-colors"
-				>
-					Cancel
-				</button>
+				<button type="submit" disabled={creating} class="btn-primary">{creating ? 'Creating...' : 'Create'}</button>
+				<button type="button" onclick={() => (showCreate = false)} class="btn-secondary">Cancel</button>
 			</div>
 		</form>
-	{/if}
+	</FloatingInspector>
 
 	<!-- Keys list -->
 	{#if loading}

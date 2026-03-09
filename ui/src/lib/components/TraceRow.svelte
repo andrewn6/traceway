@@ -24,6 +24,7 @@
 		confirmDelete = false;
 	}
 
+
 	const firstSpan = $derived(spans[0]);
 	const status = $derived.by(() => {
 		if (spans.some((s) => spanStatus(s) === 'failed')) return 'failed';

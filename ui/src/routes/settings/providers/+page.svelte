@@ -8,6 +8,7 @@
 		type ProviderConnectionInfo,
 		type AuthConfig
 	} from '$lib/api';
+	import FloatingInspector from '$lib/components/FloatingInspector.svelte';
 	import { onMount } from 'svelte';
 
 	let authConfig: AuthConfig = $state({ mode: 'local', features: [] });
@@ -128,6 +129,7 @@
 	let formApiKey = $state('');
 	let formDefaultModel = $state('');
 	let creating = $state(false);
+	let modalWidth: 'compact' | 'default' | 'wide' = $state('default');
 
 	// Edit state
 	let editingId: string | null = $state(null);
@@ -263,15 +265,15 @@
 		</div>
 		<button
 			onclick={openAddModal}
-			class="px-4 py-2 text-sm bg-accent text-bg font-semibold rounded-lg hover:bg-accent/80 transition-colors"
+			class="btn-primary px-4"
 		>+ Add Provider</button>
 	</div>
 
 	{#if error && !showModal}
-		<div class="bg-danger/10 border border-danger/30 rounded-xl px-3 py-2 text-danger text-sm">{error}</div>
+		<div class="alert-danger">{error}</div>
 	{/if}
 	{#if success}
-		<div class="bg-success/10 border border-success/30 rounded-xl px-3 py-2 text-success text-sm">{success}</div>
+		<div class="alert-success">{success}</div>
 	{/if}
 
 	<!-- Active connections -->
@@ -283,7 +285,7 @@
 			<p class="text-text-muted text-xs mb-4">Add a provider to run evals and use LLM features.</p>
 			<button
 				onclick={openAddModal}
-				class="px-4 py-2 text-sm bg-accent text-bg font-semibold rounded-lg hover:bg-accent/80 transition-colors"
+				class="btn-primary px-4"
 			>+ Add Provider</button>
 		</div>
 	{:else}
@@ -378,36 +380,29 @@
 
 <!-- Add Provider Modal -->
 {#if showModal}
-	<!-- Backdrop -->
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<div class="fixed inset-0 z-[140] flex items-center justify-center bg-black/65 backdrop-blur-sm p-4" onclick={(e) => { if (e.target === e.currentTarget) closeModal(); }}>
-		<div class="bg-bg-secondary border border-border rounded-xl shadow-2xl w-full max-w-md overflow-hidden max-h-[88vh] overflow-y-auto">
-			<!-- Header -->
-			<div class="px-5 py-4 border-b border-border flex items-center justify-between">
-				<h2 class="text-base font-semibold text-text">Add API key</h2>
-				<button onclick={closeModal} class="text-text-muted hover:text-text transition-colors" aria-label="Close add provider modal" title="Close">
-					<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-						<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-					</svg>
-				</button>
-			</div>
-
-			<div class="p-5 space-y-4">
+	<FloatingInspector
+		open={showModal}
+		title="Add API key"
+		subtitle={selectedProvider ? selectedProvider.name : 'Provider connection'}
+		width={modalWidth}
+		on:close={closeModal}
+		on:width={(e) => (modalWidth = e.detail.width)}
+	>
+		<div class="space-y-4">
 				{#if error}
-					<div class="bg-danger/10 border border-danger/30 rounded px-3 py-2 text-danger text-xs">{error}</div>
+					<div class="alert-danger">{error}</div>
 				{/if}
 
 				<!-- Name -->
 				<div>
-					<label for="modal-name" class="block text-xs text-text-secondary mb-1.5">Name</label>
+					<label for="modal-name" class="label-micro block mb-1.5">Name</label>
 					<input id="modal-name" type="text" bind:value={formName} placeholder="My OpenAI key"
-						class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent" />
+						class="control-input" />
 				</div>
 
 				<!-- Provider dropdown -->
 				<div>
-					<label for="modal-provider" class="block text-xs text-text-secondary mb-1.5">API key provider</label>
+					<label for="modal-provider" class="label-micro block mb-1.5">API key provider</label>
 					<div class="relative">
 						<select
 							id="modal-provider"
@@ -420,7 +415,7 @@
 									formDefaultModel = prov.defaultModel;
 								}
 							}}
-							class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2.5 text-sm text-text focus:outline-none focus:border-accent appearance-none cursor-pointer"
+							class="control-select appearance-none cursor-pointer"
 						>
 							<option value="" disabled>Select a provider...</option>
 							{#each visibleProviders as prov}
@@ -440,9 +435,9 @@
 							<div class="w-5 h-5 flex items-center justify-center" style="color: {selectedProvider.color}">
 								{@html selectedProvider.icon}
 							</div>
-							<span class="text-xs text-text-secondary">{selectedProvider.name}</span>
+							<span class="text-[12px] text-text-secondary">{selectedProvider.name}</span>
 							{#if selectedProvider.defaultModel}
-								<span class="text-[10px] font-mono text-text-muted bg-bg-tertiary px-1.5 py-0.5 rounded">{selectedProvider.defaultModel}</span>
+								<span class="text-[11px] font-mono text-text-muted bg-bg-tertiary px-1.5 py-0.5 rounded">{selectedProvider.defaultModel}</span>
 							{/if}
 						</div>
 					{/if}
@@ -452,42 +447,39 @@
 				{#if selectedProvider}
 					{#if selectedProvider.needsKey}
 						<div>
-							<label for="modal-key" class="block text-xs text-text-secondary mb-1.5">API Key</label>
+							<label for="modal-key" class="label-micro block mb-1.5">API Key</label>
 							<input id="modal-key" type="password" bind:value={formApiKey} placeholder={selectedProvider.keyPlaceholder}
-								class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent font-mono" />
+								class="control-input font-mono" />
 						</div>
 					{/if}
 
 					<!-- Default model -->
 					<div>
-						<label for="modal-model" class="block text-xs text-text-secondary mb-1.5">Default Model</label>
+						<label for="modal-model" class="label-micro block mb-1.5">Default Model</label>
 						<input id="modal-model" type="text" bind:value={formDefaultModel} placeholder={selectedProvider.defaultModel || 'e.g. gpt-4o'}
-							class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent font-mono" />
+							class="control-input font-mono" />
 					</div>
 
 					<!-- Base URL (only for custom/azure or if changed) -->
 					{#if selectedProvider.id === 'custom' || selectedProvider.id === 'azure' || !selectedProvider.baseUrl}
 						<div>
-							<label for="modal-url" class="block text-xs text-text-secondary mb-1.5">Base URL</label>
+							<label for="modal-url" class="label-micro block mb-1.5">Base URL</label>
 							<input id="modal-url" type="text" bind:value={formBaseUrl} placeholder={selectedProvider.baseUrl || 'https://api.example.com/v1'}
-								class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-xs text-text placeholder:text-text-muted focus:outline-none focus:border-accent font-mono" />
+								class="control-input font-mono text-[12px]" />
 						</div>
 					{/if}
 				{/if}
-			</div>
-
 			<!-- Footer -->
-			<div class="px-5 py-4 border-t border-border flex items-center justify-end gap-3">
-				<button onclick={closeModal}
-					class="px-4 py-2 text-sm text-text-secondary hover:text-text transition-colors">Cancel</button>
+			<div class="pt-1 border-t border-border flex items-center justify-end gap-3">
+				<button onclick={closeModal} class="btn-ghost">Cancel</button>
 				<button
 					onclick={handleCreate}
 					disabled={creating || !selectedProvider || !formName.trim() || (selectedProvider?.needsKey && !formApiKey.trim())}
-					class="px-5 py-2 text-sm bg-accent text-bg font-semibold rounded-lg hover:bg-accent/80 disabled:opacity-40 transition-colors"
+					class="btn-primary px-5 disabled:opacity-40"
 				>
 					{creating ? 'Saving...' : 'Save'}
 				</button>
 			</div>
 		</div>
-	</div>
+	</FloatingInspector>
 {/if}

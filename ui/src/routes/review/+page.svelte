@@ -13,6 +13,7 @@
 		type DatasetWithCount,
 	} from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import FloatingInspector from '$lib/components/FloatingInspector.svelte';
 	import { onMount } from 'svelte';
 
 	let items: QueueItem[] = $state([]);
@@ -29,6 +30,7 @@
 	let reviewingItem: QueueItem | null = $state(null);
 	let editedJson = $state('');
 	let submitting = $state(false);
+	let inspectorWidth: 'compact' | 'default' | 'wide' = $state('default');
 
 	// Derived from reviewingItem for chat rendering
 	const reviewingMessages = $derived(reviewingItem ? extractMessages(reviewingItem.original_data) : null);
@@ -298,114 +300,28 @@
 			</div>
 		</div>
 	{:else}
-		<!-- Review detail panel (slides in when reviewing) -->
-		{#if reviewingItem}
-			<div class="mb-4 table-float border-accent/20 overflow-hidden">
-				<!-- Review header -->
-				<div class="flex items-center justify-between px-4 py-3 border-b border-border">
-					<div class="flex items-center gap-3">
-						<span class="text-sm font-semibold text-text">Reviewing</span>
-						<span class="text-xs text-text-muted font-mono">{shortId(reviewingItem.id)}</span>
-						<span class="text-xs text-text-muted">from</span>
-						<a href="/datasets/{reviewingItem.dataset_id}" class="text-xs text-accent hover:underline">
-							{datasetName(reviewingItem.dataset_id)}
-						</a>
-					</div>
-					<button class="text-text-muted hover:text-text text-xs" onclick={closeReview}>Close</button>
-				</div>
-
-				<!-- Content: chat messages or raw JSON -->
-				<div class="p-4">
-					{#if reviewingMessages}
-						<!-- Chat message view -->
-						<div class="space-y-2 mb-4">
-							<div class="text-xs text-text-muted uppercase mb-2">Conversation</div>
-							{#each reviewingMessages as msg}
-								<div class="rounded border px-3 py-2 {roleColor(msg.role)}">
-									<div class="text-[10px] font-semibold uppercase mb-1 {roleLabelColor(msg.role)}">{msg.role}</div>
-									<div class="text-sm text-text whitespace-pre-wrap">{msg.content}</div>
-								</div>
-							{/each}
-						</div>
-
-						{#if reviewingExpected}
-							<div class="mb-4">
-								<div class="text-xs text-text-muted uppercase mb-1">Expected Output</div>
-								<pre class="text-xs bg-bg-tertiary rounded p-3 overflow-auto max-h-40 font-mono text-text-secondary whitespace-pre-wrap">{formatJson(reviewingExpected)}</pre>
-							</div>
-						{/if}
-					{:else}
-						<!-- Raw data view -->
-						<div class="grid grid-cols-2 gap-4 mb-4">
-							<div>
-								<div class="text-xs text-text-muted uppercase mb-1">Original Data</div>
-								<pre class="text-xs bg-bg-tertiary rounded p-3 overflow-auto max-h-64 font-mono text-text-secondary whitespace-pre-wrap">{formatJson(reviewingItem.original_data)}</pre>
-							</div>
-							<div>
-								<div class="text-xs text-text-muted uppercase mb-1">Edit (optional)</div>
-								<textarea
-									bind:value={editedJson}
-									rows={10}
-									class="w-full bg-bg-tertiary border border-border rounded px-3 py-2 text-xs text-text font-mono resize-y"
-								></textarea>
-							</div>
-						</div>
-					{/if}
-				</div>
-
-				<!-- Actions -->
-				<div class="flex items-center gap-2 px-4 py-3 border-t border-border bg-bg-tertiary/20">
-					{#if reviewingItem.status === 'pending'}
-						<button
-							class="px-4 py-1.5 text-xs bg-accent text-bg font-semibold rounded hover:bg-accent/80 transition-colors"
-							onclick={() => handleClaim(reviewingItem!.id)}
-						>Claim & Start Review</button>
-					{:else if reviewingItem.status === 'claimed'}
-						<button
-							class="px-4 py-1.5 text-xs bg-success text-bg font-semibold rounded hover:bg-success/80 transition-colors disabled:opacity-50"
-							onclick={handleApprove}
-							disabled={submitting}
-						>Approve</button>
-						<button
-							class="px-4 py-1.5 text-xs bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded hover:bg-amber-400/20 transition-colors disabled:opacity-50"
-							onclick={handleSubmitEdited}
-							disabled={submitting}
-						>Submit with Edits</button>
-					{/if}
-					<div class="flex-1"></div>
-					{#if reviewingItem.claimed_by}
-						<span class="text-xs text-text-muted">Claimed by {reviewingItem.claimed_by}</span>
-					{/if}
-				</div>
-			</div>
-		{/if}
-
 		<!-- Item list -->
 		<div class="table-float divide-y divide-border/35">
+			<div class="grid grid-cols-[80px_1fr_110px_92px_70px] gap-3 px-4 py-2 table-head-compact border-b border-border/55">
+				<span>Dataset</span>
+				<span>Preview</span>
+				<span>Reviewer</span>
+				<span class="text-right">Created</span>
+				<span class="text-right">State</span>
+			</div>
 			{#each filteredItems as item (item.id)}
 				<button
-					class="w-full flex items-center gap-3 px-4 py-2.5 transition-colors text-left
+					class="w-full grid grid-cols-[80px_1fr_110px_92px_70px] gap-3 items-center px-4 py-2.5 transition-colors text-left
 						{reviewingItem?.id === item.id
 							? 'bg-accent/5'
 							: 'hover:bg-bg-tertiary/20'}"
 					onclick={() => startReview(item)}
 				>
-					<!-- Status -->
-					{#if item.status === 'pending'}
-						<StatusBadge status="running" />
-					{:else if item.status === 'claimed'}
-						<span class="w-2 h-2 rounded-full bg-accent shrink-0"></span>
-					{:else}
-						<StatusBadge status="completed" />
-					{/if}
-
-					<!-- Dataset name -->
-					<span class="text-xs text-text-muted w-28 truncate shrink-0">
+					<span class="text-[12px] text-text-muted truncate">
 						{datasetName(item.dataset_id)}
 					</span>
 
-				<!-- Preview of content -->
-				<span class="text-xs text-text-secondary flex-1 truncate font-mono">
+				<span class="text-[12px] text-text-secondary truncate font-mono">
 					{#if extractMessages(item.original_data)}
 						{@const messages = extractMessages(item.original_data)!}
 						{messages[messages.length - 1].role}: {messages[messages.length - 1].content.slice(0, 100)}
@@ -414,15 +330,11 @@
 					{/if}
 				</span>
 
-					<!-- Claimed by -->
-					{#if item.claimed_by}
-						<span class="text-[10px] text-text-muted shrink-0">{item.claimed_by}</span>
-					{/if}
+					<span class="text-[11px] text-text-muted truncate">{item.claimed_by ?? '-'}</span>
 
-					<!-- Timestamp -->
-					<span class="text-[10px] text-text-muted shrink-0 w-24 text-right">{formatDate(item.created_at)}</span>
+					<span class="text-[11px] text-text-muted text-right">{formatDate(item.created_at)}</span>
 
-					<!-- Quick action -->
+					<div class="text-right">
 					{#if item.status === 'pending'}
 						<!-- svelte-ignore a11y_click_events_have_key_events -->
 						<span
@@ -436,8 +348,64 @@
 					{:else}
 						<span class="px-2 py-0.5 text-[10px] text-success border border-success/20 rounded shrink-0">done</span>
 					{/if}
+					</div>
 				</button>
 			{/each}
 		</div>
+
+		<FloatingInspector
+			open={!!reviewingItem}
+			title={reviewingItem ? `Review ${shortId(reviewingItem.id)}` : 'Review'}
+			subtitle={reviewingItem ? `Dataset: ${datasetName(reviewingItem.dataset_id)}` : ''}
+			width={inspectorWidth}
+			on:close={closeReview}
+			on:width={(e) => (inspectorWidth = e.detail.width)}
+		>
+			{#if reviewingItem}
+				<div class="space-y-3">
+					{#if reviewingMessages}
+						<div class="space-y-2">
+							<div class="text-xs text-text-muted uppercase mb-1">Conversation</div>
+							{#each reviewingMessages as msg}
+								<div class="rounded border px-3 py-2 {roleColor(msg.role)}">
+									<div class="text-[10px] font-semibold uppercase mb-1 {roleLabelColor(msg.role)}">{msg.role}</div>
+									<div class="text-sm text-text whitespace-pre-wrap">{msg.content}</div>
+								</div>
+							{/each}
+						</div>
+						{#if reviewingExpected}
+							<div>
+								<div class="text-xs text-text-muted uppercase mb-1">Expected Output</div>
+								<pre class="text-xs query-float rounded p-3 overflow-auto max-h-40 font-mono text-text-secondary whitespace-pre-wrap">{formatJson(reviewingExpected)}</pre>
+							</div>
+						{/if}
+					{:else}
+						<div class="space-y-2">
+							<div>
+								<div class="text-xs text-text-muted uppercase mb-1">Original Data</div>
+								<pre class="text-xs query-float rounded p-3 overflow-auto max-h-64 font-mono text-text-secondary whitespace-pre-wrap">{formatJson(reviewingItem.original_data)}</pre>
+							</div>
+							<div>
+								<div class="text-xs text-text-muted uppercase mb-1">Edit (optional)</div>
+								<textarea bind:value={editedJson} rows={10} class="w-full bg-bg-tertiary border border-border rounded px-3 py-2 text-xs text-text font-mono resize-y"></textarea>
+							</div>
+						</div>
+					{/if}
+
+					<div class="flex items-center gap-2 pt-2 border-t border-border/60">
+						{#if reviewingItem.status === 'pending'}
+							<button class="px-4 py-1.5 text-xs bg-accent text-bg font-semibold rounded hover:bg-accent/80 transition-colors" onclick={() => handleClaim(reviewingItem.id)}>Claim & Start</button>
+						{:else if reviewingItem.status === 'claimed'}
+							<button class="px-4 py-1.5 text-xs bg-success text-bg font-semibold rounded hover:bg-success/80 transition-colors disabled:opacity-50" onclick={handleApprove} disabled={submitting}>Approve</button>
+							<button class="px-4 py-1.5 text-xs bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded hover:bg-amber-400/20 transition-colors disabled:opacity-50" onclick={handleSubmitEdited} disabled={submitting}>Submit edits</button>
+						{/if}
+						<div class="flex-1"></div>
+						{#if reviewingItem.claimed_by}
+							<span class="text-xs text-text-muted">Claimed by {reviewingItem.claimed_by}</span>
+						{/if}
+					</div>
+				</div>
+			{/if}
+		</FloatingInspector>
 	{/if}
 </div>

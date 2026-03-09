@@ -155,7 +155,7 @@
 	</div>
 
 	{#if error}
-		<div class="bg-danger/10 border border-danger/30 rounded px-3 py-2 text-danger text-sm">{error}</div>
+		<div class="alert-danger">{error}</div>
 	{/if}
 
 	{#if loading || !org}
@@ -225,7 +225,7 @@
 			</div>
 
 			{#if usageError}
-				<div class="text-[12px] text-warning border border-warning/30 bg-warning/8 rounded-lg px-3 py-2">{usageError}</div>
+				<div class="alert-warning text-[12px]">{usageError}</div>
 			{/if}
 
 			<div class="table-float p-0 overflow-hidden">

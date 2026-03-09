@@ -46,51 +46,51 @@
 			<p class="text-text-muted text-sm mt-1">Create your account</p>
 		</div>
 
-		<form onsubmit={handleSubmit} class="bg-bg-secondary border border-border rounded p-6 space-y-4">
+		<form onsubmit={handleSubmit} class="auth-card space-y-4">
 			{#if error}
-				<div class="bg-danger/10 border border-danger/30 rounded px-3 py-2 text-danger text-sm">
+				<div class="alert-danger">
 					{error}
 				</div>
 			{/if}
 
 			<div>
-				<label for="name" class="block text-xs text-text-secondary mb-1">Name <span class="text-text-muted">(optional)</span></label>
+				<label for="name" class="label-micro block mb-1">Name <span class="text-text-muted">(optional)</span></label>
 				<input
 					id="name"
 					type="text"
 					bind:value={name}
 					autocomplete="name"
-					class="w-full bg-bg-tertiary border border-border rounded px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
+					class="control-input"
 					placeholder="Your name"
 				/>
 			</div>
 
 			<div>
-				<label for="org-name" class="block text-xs text-text-secondary mb-1">Organization <span class="text-text-muted">(optional)</span></label>
+				<label for="org-name" class="label-micro block mb-1">Organization <span class="text-text-muted">(optional)</span></label>
 				<input
 					id="org-name"
 					type="text"
 					bind:value={orgName}
-					class="w-full bg-bg-tertiary border border-border rounded px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
+					class="control-input"
 					placeholder="Your team or company"
 				/>
 			</div>
 
 			<div>
-				<label for="email" class="block text-xs text-text-secondary mb-1">Email</label>
+				<label for="email" class="label-micro block mb-1">Email</label>
 				<input
 					id="email"
 					type="email"
 					bind:value={email}
 					required
 					autocomplete="email"
-					class="w-full bg-bg-tertiary border border-border rounded px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
+					class="control-input"
 					placeholder="you@example.com"
 				/>
 			</div>
 
 			<div>
-				<label for="password" class="block text-xs text-text-secondary mb-1">Password</label>
+				<label for="password" class="label-micro block mb-1">Password</label>
 				<div class="relative">
 					<input
 						id="password"
@@ -99,7 +99,7 @@
 						required
 						autocomplete="new-password"
 						minlength="8"
-						class="w-full bg-bg-tertiary border border-border rounded px-3 py-2 pr-10 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
+						class="control-input pr-10"
 						placeholder="Min. 8 characters"
 					/>
 					<button
@@ -120,7 +120,7 @@
 			<button
 				type="submit"
 				disabled={loading}
-				class="w-full bg-accent text-bg font-semibold py-2 rounded text-sm hover:bg-accent/80 transition-colors disabled:opacity-50"
+			class="btn-primary w-full"
 			>
 				{loading ? 'Creating account...' : 'Create account'}
 			</button>

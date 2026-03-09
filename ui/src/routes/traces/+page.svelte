@@ -223,6 +223,7 @@ with client.trace("summarize-doc") as t:
 			return true;
 		});
 	});
+
 </script>
 
 <div class="app-shell-wide space-y-4">
@@ -335,7 +336,7 @@ with client.trace("summarize-doc") as t:
 			</div>
 
 			<div class="table-float">
-				<div class="grid grid-cols-[1fr_140px_80px_80px_80px_80px_80px_60px] gap-3 px-3.5 py-2 text-[10px] text-text-muted uppercase tracking-[0.15em]">
+				<div class="grid grid-cols-[1fr_140px_80px_80px_80px_80px_80px_60px] gap-3 px-3.5 py-2 table-head-compact">
 					<span>Trace</span>
 					<span>Timestamp</span>
 					<span class="text-center">Status</span>

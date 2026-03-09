@@ -7,6 +7,7 @@
 		type OrgMember,
 		type InviteInfo
 	} from '$lib/api';
+	import FloatingInspector from '$lib/components/FloatingInspector.svelte';
 	import { onMount } from 'svelte';
 
 	let members: OrgMember[] = $state([]);
@@ -20,6 +21,7 @@
 	let inviteRole = $state('member');
 	let sending = $state(false);
 	let sent = $state(false);
+	let invitePanelWidth: 'compact' | 'default' | 'wide' = $state('default');
 
 	// Delete confirm
 	let revokingId: string | null = $state(null);
@@ -78,7 +80,7 @@
 				showInvite = true;
 				sent = false;
 			}}
-			class="px-3 py-1.5 text-sm bg-accent text-bg font-semibold rounded-lg hover:bg-accent/80 transition-colors"
+			class="btn-primary"
 		>
 			Invite member
 		</button>
@@ -89,61 +91,51 @@
 	</p>
 
 	{#if error}
-		<div class="bg-danger/10 border border-danger/30 rounded-xl px-3 py-2 text-danger text-sm">
+		<div class="alert-danger">
 			{error}
 		</div>
 	{/if}
 
 	{#if sent}
-		<div class="bg-success/10 border border-success/30 rounded-xl px-3 py-2 text-success text-sm">
+		<div class="alert-success">
 			Invite sent successfully.
 		</div>
 	{/if}
 
 	<!-- Invite form -->
-	{#if showInvite}
-		<form onsubmit={handleInvite} class="glass-surface rounded-2xl p-4 space-y-3">
-			<h2 class="text-sm font-semibold text-text">Invite a team member</h2>
+	<FloatingInspector
+		open={showInvite}
+		title="Invite team member"
+		subtitle="Send an email invite"
+		width={invitePanelWidth}
+		on:close={() => (showInvite = false)}
+		on:width={(e) => (invitePanelWidth = e.detail.width)}
+	>
+		<form onsubmit={handleInvite} class="space-y-3">
 			<div>
-				<label for="invite-email" class="block text-xs text-text-secondary mb-1">Email address</label>
+				<label for="invite-email" class="label-micro block mb-1">Email address</label>
 				<input
 					id="invite-email"
 					type="email"
 					bind:value={inviteEmail}
 					required
 					placeholder="colleague@example.com"
-					class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
+					class="control-input"
 				/>
 			</div>
 			<div>
-				<label for="invite-role" class="block text-xs text-text-secondary mb-1">Role</label>
-				<select
-					id="invite-role"
-					bind:value={inviteRole}
-					class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent"
-				>
+				<label for="invite-role" class="label-micro block mb-1">Role</label>
+				<select id="invite-role" bind:value={inviteRole} class="control-select">
 					<option value="member">Member</option>
 					<option value="admin">Admin</option>
 				</select>
 			</div>
 			<div class="flex gap-2">
-				<button
-					type="submit"
-					disabled={sending}
-					class="px-4 py-1.5 text-sm bg-accent text-bg font-semibold rounded-lg hover:bg-accent/80 transition-colors disabled:opacity-50"
-				>
-					{sending ? 'Sending...' : 'Send invite'}
-				</button>
-				<button
-					type="button"
-					onclick={() => (showInvite = false)}
-					class="px-4 py-1.5 text-sm bg-bg-tertiary text-text rounded-lg hover:bg-bg-secondary transition-colors"
-				>
-					Cancel
-				</button>
+				<button type="submit" disabled={sending} class="btn-primary">{sending ? 'Sending...' : 'Send invite'}</button>
+				<button type="button" onclick={() => (showInvite = false)} class="btn-secondary">Cancel</button>
 			</div>
 		</form>
-	{/if}
+	</FloatingInspector>
 
 	<!-- Members list -->
 	<div class="space-y-2">

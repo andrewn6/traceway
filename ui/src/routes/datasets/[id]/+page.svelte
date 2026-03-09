@@ -39,6 +39,7 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import EvalScoreBadge from '$lib/components/EvalScoreBadge.svelte';
 	import EvalProgressBar from '$lib/components/EvalProgressBar.svelte';
+	import FloatingInspector from '$lib/components/FloatingInspector.svelte';
 	import { onMount } from 'svelte';
 
 	const datasetId = $derived(page.params.id ?? '');
@@ -281,6 +282,9 @@
 
 	// ── Bulk select ────────────────────────────────────────────────────
 	let selected: Set<string> = $state(new Set());
+	let selectedDatapointId: string | null = $state(null);
+	let datapointInspectorWidth: 'compact' | 'default' | 'wide' = $state('default');
+	const selectedDatapoint = $derived(datapoints.find((d) => d.id === selectedDatapointId) ?? null);
 
 	function toggleSelect(id: string) {
 		const next = new Set(selected);
@@ -462,6 +466,23 @@
 		return JSON.stringify(input);
 	}
 
+	function datapointData(dp: Datapoint): unknown {
+		const kind = dp.kind as any;
+		if (dp.kind.type === 'llm_conversation') return kind.messages ?? [];
+		return kind.input;
+	}
+
+	function datapointTarget(dp: Datapoint): unknown {
+		const kind = dp.kind as any;
+		if (dp.kind.type === 'llm_conversation') return kind.expected_output ?? null;
+		return kind.target ?? null;
+	}
+
+	function datapointMetadata(dp: Datapoint): unknown {
+		const kind = dp.kind as any;
+		return kind.metadata ?? null;
+	}
+
 	function formatDate(iso: string): string {
 		return new Date(iso).toLocaleDateString(undefined, {
 			month: 'short',
@@ -488,6 +509,16 @@
 		a.click();
 		URL.revokeObjectURL(url);
 	}
+
+	$effect(() => {
+		if (selectedDatapointId && !datapoints.some((d) => d.id === selectedDatapointId)) {
+			selectedDatapointId = null;
+		}
+	});
+
+	$effect(() => {
+		if (activeTab !== 'datapoints') selectedDatapointId = null;
+	});
 
 	const queueItemsByStatus = $derived.by(() => {
 		const pending = queueItems.filter((i) => i.status === 'pending');
@@ -683,11 +714,18 @@
 				{:else}
 					<div class="space-y-0">
 						{#each datapoints as dp (dp.id)}
-							<div class="grid grid-cols-[32px_80px_1fr_90px_120px_80px] gap-3 items-center px-3 py-2 text-sm border-b border-border/50 hover:bg-bg-secondary transition-colors">
+							<div
+								class="grid grid-cols-[32px_80px_1fr_90px_120px_80px] gap-3 items-center px-3 py-2 text-sm border-b border-border/50 hover:bg-bg-secondary transition-colors cursor-pointer {selectedDatapointId === dp.id ? 'bg-bg-secondary/70' : ''}"
+								onclick={() => (selectedDatapointId = dp.id)}
+								onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (selectedDatapointId = dp.id)}
+								role="button"
+								tabindex="0"
+							>
 								<label class="flex items-center justify-center">
 									<input
 										type="checkbox"
 										checked={selected.has(dp.id)}
+										onclick={(e) => e.stopPropagation()}
 										onchange={() => toggleSelect(dp.id)}
 										class="accent-amber-400"
 									/>
@@ -704,13 +742,55 @@
 								<div class="text-right flex items-center justify-end gap-2">
 									<button
 										class="text-text-muted hover:text-danger text-xs transition-colors"
-										onclick={() => handleDeleteDatapoint(dp.id)}
+										onclick={(e) => {
+											e.stopPropagation();
+											handleDeleteDatapoint(dp.id);
+										}}
 									>delete</button>
 								</div>
 							</div>
 						{/each}
 					</div>
 				{/if}
+
+				<FloatingInspector
+					open={!!selectedDatapoint}
+					title={selectedDatapoint ? selectedDatapoint.kind.type === 'llm_conversation' ? 'Conversation datapoint' : 'Datapoint' : 'Datapoint'}
+					subtitle={selectedDatapoint ? `${shortId(selectedDatapoint.id)} - ${formatDate(selectedDatapoint.created_at)}` : ''}
+					width={datapointInspectorWidth}
+					on:close={() => (selectedDatapointId = null)}
+					on:width={(e) => (datapointInspectorWidth = e.detail.width)}
+				>
+					{#if selectedDatapoint}
+						<div class="space-y-3">
+							<div class="grid grid-cols-2 gap-2 text-[12px]">
+								<div class="rounded-lg border border-border/60 bg-bg-secondary/35 px-2.5 py-2">
+									<div class="text-text-muted">Source</div>
+									<div class="text-text mt-0.5">{selectedDatapoint.source}</div>
+								</div>
+								<div class="rounded-lg border border-border/60 bg-bg-secondary/35 px-2.5 py-2">
+									<div class="text-text-muted">Kind</div>
+									<div class="text-text mt-0.5">{selectedDatapoint.kind.type}</div>
+								</div>
+							</div>
+
+							<div class="space-y-1.5">
+								<div class="text-[11px] uppercase tracking-[0.12em] text-text-muted">Data</div>
+								<pre class="query-float rounded-lg border border-border/60 p-2.5 text-[12px] text-text-secondary whitespace-pre-wrap">{formatJson(datapointData(selectedDatapoint))}</pre>
+							</div>
+
+							<div class="space-y-1.5">
+								<div class="text-[11px] uppercase tracking-[0.12em] text-text-muted">Target</div>
+								<pre class="query-float rounded-lg border border-border/60 p-2.5 text-[12px] text-text-secondary whitespace-pre-wrap">{formatJson(datapointTarget(selectedDatapoint))}</pre>
+							</div>
+
+							<div class="space-y-1.5">
+								<div class="text-[11px] uppercase tracking-[0.12em] text-text-muted">Metadata</div>
+								<pre class="query-float rounded-lg border border-border/60 p-2.5 text-[12px] text-text-secondary whitespace-pre-wrap">{formatJson(datapointMetadata(selectedDatapoint))}</pre>
+							</div>
+						</div>
+					{/if}
+				</FloatingInspector>
 			</div>
 
 		<!-- Tab: Import -->

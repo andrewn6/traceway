@@ -55,31 +55,31 @@
 		</div>
 
 		{#if !hasToken}
-			<div class="bg-danger/10 border border-danger/30 rounded px-3 py-2 text-danger text-sm">
+			<div class="alert-danger">
 				Invalid invite link. Please use the link from your invite email.
 			</div>
 		{:else}
-			<form onsubmit={handleSubmit} class="bg-bg-secondary border border-border rounded p-6 space-y-4">
+			<form onsubmit={handleSubmit} class="auth-card space-y-4">
 				{#if error}
-					<div class="bg-danger/10 border border-danger/30 rounded px-3 py-2 text-danger text-sm">
+					<div class="alert-danger">
 						{error}
 					</div>
 				{/if}
 
 				<div>
-					<label for="name" class="block text-xs text-text-secondary mb-1">Name <span class="text-text-muted">(optional)</span></label>
+					<label for="name" class="label-micro block mb-1">Name <span class="text-text-muted">(optional)</span></label>
 					<input
 						id="name"
 						type="text"
 						bind:value={name}
 						autocomplete="name"
-						class="w-full bg-bg-tertiary border border-border rounded px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
+						class="control-input"
 						placeholder="Your name"
 					/>
 				</div>
 
 				<div>
-					<label for="password" class="block text-xs text-text-secondary mb-1">Password</label>
+					<label for="password" class="label-micro block mb-1">Password</label>
 					<input
 						id="password"
 						type="password"
@@ -87,13 +87,13 @@
 						required
 						autocomplete="new-password"
 						minlength="8"
-						class="w-full bg-bg-tertiary border border-border rounded px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
+						class="control-input"
 						placeholder="Min. 8 characters"
 					/>
 				</div>
 
 				<div>
-					<label for="confirm-password" class="block text-xs text-text-secondary mb-1">Confirm password</label>
+					<label for="confirm-password" class="label-micro block mb-1">Confirm password</label>
 					<input
 						id="confirm-password"
 						type="password"
@@ -101,7 +101,7 @@
 						required
 						autocomplete="new-password"
 						minlength="8"
-						class="w-full bg-bg-tertiary border border-border rounded px-3 py-2 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent"
+						class="control-input"
 						placeholder="Repeat your password"
 					/>
 				</div>
@@ -109,7 +109,7 @@
 				<button
 					type="submit"
 					disabled={loading}
-					class="w-full bg-accent text-bg font-semibold py-2 rounded text-sm hover:bg-accent/80 transition-colors disabled:opacity-50"
+					class="btn-primary w-full"
 				>
 					{loading ? 'Creating account...' : 'Accept invite'}
 				</button>

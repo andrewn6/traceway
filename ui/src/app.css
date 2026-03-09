@@ -24,6 +24,10 @@ html {
 	font-family: var(--font-sans);
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
+	--radius-panel: 1rem;
+	--radius-control: 0.62rem;
+	--shadow-panel: 0 22px 52px -32px rgba(4, 14, 38, 0.78);
+	--shadow-float: 0 16px 30px -24px rgba(4, 14, 38, 0.8);
 }
 
 html[data-theme='light'] {
@@ -154,6 +158,109 @@ html[data-theme='light'] .glass-surface {
 	box-shadow: 0 22px 52px -32px rgba(4, 14, 38, 0.78);
 }
 
+.surface-panel {
+	background:
+		linear-gradient(180deg, color-mix(in oklab, var(--color-accent) 10%, transparent), transparent 35%),
+		color-mix(in oklab, var(--color-bg-secondary) 72%, transparent);
+	border: 1px solid color-mix(in oklab, var(--color-border) 78%, transparent);
+	backdrop-filter: blur(18px);
+	-webkit-backdrop-filter: blur(18px);
+	box-shadow: var(--shadow-panel);
+	border-radius: var(--radius-panel);
+}
+
+.surface-quiet {
+	background: color-mix(in oklab, var(--color-bg-secondary) 64%, transparent);
+	border: 1px solid color-mix(in oklab, var(--color-border) 56%, transparent);
+	backdrop-filter: blur(10px);
+	-webkit-backdrop-filter: blur(10px);
+	border-radius: var(--radius-control);
+}
+
+.surface-command {
+	background:
+		linear-gradient(180deg, color-mix(in oklab, #000 24%, transparent), transparent 40%),
+		color-mix(in oklab, var(--color-bg-secondary) 88%, transparent);
+	border: 1px solid color-mix(in oklab, var(--color-border) 76%, transparent);
+	backdrop-filter: blur(14px);
+	-webkit-backdrop-filter: blur(14px);
+	box-shadow: var(--shadow-float), 0 1px 0 0 color-mix(in oklab, #fff 8%, transparent) inset;
+	border-radius: calc(var(--radius-panel) - 0.1rem);
+}
+
+.command-input-shell {
+	display: flex;
+	align-items: center;
+	min-width: 15rem;
+	flex: 1 1 auto;
+	border-radius: var(--radius-control);
+	border: 1px solid color-mix(in oklab, var(--color-border) 64%, transparent);
+	background: color-mix(in oklab, var(--color-bg) 38%, transparent);
+	transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.command-input-shell:focus-within {
+	border-color: color-mix(in oklab, var(--color-accent) 60%, var(--color-border));
+	background: color-mix(in oklab, var(--color-bg) 52%, transparent);
+}
+
+.command-input {
+	flex: 1;
+	background: transparent;
+	padding: 0.38rem 0;
+	font-size: 0.81rem;
+	font-family: var(--font-mono);
+	color: var(--color-text);
+	outline: none;
+}
+
+.command-input::placeholder {
+	color: color-mix(in oklab, var(--color-text-muted) 75%, transparent);
+}
+
+.table-head-compact {
+	font-size: 0.66rem;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--color-text-muted);
+}
+
+.alert-danger,
+.alert-success,
+.alert-warning {
+	border-radius: var(--radius-control);
+	padding: 0.5rem 0.72rem;
+	font-size: 0.78rem;
+	border-width: 1px;
+	border-style: solid;
+}
+
+.alert-danger {
+	background: color-mix(in oklab, var(--color-danger) 10%, transparent);
+	border-color: color-mix(in oklab, var(--color-danger) 35%, transparent);
+	color: var(--color-danger);
+}
+
+.alert-success {
+	background: color-mix(in oklab, var(--color-success) 10%, transparent);
+	border-color: color-mix(in oklab, var(--color-success) 35%, transparent);
+	color: var(--color-success);
+}
+
+.alert-warning {
+	background: color-mix(in oklab, var(--color-warning) 10%, transparent);
+	border-color: color-mix(in oklab, var(--color-warning) 35%, transparent);
+	color: var(--color-warning);
+}
+
+.auth-card {
+	background: color-mix(in oklab, var(--color-bg-secondary) 94%, transparent);
+	border: 1px solid color-mix(in oklab, var(--color-border) 75%, transparent);
+	border-radius: var(--radius-panel);
+	padding: 1.5rem;
+	box-shadow: 0 18px 34px -28px rgba(4, 14, 38, 0.75);
+}
+
 .query-command-shell {
 	background:
 		linear-gradient(180deg, color-mix(in oklab, #000 24%, transparent), transparent 40%),
@@ -164,6 +271,93 @@ html[data-theme='light'] .glass-surface {
 	box-shadow:
 		0 14px 24px -18px rgba(4, 14, 38, 0.85),
 		0 1px 0 0 color-mix(in oklab, #fff 8%, transparent) inset;
+}
+
+.label-micro {
+	font-size: 0.69rem;
+	line-height: 1.05rem;
+	letter-spacing: 0.03em;
+	font-weight: 500;
+	color: var(--color-text-secondary);
+}
+
+.control-input,
+.control-select,
+.control-textarea {
+	width: 100%;
+	background: color-mix(in oklab, var(--color-bg-tertiary) 94%, transparent);
+	border: 1px solid color-mix(in oklab, var(--color-border) 88%, transparent);
+	border-radius: var(--radius-control);
+	padding: 0.52rem 0.72rem;
+	font-size: 0.82rem;
+	color: var(--color-text);
+	outline: none;
+	transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.control-input::placeholder,
+.control-textarea::placeholder {
+	color: color-mix(in oklab, var(--color-text-muted) 88%, transparent);
+}
+
+.control-input:focus,
+.control-select:focus,
+.control-textarea:focus {
+	border-color: color-mix(in oklab, var(--color-accent) 62%, var(--color-border));
+	background: color-mix(in oklab, var(--color-bg-tertiary) 98%, transparent);
+}
+
+.btn-primary,
+.btn-secondary,
+.btn-ghost {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 2rem;
+	padding: 0 0.85rem;
+	font-size: 0.78rem;
+	font-weight: 600;
+	border-radius: var(--radius-control);
+	transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease;
+}
+
+.btn-primary {
+	background: var(--color-accent);
+	color: var(--color-bg);
+	border: 1px solid color-mix(in oklab, var(--color-accent) 80%, black 20%);
+}
+
+.btn-primary:hover {
+	background: color-mix(in oklab, var(--color-accent) 86%, black 14%);
+}
+
+.btn-secondary {
+	background: color-mix(in oklab, var(--color-bg-tertiary) 88%, transparent);
+	color: var(--color-text-secondary);
+	border: 1px solid color-mix(in oklab, var(--color-border) 88%, transparent);
+}
+
+.btn-secondary:hover {
+	color: var(--color-text);
+	background: color-mix(in oklab, var(--color-bg-tertiary) 96%, transparent);
+}
+
+.btn-ghost {
+	background: transparent;
+	color: var(--color-text-secondary);
+	border: 1px solid transparent;
+}
+
+.btn-ghost:hover {
+	color: var(--color-text);
+	background: color-mix(in oklab, var(--color-bg-tertiary) 55%, transparent);
+}
+
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-ghost:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
 }
 
 .command-rail-anim {

@@ -86,7 +86,7 @@
 	</div>
 
 	{#if error}
-		<div class="bg-danger/10 border border-danger/30 rounded px-3 py-2 text-danger text-sm">
+		<div class="alert-danger">
 			{error}
 		</div>
 	{/if}
@@ -105,7 +105,7 @@
 				<div class="table-float p-3.5">
 					<div class="flex items-center justify-between gap-4">
 						<div>
-							<div class="text-[11px] text-text-muted uppercase tracking-wide">Current plan</div>
+							<div class="label-micro uppercase tracking-wide">Current plan</div>
 							<div class="text-[1.65rem] leading-none font-semibold text-text capitalize mt-0.5">{org.plan}</div>
 						</div>
 						<div class="grid grid-cols-3 gap-4 text-right">
@@ -161,7 +161,7 @@
 								<button
 									onclick={() => startCheckout(plan.id)}
 									disabled={!!checkoutLoading}
-									class="block w-full text-center px-3.5 py-1.5 text-[13px] bg-accent text-bg font-semibold rounded-lg hover:bg-accent/85 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+									class="btn-primary w-full disabled:cursor-not-allowed"
 								>
 									{checkoutLoading === plan.id ? 'Redirecting...' : `Upgrade to ${plan.name}`}
 								</button>
@@ -176,7 +176,7 @@
 						<div class="text-sm text-text-muted mt-1">Unlimited spans, 365-day retention, SSO, dedicated support, custom legal terms.</div>
 					</div>
 					<div class="flex md:justify-end">
-						<a href="mailto:andrew@traceway.ai" class="px-4 py-2 text-sm border border-accent/70 text-accent font-semibold rounded-lg hover:bg-accent/10 transition-colors">Contact us</a>
+						<a href="mailto:andrew@traceway.ai" class="btn-secondary border-accent/70 text-accent hover:bg-accent/10">Contact us</a>
 					</div>
 				</div>
 

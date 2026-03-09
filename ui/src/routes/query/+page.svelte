@@ -16,6 +16,7 @@
 	import { parseDsl, filterToDsl, parseRelativeTime } from '$lib/query-dsl';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import SpanKindIcon from '$lib/components/SpanKindIcon.svelte';
+	import FloatingInspector from '$lib/components/FloatingInspector.svelte';
 	import { onMount } from 'svelte';
 
 	// ─── State ──────────────────────────────────────────────────────────
@@ -536,6 +537,8 @@
 	}
 
 	let hoveredPoint: ScatterPoint | null = $state(null);
+	let inspectedSpan: Span | null = $state(null);
+	let inspectorWidth: 'compact' | 'default' | 'wide' = $state('default');
 
 	// ─── URL state ──────────────────────────────────────────────────────
 
@@ -760,6 +763,27 @@
 		writeUrlState();
 		navigator.clipboard.writeText(window.location.href);
 	}
+
+	function formatAny(value: unknown): string {
+		if (value === null || value === undefined) return '(none)';
+		if (typeof value === 'string') return value;
+		return JSON.stringify(value, null, 2);
+	}
+
+	function spanData(span: Span): unknown {
+		const k = span.kind as any;
+		if (!k) return null;
+		if (k.type === 'llm_call') return k.input ?? k.messages ?? null;
+		if (k.type === 'tool_call') return k.input ?? null;
+		if (k.type === 'fs_read' || k.type === 'fs_write') return k.path ?? k;
+		return k.input ?? k;
+	}
+
+	function spanOutput(span: Span): unknown {
+		const k = span.kind as any;
+		if (!k) return null;
+		return k.output ?? k.response ?? null;
+	}
 </script>
 
 <svelte:head>
@@ -818,7 +842,7 @@
 								{#each results as span}
 									<tr
 										class="cursor-pointer transition-colors"
-										onclick={() => goto(`/traces/${span.trace_id}`)}
+										onclick={() => (inspectedSpan = span)}
 									>
 										<td class="px-3 py-2 text-xs text-text truncate max-w-[240px] font-medium">{span.name}</td>
 										<td class="px-3 py-1.5">
@@ -835,7 +859,9 @@
 										<td class="px-3 py-1.5">
 											<StatusBadge status={spanStatus(span)} />
 										</td>
-										<td class="px-3 py-1.5 text-xs text-accent">{shortId(span.trace_id)}</td>
+										<td class="px-3 py-1.5 text-xs text-accent">
+											<button class="hover:underline" onclick={(e) => { e.stopPropagation(); goto(`/traces/${span.trace_id}`); }}>{shortId(span.trace_id)}</button>
+										</td>
 										<td class="px-3 py-1.5 text-right text-text-secondary font-mono text-xs tabular-nums">{formatTokens(span)}</td>
 										<td class="px-3 py-1.5 text-right text-text-secondary font-mono text-xs tabular-nums">{formatCost(span)}</td>
 										<td class="px-3 py-1.5 text-right text-text-secondary font-mono text-xs tabular-nums">{formatDuration(spanDurationMs(span))}</td>
@@ -1108,9 +1134,55 @@
 		{/if}
 	</div>
 
+	<FloatingInspector
+		open={!!inspectedSpan}
+		title={inspectedSpan?.name ?? 'Span'}
+		subtitle={inspectedSpan ? `${spanKindLabel(inspectedSpan)} - ${spanStatus(inspectedSpan)}` : ''}
+		width={inspectorWidth}
+		on:close={() => (inspectedSpan = null)}
+		on:width={(e) => (inspectorWidth = e.detail.width)}
+	>
+		{#if inspectedSpan}
+			<div class="space-y-3">
+				<div class="flex items-center gap-2 text-[12px] text-text-secondary">
+					<StatusBadge status={spanStatus(inspectedSpan)} />
+					<span class="font-mono">{shortId(inspectedSpan.id)}</span>
+					<span class="text-text-muted">trace</span>
+					<button class="text-accent hover:underline font-mono" onclick={() => goto(`/traces/${inspectedSpan.trace_id}`)}>{shortId(inspectedSpan.trace_id)}</button>
+				</div>
+
+				<div class="grid grid-cols-2 gap-2 text-[12px]">
+					<div class="rounded-lg border border-border/60 bg-bg-secondary/35 px-2.5 py-2">
+						<div class="text-text-muted">Started</div>
+						<div class="text-text mt-0.5">{formatDateTime(spanStartedAt(inspectedSpan))}</div>
+					</div>
+					<div class="rounded-lg border border-border/60 bg-bg-secondary/35 px-2.5 py-2">
+						<div class="text-text-muted">Duration</div>
+						<div class="text-text mt-0.5">{formatDuration(spanDurationMs(inspectedSpan))}</div>
+					</div>
+				</div>
+
+				<div class="space-y-1.5">
+					<div class="text-[11px] uppercase tracking-[0.12em] text-text-muted">Input</div>
+					<pre class="query-float rounded-lg border border-border/60 p-2.5 text-[12px] text-text-secondary whitespace-pre-wrap">{formatAny(spanData(inspectedSpan))}</pre>
+				</div>
+
+				<div class="space-y-1.5">
+					<div class="text-[11px] uppercase tracking-[0.12em] text-text-muted">Output</div>
+					<pre class="query-float rounded-lg border border-border/60 p-2.5 text-[12px] text-text-secondary whitespace-pre-wrap">{formatAny(spanOutput(inspectedSpan))}</pre>
+				</div>
+
+				<div class="space-y-1.5">
+					<div class="text-[11px] uppercase tracking-[0.12em] text-text-muted">Raw span</div>
+					<pre class="query-float rounded-lg border border-border/60 p-2.5 text-[12px] text-text-secondary whitespace-pre-wrap">{formatAny(inspectedSpan)}</pre>
+				</div>
+			</div>
+		{/if}
+	</FloatingInspector>
+
 	<!-- Floating command bar -->
 	<div class="fixed left-1/2 bottom-3 -translate-x-1/2 z-40 w-[min(1080px,calc(100vw-1.25rem))]">
-		<div class="relative query-command-shell rounded-xl p-2 sm:p-2.5" role="search" aria-label="Trace query command bar">
+		<div class="relative surface-command query-command-shell p-2 sm:p-2.5" role="search" aria-label="Trace query command bar">
 			{#if pickerMenuOpen}
 				<div class="absolute left-0 bottom-full mb-2 w-72 query-float-strong rounded-xl border border-border/70 shadow-xl overflow-hidden z-30">
 					<div class="px-3 py-2 border-b border-border/60 text-[11px] text-text-muted uppercase tracking-[0.12em]">Add filter</div>
@@ -1202,7 +1274,7 @@
 					</svg>
 				</button>
 
-				<div class="flex items-center flex-1 rounded-lg border border-border/40 bg-bg/30 min-w-[240px] transition-all duration-200 focus-within:border-accent/55 focus-within:bg-bg/40">
+				<div class="command-input-shell">
 					<div class="pl-3 pr-2 text-text-muted/80">
 						<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 							<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
@@ -1217,7 +1289,7 @@
 						type="text"
 						placeholder="Filter spans... kind:llm_call since:1h"
 						aria-label="Query spans"
-						class="flex-1 bg-transparent py-1.5 text-[12px] sm:text-[13px] font-mono text-text placeholder:text-text-muted/45 focus:outline-none"
+						class="command-input"
 					/>
 					{#if dslInput}
 						<button
@@ -1235,7 +1307,7 @@
 				<button
 					onclick={applyDsl}
 					disabled={loading}
-					class="px-3.5 py-1.5 bg-accent text-bg rounded-lg text-xs font-semibold tracking-wide hover:bg-accent/90 disabled:opacity-50 transition-colors"
+					class="btn-primary px-3.5"
 				>
 					{loading ? '...' : 'Query'}
 				</button>
