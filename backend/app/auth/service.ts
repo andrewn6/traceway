@@ -2,6 +2,7 @@ import { randomBytes, scryptSync, timingSafeEqual, createHash, randomUUID } from
 import { and, eq, gt, isNull } from "drizzle-orm";
 
 import { db } from "../core/database";
+import { sendInviteEmail, sendPasswordResetEmail } from "../email/resend";
 import {
   apiKeys,
   authSessions,
@@ -534,6 +535,8 @@ export async function createInvite(token: string | undefined, email: string, rol
   const me = await meFromSessionToken(token);
   if (!me || !me.user_id) return null;
   const inviteToken = randomBytes(32).toString("base64url");
+  const [inviter] = await db.select({ name: users.name }).from(users).where(eq(users.id, me.user_id)).limit(1);
+  await sendInviteEmail(email.toLowerCase().trim(), inviteToken, inviter?.name ?? undefined);
   const now = new Date();
   const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
   const [inv] = await db
@@ -666,6 +669,11 @@ export async function issuePasswordReset(email: string): Promise<{ ok: boolean; 
   if (!user) return { ok: true };
 
   const token = randomBytes(32).toString("base64url");
+  try {
+    await sendPasswordResetEmail(user.email, token);
+  } catch (err) {
+    console.error("[auth] failed to send password reset email", err);
+  }
   await db.insert(passwordResets).values({
     id: randomUUID(),
     userId: user.id,

@@ -29,6 +29,16 @@ export type SpanItem = {
   ended_at?: string | null;
 };
 
+export type SessionItem = {
+  id: string;
+  trace_count: number;
+  span_count: number;
+  total_tokens: number;
+  total_cost: number;
+  started_at: string;
+  ended_at?: string | null;
+};
+
 function mapTrace(row: typeof traces.$inferSelect): TraceItem {
   return {
     id: row.id,
@@ -76,6 +86,73 @@ export async function listTraces(scope: Scope): Promise<TraceItem[]> {
     .where(and(eq(traces.orgId, scope.org_id), eq(traces.projectId, scope.project_id)))
     .orderBy(desc(traces.startedAt));
   return rows.map(mapTrace);
+}
+
+function extractSessionId(trace: TraceItem): string | null {
+  const tags = trace.tags ?? [];
+  for (const tag of tags) {
+    if (tag.startsWith("session_id:")) return tag.slice("session_id:".length);
+    if (tag.startsWith("session:")) return tag.slice("session:".length);
+  }
+  return null;
+}
+
+export async function listSessions(scope: Scope): Promise<SessionItem[]> {
+  const traceRows = await listTraces(scope);
+  const spanRows = await listSpans(scope);
+  const spanByTrace = new Map<string, SpanItem[]>();
+  for (const s of spanRows) {
+    const arr = spanByTrace.get(s.trace_id) ?? [];
+    arr.push(s);
+    spanByTrace.set(s.trace_id, arr);
+  }
+
+  const grouped = new Map<string, SessionItem>();
+  for (const trace of traceRows) {
+    const sessionId = extractSessionId(trace);
+    if (!sessionId) continue;
+    const spansForTrace = spanByTrace.get(trace.id) ?? [];
+    let tokens = 0;
+    let cost = 0;
+    for (const s of spansForTrace) {
+      const kind = s.kind as Record<string, unknown>;
+      if (kind.type === "llm_call") {
+        const input = typeof kind.input_tokens === "number" ? kind.input_tokens : 0;
+        const output = typeof kind.output_tokens === "number" ? kind.output_tokens : 0;
+        tokens += input + output;
+        if (typeof kind.cost === "number") cost += kind.cost;
+      }
+    }
+
+    const existing = grouped.get(sessionId);
+    if (!existing) {
+      grouped.set(sessionId, {
+        id: sessionId,
+        trace_count: 1,
+        span_count: spansForTrace.length,
+        total_tokens: tokens,
+        total_cost: cost,
+        started_at: trace.started_at,
+        ended_at: trace.ended_at ?? null,
+      });
+      continue;
+    }
+
+    existing.trace_count += 1;
+    existing.span_count += spansForTrace.length;
+    existing.total_tokens += tokens;
+    existing.total_cost += cost;
+    if (new Date(trace.started_at).getTime() < new Date(existing.started_at).getTime()) {
+      existing.started_at = trace.started_at;
+    }
+    if (!existing.ended_at) {
+      existing.ended_at = trace.ended_at ?? existing.ended_at;
+    } else if (trace.ended_at && new Date(trace.ended_at).getTime() > new Date(existing.ended_at).getTime()) {
+      existing.ended_at = trace.ended_at;
+    }
+  }
+
+  return [...grouped.values()].sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
 }
 
 export async function createTrace(scope: Scope, input: { id?: string; name?: string; tags?: string[] }): Promise<TraceItem> {
@@ -225,6 +302,44 @@ export async function completeSpan(scope: Scope, spanId: string, output?: unknow
     .returning();
 
   if (!row) return;
+
+  const kind = row.kind as Record<string, unknown>;
+  const kindType = typeof kind.type === "string" ? kind.type : "";
+  if (kindType === "fs_read" || kindType === "fs_write") {
+    const path = typeof kind.path === "string" ? kind.path : "";
+    const hash = typeof kind.file_version === "string" ? kind.file_version : "";
+    const sizeField = kindType === "fs_read" ? kind.bytes_read : kind.bytes_written;
+    const size = typeof sizeField === "number" ? sizeField : 0;
+
+    if (path && hash) {
+      await db
+        .insert(fileVersions)
+        .values({
+          id: newId(),
+          orgId: scope.org_id,
+          projectId: scope.project_id,
+          path,
+          hash,
+          metadata: { size, source: kindType },
+          createdBySpan: row.id,
+          createdAt: row.endedAt ?? new Date(),
+        })
+        .onConflictDoNothing();
+
+      const out = row.output as Record<string, unknown> | null;
+      const fileContent = out && typeof out === "object"
+        ? (typeof out.file_content === "string"
+          ? out.file_content
+          : typeof out.content === "string"
+            ? out.content
+            : null)
+        : null;
+      if (fileContent !== null) {
+        await putFileContent(hash, fileContent);
+      }
+    }
+  }
+
   const span = mapSpan(row);
   await appendEvent(scope, "span_completed", { type: "span_completed", span });
 }

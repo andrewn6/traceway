@@ -222,7 +222,14 @@ export const createInviteEndpoint = api.raw(
       json(res, 400, { error: "email is required" });
       return;
     }
-    const invite = await createInvite(currentSessionToken(req), body.email, body.role);
+    let invite;
+    try {
+      invite = await createInvite(currentSessionToken(req), body.email, body.role);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to send invite";
+      json(res, 502, { error: message });
+      return;
+    }
     if (!invite) {
       json(res, 401, { error: "Unauthorized" });
       return;

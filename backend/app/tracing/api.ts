@@ -16,6 +16,7 @@ import {
   getSpan,
   getTraceSpans,
   listEvents,
+  listSessions,
   listFileVersions,
   listSpans,
   listTraces,
@@ -112,6 +113,18 @@ export const listSpansEndpoint = api.raw(
       const q = nameContains.toLowerCase();
       items = items.filter((s) => s.name.toLowerCase().includes(q));
     }
+    json(res, 200, page(items));
+  }
+);
+
+export const listSessionsEndpoint = api.raw(
+  { expose: true, method: "GET", path: "/sessions" },
+  async (req, res) => {
+    if (handlePreflight(req, res)) return;
+    const session = await requireScope(req, res);
+    if (!session) return;
+    setCors(req, res);
+    const items = await listSessions(session);
     json(res, 200, page(items));
   }
 );

@@ -26,12 +26,18 @@ type PolarWebhookPayload = {
 
 function polarProductId(plan: string): string | null {
   if (plan === "pro") {
-    return process.env.POLAR_PRODUCT_PRO_ID ?? "02a58cb6-1853-4179-ba29-6d65c71836db";
+    return process.env.POLAR_PRODUCT_PRO_ID ?? process.env.POLAR_PRO_PRODUCT_ID ?? "02a58cb6-1853-4179-ba29-6d65c71836db";
   }
   if (plan === "team") {
-    return process.env.POLAR_PRODUCT_TEAM_ID ?? "507c5aeb-b4a2-47e4-870b-ea6b89814a9f";
+    return process.env.POLAR_PRODUCT_TEAM_ID ?? process.env.POLAR_TEAM_PRODUCT_ID ?? "507c5aeb-b4a2-47e4-870b-ea6b89814a9f";
   }
   return null;
+}
+
+function readEnv(name: string): string | undefined {
+  const raw = process.env[name];
+  if (!raw) return undefined;
+  return raw.trim().replace(/^['\"]|['\"]$/g, "");
 }
 
 function planFromProduct(product: { name?: string; metadata?: Record<string, unknown> } | undefined): "free" | "pro" | "team" {
@@ -116,7 +122,7 @@ export const createCheckout = api.raw(
     if (!session) return;
     setCors(req, res);
 
-    const token = process.env.POLAR_ACCESS_TOKEN;
+    const token = readEnv("POLAR_ACCESS_TOKEN");
     if (!token) {
       json(res, 503, { error: "Billing not configured" });
       return;
