@@ -21,9 +21,9 @@
 	} = $props();
 
 	// ── Constants ──────────────────────────────────────────────────────
-	const SPAN_ROW_HEIGHT = 44;
-	const PREVIEW_LINE_HEIGHT = 19;
-	const PREVIEW_PADDING = 8; // py-1 top+bottom
+	const SPAN_ROW_HEIGHT = 40;
+	const PREVIEW_LINE_HEIGHT = 17;
+	const PREVIEW_PADDING = 6;
 	const OVERSCAN = 10;
 	const INDENT_PX = 20;
 
@@ -436,7 +436,7 @@
 							onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect?.(s); } }}
 						>
 							<!-- Span info -->
-							<div class="flex items-center gap-1.5 flex-1 px-2.5 overflow-hidden min-w-0">
+							<div class="flex items-center gap-1.5 flex-1 px-2 overflow-hidden min-w-0">
 								<!-- Indent + collapse -->
 								{#if viewMode === 'tree'}
 									<div class="relative flex items-center shrink-0" style="width: {node.depth * INDENT_PX + 20}px">
@@ -473,37 +473,37 @@
 								</div>
 
 							<!-- Name -->
-							<span class="text-text truncate text-[13px] font-medium max-w-[40%] tracking-[0.01em]">{s.name}</span>
+							<span class="text-text truncate text-[12px] font-medium max-w-[42%] tracking-[0.01em]">{s.name}</span>
 
 							<!-- Primary metadata -->
-							<span class="shrink-0 text-[11px] text-text-secondary bg-bg-tertiary/55 border border-border/55 rounded px-1.5 py-px font-mono">{formatDuration(duration)}</span>
+							<span class="shrink-0 text-[10px] text-text-secondary bg-bg-tertiary/55 border border-border/55 rounded px-1.5 py-px font-mono">{formatDuration(duration)}</span>
 
 							<!-- Inline badges -->
 							{#if showMetadata && model}
-								<span class="shrink-0 text-[11px] text-accent bg-accent/10 border border-accent/30 rounded px-1.5 py-px max-w-[32%] truncate">{model}</span>
+								<span class="shrink-0 text-[10px] text-accent bg-accent/10 border border-accent/30 rounded px-1.5 py-px max-w-[30%] truncate">{model}</span>
 							{/if}
 							{#if showMetadata && provider}
-								<span class="shrink-0 text-[11px] text-text-muted bg-bg-tertiary/50 border border-border/50 rounded px-1.5 py-px">{provider}</span>
+								<span class="shrink-0 text-[10px] text-text-muted bg-bg-tertiary/50 border border-border/50 rounded px-1.5 py-px">{provider}</span>
 							{/if}
 							{#if showMetadata && tokens}
-								<span class="shrink-0 text-text-muted text-[11px] bg-bg-tertiary/45 border border-border/45 rounded px-1.5 py-px">{tokens}</span>
+								<span class="shrink-0 text-text-muted text-[10px] bg-bg-tertiary/45 border border-border/45 rounded px-1.5 py-px">{tokens}</span>
 							{/if}
 							{#if showMetadata && cost}
-								<span class="shrink-0 text-success text-[11px] bg-success/10 border border-success/25 rounded px-1.5 py-px">{cost}</span>
+								<span class="shrink-0 text-success text-[10px] bg-success/10 border border-success/25 rounded px-1.5 py-px">{cost}</span>
 							{/if}
 							{#if showMetadata && bytes}
-								<span class="shrink-0 text-text-muted text-[11px] bg-bg-tertiary/45 border border-border/45 rounded px-1.5 py-px">{bytes}</span>
+								<span class="shrink-0 text-text-muted text-[10px] bg-bg-tertiary/45 border border-border/45 rounded px-1.5 py-px">{bytes}</span>
 							{/if}
 
 								<!-- Collapsed count -->
 								{#if node.hasChildren && collapsed.has(s.id)}
-									<span class="shrink-0 text-text-muted text-[11px] bg-bg-tertiary rounded px-1.5 py-px">+{node.descendantCount}</span>
+									<span class="shrink-0 text-text-muted text-[10px] bg-bg-tertiary rounded px-1.5 py-px">+{node.descendantCount}</span>
 								{/if}
 							</div>
 
 							<!-- Duration / offset (right side) -->
-							<div class="shrink-0 flex flex-col items-end pr-3 text-right min-w-16">
-								<span class="text-[11px] text-text-muted font-mono">{relativeOffset(s)}</span>
+							<div class="shrink-0 flex flex-col items-end pr-2.5 text-right min-w-14">
+								<span class="text-[10px] text-text-muted font-mono">{relativeOffset(s)}</span>
 							</div>
 						</div>
 					{/if}

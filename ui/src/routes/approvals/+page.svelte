@@ -20,11 +20,14 @@
 	let loading = $state(true);
 
 	let statusFilter: 'all' | 'pending' | 'claimed' | 'completed' = $state('pending');
+	let savedView: 'all' | 'mine' | 'unclaimed' | 'completed_today' = $state('all');
+	let sortBy: 'created_desc' | 'created_asc' | 'status' = $state('created_desc');
 	let datasetFilter: string = $state('all');
 	let searchQuery = $state('');
 	let mineOnly = $state(false);
 	let selectedItemId: string | null = $state(null);
 	let detailOpen = $state(false);
+	let selectedIds: Set<string> = $state(new Set());
 
 	let selectedDatapoint: Datapoint | null = $state(null);
 	let selectedSourceSpan: Span | null = $state(null);
@@ -39,18 +42,39 @@
 	const selectedItem = $derived(items.find((i) => i.id === selectedItemId) ?? null);
 
 	const filteredItems = $derived.by(() => {
-		return items.filter((i) => {
+		const now = new Date();
+		const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+		const filtered = items.filter((i) => {
 			const statusOk = statusFilter === 'all' || i.status === statusFilter;
 			const datasetOk = datasetFilter === 'all' || i.dataset_id === datasetFilter;
-			const mineOk = !mineOnly || i.claimed_by === claimName;
+			const mineFlagOk = !mineOnly || i.claimed_by === claimName;
+			const viewOk =
+				savedView === 'all'
+				|| (savedView === 'mine' && i.claimed_by === claimName)
+				|| (savedView === 'unclaimed' && i.status === 'pending')
+				|| (savedView === 'completed_today' && i.status === 'completed' && new Date(i.created_at).getTime() >= today);
 			const q = searchQuery.trim().toLowerCase();
 			const searchOk = q.length === 0
 				|| i.id.toLowerCase().includes(q)
 				|| i.datapoint_id.toLowerCase().includes(q)
 				|| (i.claimed_by ?? '').toLowerCase().includes(q)
 				|| datasetName(i.dataset_id).toLowerCase().includes(q);
-			return statusOk && datasetOk && mineOk && searchOk;
+			return statusOk && datasetOk && mineFlagOk && viewOk && searchOk;
 		});
+
+		filtered.sort((a, b) => {
+			if (sortBy === 'created_asc') {
+				return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+			}
+			if (sortBy === 'status') {
+				const diff = statusRank(a.status) - statusRank(b.status);
+				if (diff !== 0) return diff;
+				return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+			}
+			return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+		});
+
+		return filtered;
 	});
 
 	const nextPending = $derived(items.find((i) => i.status === 'pending') ?? null);
@@ -77,6 +101,38 @@
 		if (status === 'pending') return 'border-l-warning/50';
 		if (status === 'claimed') return 'border-l-accent/50';
 		return 'border-l-success/50';
+	}
+
+	function statusFilterClass(status: typeof statusFilter): string {
+		if (statusFilter !== status) return 'query-chip';
+		if (status === 'pending') return 'query-chip border-warning/35 bg-warning/12 text-warning';
+		if (status === 'claimed') return 'query-chip border-accent/35 bg-accent/12 text-accent';
+		if (status === 'completed') return 'query-chip border-success/35 bg-success/12 text-success';
+		return 'query-chip query-chip-active';
+	}
+
+	function statusRank(status: QueueItem['status']): number {
+		if (status === 'pending') return 0;
+		if (status === 'claimed') return 1;
+		return 2;
+	}
+
+	const selectedVisibleCount = $derived.by(() => filteredItems.filter((i) => selectedIds.has(i.id)).length);
+	const allVisibleSelected = $derived(filteredItems.length > 0 && selectedVisibleCount === filteredItems.length);
+
+	function toggleSelected(id: string) {
+		const next = new Set(selectedIds);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		selectedIds = next;
+	}
+
+	function toggleSelectAllVisible() {
+		if (allVisibleSelected) {
+			selectedIds = new Set();
+			return;
+		}
+		selectedIds = new Set(filteredItems.map((i) => i.id));
 	}
 
 	function formatDate(iso?: string | null): string {
@@ -163,6 +219,50 @@
 	async function claimNextPending() {
 		if (!nextPending) return;
 		await handleClaim(nextPending);
+	}
+
+	async function bulkClaimSelected() {
+		const targets = filteredItems.filter((i) => selectedIds.has(i.id) && i.status === 'pending');
+		if (targets.length === 0) return;
+		submitting = true;
+		actionError = '';
+		actionSuccess = '';
+		try {
+			for (const item of targets) {
+				const updated = await claimQueueItem(item.id, claimName);
+				items = items.map((i) => (i.id === updated.id ? updated : i));
+			}
+			actionSuccess = `Claimed ${targets.length} item${targets.length === 1 ? '' : 's'}`;
+		} catch (err) {
+			actionError = err instanceof Error ? err.message : 'Bulk claim failed';
+		}
+		submitting = false;
+	}
+
+	async function bulkApproveSelected() {
+		const targets = filteredItems.filter((i) => selectedIds.has(i.id) && i.status !== 'completed');
+		if (targets.length === 0) return;
+		submitting = true;
+		actionError = '';
+		actionSuccess = '';
+		let approved = 0;
+		try {
+			for (const item of targets) {
+				let candidate = item;
+				if (candidate.status === 'pending') {
+					candidate = await claimQueueItem(candidate.id, claimName);
+					items = items.map((i) => (i.id === candidate.id ? candidate : i));
+				}
+				const updated = await submitQueueItem(candidate.id);
+				items = items.map((i) => (i.id === updated.id ? updated : i));
+				approved += 1;
+			}
+			actionSuccess = `Approved ${approved} item${approved === 1 ? '' : 's'}`;
+			selectedIds = new Set();
+		} catch (err) {
+			actionError = err instanceof Error ? err.message : 'Bulk approve failed';
+		}
+		submitting = false;
 	}
 
 	function openNextClaimedByMe() {
@@ -277,6 +377,15 @@
 	});
 
 	$effect(() => {
+		const visible = new Set(filteredItems.map((i) => i.id));
+		const next = new Set<string>();
+		for (const id of selectedIds) {
+			if (visible.has(id)) next.add(id);
+		}
+		if (next.size !== selectedIds.size) selectedIds = next;
+	});
+
+	$effect(() => {
 		if (selectedItem) {
 			actionError = '';
 			actionSuccess = '';
@@ -316,55 +425,75 @@
 		</div>
 	</div>
 
-	<div class="app-toolbar-shell rounded-xl p-2 flex items-center gap-2 flex-wrap">
-		<select bind:value={statusFilter} class="control-select h-8 text-[12px] w-36">
-			<option value="pending">Pending ({counts.pending})</option>
-			<option value="claimed">Claimed ({counts.claimed})</option>
-			<option value="completed">Completed ({counts.completed})</option>
-			<option value="all">All ({counts.total})</option>
-		</select>
-		<span class="px-2 py-1 text-[11px] rounded border bg-warning/20 text-warning border-warning/30">pending</span>
-		<span class="px-2 py-1 text-[11px] rounded border bg-accent/20 text-accent border-accent/30">claimed</span>
-		<span class="px-2 py-1 text-[11px] rounded border bg-success/20 text-success border-success/30">completed</span>
-		<select bind:value={datasetFilter} class="control-select h-8 text-[12px] min-w-[180px]">
-			<option value="all">All datasets</option>
-			{#each datasets as ds (ds.id)}
-				<option value={ds.id}>{ds.name}</option>
-			{/each}
-		</select>
-		<input class="control-input h-8 text-[12px] min-w-[180px]" bind:value={searchQuery} placeholder="Search item, dataset, reviewer" />
-		<button class="query-chip {mineOnly ? 'query-chip-active' : ''}" onclick={() => (mineOnly = !mineOnly)}>Mine only</button>
-		<input class="control-input h-8 text-[12px] w-40" bind:value={claimName} placeholder="Reviewer name" />
-		<button class="btn-secondary h-8 text-[12px]" disabled={!nextPending} onclick={claimNextPending}>Claim next</button>
-		<button class="btn-ghost h-8 text-[12px]" disabled={!nextClaimedByMe} onclick={openNextClaimedByMe}>Open next claimed</button>
-		<div class="hidden lg:flex items-center gap-1.5 text-[11px] text-text-muted rounded-lg border border-border/50 bg-bg-tertiary/35 px-2 py-1">
-			<span><span class="query-kbd">J</span>/<span class="query-kbd">K</span> navigate</span>
-			<span class="text-border">|</span>
-			<span><span class="query-kbd">A</span> approve</span>
-			<span class="text-border">|</span>
-			<span><span class="query-kbd">E</span> submit edited</span>
+	<div class="app-toolbar-shell rounded-xl p-2 space-y-2">
+		<div class="flex items-center gap-1.5 flex-wrap">
+			<button class="query-chip {savedView === 'all' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'all')}>All queue</button>
+			<button class="query-chip {savedView === 'mine' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'mine')}>My queue</button>
+			<button class="query-chip {savedView === 'unclaimed' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'unclaimed')}>Unclaimed</button>
+			<button class="query-chip {savedView === 'completed_today' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'completed_today')}>Completed today</button>
+			<div class="flex-1"></div>
+			<select bind:value={sortBy} class="control-select h-8 text-[12px] w-[170px]">
+				<option value="created_desc">Newest first</option>
+				<option value="created_asc">Oldest first</option>
+				<option value="status">Status priority</option>
+			</select>
 		</div>
-		<div class="ml-auto text-[12px] text-text-muted">{filteredItems.length} items</div>
+
+		<div class="flex items-center gap-1.5 flex-wrap">
+			<button class={statusFilterClass('pending')} onclick={() => (statusFilter = 'pending')}>Pending ({counts.pending})</button>
+			<button class={statusFilterClass('claimed')} onclick={() => (statusFilter = 'claimed')}>Claimed ({counts.claimed})</button>
+			<button class={statusFilterClass('completed')} onclick={() => (statusFilter = 'completed')}>Completed ({counts.completed})</button>
+			<button class={statusFilterClass('all')} onclick={() => (statusFilter = 'all')}>All ({counts.total})</button>
+			<div class="flex-1"></div>
+			<div class="text-[12px] text-text-muted">{filteredItems.length} items</div>
+		</div>
+
+		<div class="grid grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)_150px_auto_auto_auto] gap-2 items-center">
+			<select bind:value={datasetFilter} class="control-select h-8 text-[12px]">
+				<option value="all">All datasets</option>
+				{#each datasets as ds (ds.id)}
+					<option value={ds.id}>{ds.name}</option>
+				{/each}
+			</select>
+			<input class="control-input h-8 text-[12px]" bind:value={searchQuery} placeholder="Search item, dataset, reviewer" />
+			<input class="control-input h-8 text-[12px]" bind:value={claimName} placeholder="Reviewer" />
+			<button class="query-chip h-8 {mineOnly ? 'query-chip-active' : ''}" onclick={() => (mineOnly = !mineOnly)}>Mine</button>
+			<button class="btn-secondary h-8 text-[12px]" disabled={!nextPending} onclick={claimNextPending}>Claim next</button>
+			<button class="btn-ghost h-8 text-[12px]" disabled={!nextClaimedByMe} onclick={openNextClaimedByMe}>Open next</button>
+		</div>
+
+		{#if selectedVisibleCount > 0}
+			<div class="flex items-center gap-2 text-[12px] border border-border/50 rounded-lg px-2 py-1.5 bg-bg-tertiary/30">
+				<span class="text-text-muted">{selectedVisibleCount} selected</span>
+				<button class="btn-secondary h-7 text-[11px]" disabled={submitting} onclick={bulkClaimSelected}>Bulk claim</button>
+				<button class="btn-primary h-7 text-[11px]" disabled={submitting} onclick={bulkApproveSelected}>Bulk approve</button>
+				<button class="btn-ghost h-7 text-[11px]" onclick={() => (selectedIds = new Set())}>Clear</button>
+			</div>
+		{/if}
 	</div>
 
 	{#if loading}
 		<div class="text-text-muted text-sm text-center py-10">Loading approvals...</div>
 	{:else}
 		<div class="table-float overflow-hidden">
-			<div class="grid grid-cols-[100px_1fr_170px_130px_110px_120px] gap-3 px-3 py-2 table-head-compact border-b border-border/55">
-				<span>Status</span>
-				<span>Dataset / Item</span>
-				<span>Datapoint</span>
-				<span>Created</span>
-				<span>Reviewer</span>
-				<span class="text-right">Action</span>
-			</div>
 			{#if filteredItems.length === 0}
 				<div class="px-3 py-8 text-center text-sm text-text-muted">No items match current filters.</div>
 			{:else}
 				<div class="max-h-[min(72vh,980px)] overflow-y-auto">
+					<div class="grid grid-cols-[34px_100px_1fr_170px_130px_110px_120px] gap-3 px-3 py-2 table-head-compact border-b border-border/55 sticky top-0 z-10 bg-bg-secondary/96 backdrop-blur-sm">
+						<label class="flex items-center justify-center"><input type="checkbox" checked={allVisibleSelected} onchange={toggleSelectAllVisible} class="accent-accent" /></label>
+						<span>Status</span>
+						<span>Dataset / Item</span>
+						<span>Datapoint</span>
+						<span>Created</span>
+						<span>Reviewer</span>
+						<span class="text-right">Action</span>
+					</div>
 					{#each filteredItems as item (item.id)}
-						<div class="grid grid-cols-[100px_1fr_170px_130px_110px_120px] gap-3 items-center px-3 py-2 border-b border-border/45 border-l-2 {rowAccent(item.status)} hover:bg-bg-secondary/45 motion-row cursor-pointer" role="button" tabindex="0" onclick={() => { selectedItemId = item.id; detailOpen = true; }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectedItemId = item.id; detailOpen = true; } }}>
+						<button type="button" class="w-full text-left grid grid-cols-[34px_100px_1fr_170px_130px_110px_120px] gap-3 items-center px-3 py-2 border-b border-border/45 border-l-2 {rowAccent(item.status)} hover:bg-bg-secondary/45 motion-row cursor-pointer" onclick={() => { selectedItemId = item.id; detailOpen = true; }}>
+							<div class="flex items-center justify-center">
+								<input type="checkbox" checked={selectedIds.has(item.id)} onclick={(e) => e.stopPropagation()} onchange={() => toggleSelected(item.id)} class="accent-accent" />
+							</div>
 							<div><span class={`px-2 py-0.5 rounded text-[11px] border ${statusTone(item.status)}`}>{item.status}</span></div>
 							<div class="min-w-0">
 								<div class="text-[13px] text-text truncate">{datasetName(item.dataset_id)}</div>
@@ -374,9 +503,9 @@
 							<div class="text-[12px] text-text-muted">{formatDate(item.created_at)}</div>
 							<div class="text-[12px] text-text-muted truncate">{item.claimed_by ?? '-'}</div>
 							<div class="text-right">
-								<button class="btn-secondary h-7 text-[11px]" onclick={(e) => { e.stopPropagation(); selectedItemId = item.id; detailOpen = true; }}>Review</button>
+								<span class="btn-secondary h-7 text-[11px] inline-flex items-center">Review</span>
 							</div>
-						</div>
+						</button>
 					{/each}
 				</div>
 			{/if}
