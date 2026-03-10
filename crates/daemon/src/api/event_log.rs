@@ -13,8 +13,8 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
-use crate::events::{EventLog, EventLogError, StoredEvent};
-use crate::SystemEvent;
+use super::events::{EventLog, EventLogError, StoredEvent};
+use super::SystemEvent;
 
 /// SQLite-backed event log.
 pub struct SqliteEventLog {

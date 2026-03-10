@@ -10,9 +10,9 @@ use tokio::sync::broadcast;
 
 use trace::{CaptureRule, Datapoint, DatapointKind, DatapointSource, Span};
 
-use crate::events::EventLog;
-use crate::org_store::SharedStore;
-use crate::SystemEvent;
+use super::events::EventLog;
+use super::org_store::SharedStore;
+use super::SystemEvent;
 
 /// Evaluate all enabled capture rules against a completed span.
 ///

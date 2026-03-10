@@ -1,6 +1,8 @@
+mod api;
 mod config;
 mod ingest;
 mod pid;
+mod proxy;
 
 #[cfg(feature = "cloud")]
 mod cloud;
@@ -14,7 +16,7 @@ use clap::Parser;
 use tokio::sync::{watch, RwLock};
 use tracing::{error, info, warn};
 
-use api::AnyBackend;
+use crate::api::AnyBackend;
 use storage::PersistentStore;
 use storage_sqlite::SqliteBackend;
 

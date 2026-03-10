@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use trace::{OrgId, Span, SpanId, SpanKind, SpanStatus, Trace, TraceId};
 
-use crate::{capture, AppState, SystemEvent};
+use super::{capture, AppState, SystemEvent};
 
 #[derive(Clone)]
 struct EncoreTraceBridge {

@@ -8,7 +8,7 @@ use trace::{
     QueueItem,
 };
 
-use crate::{
+use super::{
     ClaimRequest, CreateCaptureRuleRequest, CreateEvalRunRequest, DatapointKind,
     EvalRunDetailResponse, EnqueueRequest, SubmitRequest, UpdateCaptureRuleRequest,
     UpdateDatasetRequest,
