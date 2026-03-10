@@ -16,7 +16,7 @@ use std::time::Duration;
 use tokio::sync::{watch, RwLock};
 use tracing::{debug, info, warn};
 
-use api::AnyBackend;
+use crate::api::AnyBackend;
 use storage::PersistentStore;
 use trace::{SpanBuilder, SpanKind, Trace};
 

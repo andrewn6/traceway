@@ -178,6 +178,11 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_event_log_org_seq ON event_log(org_id, sequence);
     CREATE INDEX IF NOT EXISTS idx_event_log_created ON event_log(created_at);
     "#,
+    // v6: add org scoping to datasets
+    r#"
+    ALTER TABLE datasets ADD COLUMN org_id TEXT;
+    CREATE INDEX IF NOT EXISTS idx_datasets_org_id ON datasets(org_id);
+    "#,
 ];
 
 fn run_migrations(conn: &Connection) -> Result<(), StorageError> {

@@ -11,7 +11,7 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
-use crate::SystemEvent;
+use super::SystemEvent;
 
 // --- Durable Event Log ---
 

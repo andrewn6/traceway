@@ -24,7 +24,7 @@ use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
-use crate::AppState;
+use super::AppState;
 use auth::Plan;
 
 type HmacSha256 = Hmac<Sha256>;

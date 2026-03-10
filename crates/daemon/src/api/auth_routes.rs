@@ -19,7 +19,7 @@ use auth::{
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 
-use crate::AppState;
+use super::AppState;
 
 // ── request / response types ─────────────────────────────────────────
 

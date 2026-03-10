@@ -14,7 +14,7 @@ use storage::PersistentStore;
 use tokio::sync::RwLock;
 use tracing::{info, error};
 
-use crate::AnyBackend;
+use super::AnyBackend;
 
 pub type SharedStore = Arc<RwLock<PersistentStore<AnyBackend>>>;
 

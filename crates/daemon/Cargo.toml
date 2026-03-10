@@ -9,28 +9,66 @@ cloud = ["redis", "metrics", "storage-postgres"]
 metrics = ["prometheus"]
 
 [dependencies]
+# Internal crates
 trace = { path = "../trace" }
 storage = { path = "../storage" }
 storage-sqlite = { path = "../storage-sqlite" }
 storage-turbopuffer = { path = "../storage-turbopuffer" }
 auth = { path = "../auth" }
-api = { path = "../api" }
-axum.workspace = true
-proxy = { path = "../proxy" }
 # memfs = { path = "../memfs" }  # requires macFUSE
-clap.workspace = true
-dirs.workspace = true
+
+# Web framework
+axum.workspace = true
+axum-extra.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+utoipa.workspace = true
+utoipa-axum.workspace = true
+
+# Async runtime
 tokio.workspace = true
-tracing.workspace = true
-tracing-subscriber = { workspace = true, features = ["json"] }
-tracing-appender.workspace = true
-toml.workspace = true
+tokio-stream.workspace = true
+async-trait.workspace = true
+async-stream = "0.3"
+futures = "0.3"
+
+# Serialization
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
+csv.workspace = true
+chrono.workspace = true
+uuid = { workspace = true, features = ["v4", "v5", "v7", "serde"] }
+
+# Auth / crypto
+bcrypt.workspace = true
+jsonwebtoken.workspace = true
+rand.workspace = true
+base64.workspace = true
+sha2.workspace = true
+hmac = "0.12"
+
+# HTTP client
+reqwest.workspace = true
+
+# CLI / daemon
+clap.workspace = true
+dirs.workspace = true
 nix.workspace = true
 dotenvy = "0.15"
 
+# Logging
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["json"] }
+tracing-appender.workspace = true
+
+# Misc
+thiserror.workspace = true
+rusqlite.workspace = true
+rust-embed.workspace = true
+mime_guess.workspace = true
+
 # Cloud dependencies (optional)
 storage-postgres = { path = "../storage-postgres", optional = true }
-redis = { version = "0.25", features = ["tokio-comp", "connection-manager"], optional = true }
+redis = { version = "0.25", features = ["tokio-comp", "connection-manager", "aio"], optional = true }
 prometheus = { version = "0.13", optional = true }
