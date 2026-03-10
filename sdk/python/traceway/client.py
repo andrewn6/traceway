@@ -16,6 +16,8 @@ from .types import (
     DatasetList,
     ExportData,
     FileVersion,
+    FsReadKind,
+    FsWriteKind,
     LlmCallKind,
     QueueItem,
     QueueList,
@@ -136,18 +138,25 @@ class Traceway:
         self,
         url: str | None = None,
         api_key: str | None = None,
+        api_prefix: str | None = None,
     ):
         """Initialize the Traceway client.
         
         Args:
             url: Base URL of the Traceway server. Defaults to TRACEWAY_URL env var
-                 or http://localhost:3000
+                 or http://localhost:4000
             api_key: API key for authentication. Defaults to TRACEWAY_API_KEY env var.
-                     Required for cloud deployments.
+                      Required for cloud deployments.
+            api_prefix: API prefix to use for requests. Defaults to TRACEWAY_API_PREFIX
+                       or "auto". In auto mode, the client tries /api first and then /
+                       for compatibility across backend versions.
         """
         self._base_url = (
-            url or os.environ.get("TRACEWAY_URL") or "http://localhost:3000"
+            url or os.environ.get("TRACEWAY_URL") or "http://localhost:4000"
         ).rstrip("/")
+
+        env_prefix = os.environ.get("TRACEWAY_API_PREFIX")
+        self._api_prefix = api_prefix if api_prefix is not None else env_prefix
         
         self._api_key = api_key or os.environ.get("TRACEWAY_API_KEY")
         
@@ -155,7 +164,7 @@ class Traceway:
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
         
-        self._client = httpx.Client(base_url=self._base_url, headers=headers)
+        self._client = httpx.Client(headers=headers)
 
     def close(self) -> None:
         self._client.close()
@@ -168,17 +177,51 @@ class Traceway:
 
     # ─── Internal helpers ─────────────────────────────────────────────
 
+    def _candidate_prefixes(self) -> list[str]:
+        if self._api_prefix is not None and self._api_prefix != "auto":
+            return [self._api_prefix]
+
+        # If base URL already includes /api, don't prepend it again.
+        if self._base_url.endswith("/api"):
+            return [""]
+
+        # Auto mode: support both legacy (/api/*) and new (/*) backends.
+        return ["/api", ""]
+
+    def _build_url(self, prefix: str, path: str) -> str:
+        clean_prefix = "" if prefix in ("", "/") else (prefix if prefix.startswith("/") else f"/{prefix}")
+        clean_path = path if path.startswith("/") else f"/{path}"
+        return f"{self._base_url}{clean_prefix}{clean_path}"
+
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
-        resp = self._client.request(method, f"/api{path}", **kwargs)
-        resp.raise_for_status()
-        if resp.content:
-            return resp.json()
+        last_resp: httpx.Response | None = None
+        for prefix in self._candidate_prefixes():
+            resp = self._client.request(method, self._build_url(prefix, path), **kwargs)
+            if resp.status_code == 404:
+                last_resp = resp
+                continue
+            resp.raise_for_status()
+            if resp.content:
+                return resp.json()
+            return None
+
+        if last_resp is not None:
+            last_resp.raise_for_status()
         return None
 
     def _request_text(self, method: str, path: str, **kwargs: Any) -> str:
-        resp = self._client.request(method, f"/api{path}", **kwargs)
-        resp.raise_for_status()
-        return resp.text
+        last_resp: httpx.Response | None = None
+        for prefix in self._candidate_prefixes():
+            resp = self._client.request(method, self._build_url(prefix, path), **kwargs)
+            if resp.status_code == 404:
+                last_resp = resp
+                continue
+            resp.raise_for_status()
+            return resp.text
+
+        if last_resp is not None:
+            last_resp.raise_for_status()
+        return ""
 
     def _qs(self, params: dict[str, str | None]) -> dict[str, str]:
         return {k: v for k, v in params.items() if v is not None}
@@ -259,17 +302,100 @@ class Traceway:
     def list_files(self, path_prefix: str | None = None) -> list[TrackedFile]:
         params = self._qs({"path_prefix": path_prefix})
         resp = self._request("GET", "/files", params=params)
-        return [TrackedFile.from_dict(f) for f in resp]
+        files = resp.get("files", []) if isinstance(resp, dict) else resp
+        return [TrackedFile.from_dict(f) for f in files]
 
     def read_file(self, path: str) -> str:
-        return self._request_text("GET", f"/files/{quote(path, safe='')}")
+        versions = self.file_versions(path)
+        if not versions:
+            raise FileNotFoundError(f"No tracked versions found for path: {path}")
+        latest = versions[0]
+        return self._request_text("GET", f"/files/content/{quote(latest.hash, safe='')}")
 
     def file_versions(self, path: str) -> list[FileVersion]:
-        resp = self._request("GET", f"/files/{quote(path, safe='')}/versions")
-        return [FileVersion.from_dict(v) for v in resp]
+        quoted_path = quote(path, safe='')
+        try:
+            resp = self._request("GET", f"/files/{quoted_path}/versions")
+            versions_raw = resp if isinstance(resp, list) else resp.get("versions", [])
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 404:
+                raise
+            resp = self._request("GET", f"/files/{quoted_path}")
+            versions_raw = resp.get("versions", []) if isinstance(resp, dict) else resp
+
+        versions = [FileVersion.from_dict(v) for v in versions_raw]
+        if not versions:
+            derived: list[FileVersion] = []
+            for span in self.get_spans().spans:
+                kind = span.kind
+                if isinstance(kind, FsReadKind) and kind.path == path and kind.file_version:
+                    derived.append(
+                        FileVersion(
+                            hash=kind.file_version,
+                            path=path,
+                            size=kind.bytes_read,
+                            created_at=span.started_at or "",
+                            created_by_span=span.id,
+                            created_by_trace=span.trace_id,
+                        )
+                    )
+                elif isinstance(kind, FsWriteKind) and kind.path == path and kind.file_version:
+                    derived.append(
+                        FileVersion(
+                            hash=kind.file_version,
+                            path=path,
+                            size=kind.bytes_written,
+                            created_at=span.started_at or "",
+                            created_by_span=span.id,
+                            created_by_trace=span.trace_id,
+                        )
+                    )
+
+            dedup: dict[str, FileVersion] = {}
+            for v in derived:
+                if v.hash not in dedup:
+                    dedup[v.hash] = v
+            versions = list(dedup.values())
+
+        versions.sort(key=lambda v: v.created_at, reverse=True)
+        return versions
 
     def file_traces(self, path: str) -> dict[str, list[dict[str, str]]]:
-        return self._request("GET", f"/files/{quote(path, safe='')}/traces")
+        quoted_path = quote(path, safe='')
+        try:
+            return self._request("GET", f"/files/{quoted_path}/traces")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 404:
+                raise
+
+        links: list[dict[str, str]] = []
+        for span in self.get_spans().spans:
+            kind = span.kind
+            if isinstance(kind, FsReadKind) and kind.path == path:
+                link: dict[str, str] = {
+                    "trace_id": span.trace_id,
+                    "span_id": span.id,
+                    "operation": "read",
+                }
+                if kind.file_version:
+                    link["file_version"] = kind.file_version
+                if span.started_at:
+                    link["started_at"] = span.started_at
+                links.append(link)
+            elif isinstance(kind, FsWriteKind) and kind.path == path:
+                link = {
+                    "trace_id": span.trace_id,
+                    "span_id": span.id,
+                    "operation": "write",
+                }
+                if kind.file_version:
+                    link["file_version"] = kind.file_version
+                if span.started_at:
+                    link["started_at"] = span.started_at
+                links.append(link)
+
+        links.sort(key=lambda l: l.get("started_at", ""), reverse=True)
+        return {"traces": links}
 
     # ─── Dataset operations ─────────────────────────────────────────────
 
@@ -339,7 +465,14 @@ class Traceway:
             f"/datasets/{dataset_id}/queue",
             json={"datapoint_ids": datapoint_ids},
         )
-        return [QueueItem.from_dict(q) for q in resp]
+        if isinstance(resp, list):
+            return [QueueItem.from_dict(q) for q in resp]
+        if isinstance(resp, dict):
+            if "items" in resp and isinstance(resp["items"], list):
+                return [QueueItem.from_dict(q) for q in resp["items"]]
+            if resp.get("ok") is True:
+                return []
+        return []
 
     def claim_queue_item(self, item_id: str, claimed_by: str | None = None) -> QueueItem:
         data: dict[str, Any] = {}
@@ -379,7 +512,7 @@ class Traceway:
     def trace(self, name: str = "") -> Generator[TraceContext, None, None]:
         """Create a trace context. All spans created within will share the same trace ID.
 
-        Calls POST /api/traces to register the trace on the server.
+        Calls POST /traces (or /api/traces on legacy backends) to register the trace.
         Sets TRACEWAY_TRACE_ID env var for subprocess propagation.
 
         Example:

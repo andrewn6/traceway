@@ -184,9 +184,13 @@ class TraceList:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "TraceList":
+        items = d.get("traces") or d.get("items") or []
+        count = d.get("count")
+        if count is None:
+            count = d.get("total", len(items))
         return cls(
-            traces=[Trace.from_dict(t) for t in d["traces"]],
-            count=d["count"],
+            traces=[Trace.from_dict(t) for t in items],
+            count=count,
         )
 
 
@@ -197,9 +201,13 @@ class SpanList:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "SpanList":
+        items = d.get("spans") or d.get("items") or []
+        count = d.get("count")
+        if count is None:
+            count = d.get("total", len(items))
         return cls(
-            spans=[Span.from_dict(s) for s in d["spans"]],
-            count=d["count"],
+            spans=[Span.from_dict(s) for s in items],
+            count=count,
         )
 
 
@@ -328,9 +336,13 @@ class DatapointList:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "DatapointList":
+        items = d.get("datapoints") or d.get("items") or []
+        count = d.get("count")
+        if count is None:
+            count = d.get("total", len(items))
         return cls(
-            datapoints=[Datapoint.from_dict(dp) for dp in d["datapoints"]],
-            count=d["count"],
+            datapoints=[Datapoint.from_dict(dp) for dp in items],
+            count=count,
         )
 
 
@@ -402,9 +414,13 @@ class QueueList:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "QueueList":
+        items = d.get("items") or []
+        count = d.get("count")
+        if count is None:
+            count = d.get("total", len(items))
         return cls(
-            items=[QueueItem.from_dict(q) for q in d["items"]],
-            count=d["count"],
+            items=[QueueItem.from_dict(q) for q in items],
+            count=count,
         )
 
 

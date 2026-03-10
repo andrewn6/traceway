@@ -1,15 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/daemon",  # package name: traceway
+    "crates/daemon",  # package name: traceway (ingest binary)
     "crates/trace",
     "crates/memfs",
     "crates/storage",
     "crates/storage-sqlite",
     "crates/storage-turbopuffer",
     "crates/storage-postgres",
-    "crates/api",
-    "crates/proxy",
     "crates/auth",
 ]
 
