@@ -418,58 +418,55 @@
 </script>
 
 <div class="app-shell-wide space-y-4">
-	<div class="flex items-center justify-between">
+	<div class="flex items-center justify-between gap-4">
 		<div>
 			<h1 class="text-lg font-semibold text-text">Approvals</h1>
 			<p class="text-xs text-text-muted mt-0.5">Trace-linked human approval queue for model and agent outputs</p>
 		</div>
+		<div class="flex items-center gap-2 shrink-0">
+			<input class="control-input h-8 text-[12px] w-[120px]" bind:value={claimName} placeholder="Reviewer name" />
+			<button class="btn-secondary h-8 text-[12px] whitespace-nowrap" disabled={!nextPending} onclick={claimNextPending}>Claim next</button>
+			<button class="btn-ghost h-8 text-[12px] whitespace-nowrap" disabled={!nextClaimedByMe} onclick={openNextClaimedByMe}>Open next</button>
+		</div>
 	</div>
 
-	<div class="app-toolbar-shell rounded-xl p-2 space-y-2">
-		<div class="flex items-center gap-1.5 flex-wrap">
-			<button class="query-chip {savedView === 'all' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'all')}>All queue</button>
-			<button class="query-chip {savedView === 'mine' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'mine')}>My queue</button>
-			<button class="query-chip {savedView === 'unclaimed' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'unclaimed')}>Unclaimed</button>
-			<button class="query-chip {savedView === 'completed_today' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'completed_today')}>Completed today</button>
-			<div class="flex-1"></div>
-			<div class="flex items-center gap-1.5">
-				<input class="control-input h-8 text-[12px] w-[120px]" bind:value={claimName} placeholder="Reviewer" />
-				<button class="btn-secondary h-8 text-[12px]" disabled={!nextPending} onclick={claimNextPending}>Claim next</button>
-				<button class="btn-ghost h-8 text-[12px]" disabled={!nextClaimedByMe} onclick={openNextClaimedByMe}>Open next</button>
-			</div>
+	<div class="app-toolbar-shell rounded-xl p-2 space-y-1.5">
+		<div class="flex items-center gap-1.5 overflow-x-auto">
+			<button class="query-chip shrink-0 {savedView === 'all' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'all')}>All queue</button>
+			<button class="query-chip shrink-0 {savedView === 'mine' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'mine')}>My queue</button>
+			<button class="query-chip shrink-0 {savedView === 'unclaimed' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'unclaimed')}>Unclaimed</button>
+			<button class="query-chip shrink-0 {savedView === 'completed_today' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'completed_today')}>Completed today</button>
+			<div class="w-px h-4 bg-border/40 mx-0.5 shrink-0"></div>
+			<button class="{statusFilterClass('pending')} shrink-0" onclick={() => (statusFilter = 'pending')}>Pending ({counts.pending})</button>
+			<button class="{statusFilterClass('claimed')} shrink-0" onclick={() => (statusFilter = 'claimed')}>Claimed ({counts.claimed})</button>
+			<button class="{statusFilterClass('completed')} shrink-0" onclick={() => (statusFilter = 'completed')}>Completed ({counts.completed})</button>
+			<button class="{statusFilterClass('all')} shrink-0" onclick={() => (statusFilter = 'all')}>All ({counts.total})</button>
 		</div>
 
-		<div class="flex items-center gap-1.5 flex-wrap">
-			<button class={statusFilterClass('pending')} onclick={() => (statusFilter = 'pending')}>Pending ({counts.pending})</button>
-			<button class={statusFilterClass('claimed')} onclick={() => (statusFilter = 'claimed')}>Claimed ({counts.claimed})</button>
-			<button class={statusFilterClass('completed')} onclick={() => (statusFilter = 'completed')}>Completed ({counts.completed})</button>
-			<button class={statusFilterClass('all')} onclick={() => (statusFilter = 'all')}>All ({counts.total})</button>
-			<div class="w-px h-5 bg-border/40 mx-1"></div>
-			<select bind:value={datasetFilter} class="control-select h-7 text-[12px]">
+		<div class="flex items-center gap-2 overflow-x-auto">
+			<select bind:value={datasetFilter} class="control-select h-7 text-[12px] shrink-0 w-[160px]">
 				<option value="all">All datasets</option>
 				{#each datasets as ds (ds.id)}
 					<option value={ds.id}>{ds.name}</option>
 				{/each}
 			</select>
-			<select bind:value={sortBy} class="control-select h-7 text-[12px] w-[140px]">
+			<select bind:value={sortBy} class="control-select h-7 text-[12px] shrink-0 w-[130px]">
 				<option value="created_desc">Newest first</option>
 				<option value="created_asc">Oldest first</option>
 				<option value="status">Status priority</option>
 			</select>
-			<button class="query-chip h-7 {mineOnly ? 'query-chip-active' : ''}" onclick={() => (mineOnly = !mineOnly)}>Mine</button>
+			<button class="query-chip h-7 shrink-0 {mineOnly ? 'query-chip-active' : ''}" onclick={() => (mineOnly = !mineOnly)}>Mine</button>
+			{#if selectedVisibleCount > 0}
+				<div class="w-px h-4 bg-border/40 shrink-0"></div>
+				<span class="text-[12px] text-text-muted shrink-0">{selectedVisibleCount} selected</span>
+				<button class="btn-secondary h-7 text-[11px] shrink-0" disabled={submitting} onclick={bulkClaimSelected}>Bulk claim</button>
+				<button class="btn-primary h-7 text-[11px] shrink-0" disabled={submitting} onclick={bulkApproveSelected}>Bulk approve</button>
+				<button class="btn-ghost h-7 text-[11px] shrink-0" onclick={() => (selectedIds = new Set())}>Clear</button>
+			{/if}
 			<div class="flex-1"></div>
-			<input class="control-input h-7 text-[12px] w-[200px]" bind:value={searchQuery} placeholder="Search..." />
-			<div class="text-[12px] text-text-muted tabular-nums">{filteredItems.length} items</div>
+			<input class="control-input h-7 text-[12px] w-[180px] shrink-0" bind:value={searchQuery} placeholder="Search..." />
+			<span class="text-[12px] text-text-muted tabular-nums shrink-0">{filteredItems.length} items</span>
 		</div>
-
-		{#if selectedVisibleCount > 0}
-			<div class="flex items-center gap-2 text-[12px] border border-border/50 rounded-lg px-2 py-1.5 bg-bg-tertiary/30">
-				<span class="text-text-muted">{selectedVisibleCount} selected</span>
-				<button class="btn-secondary h-7 text-[11px]" disabled={submitting} onclick={bulkClaimSelected}>Bulk claim</button>
-				<button class="btn-primary h-7 text-[11px]" disabled={submitting} onclick={bulkApproveSelected}>Bulk approve</button>
-				<button class="btn-ghost h-7 text-[11px]" onclick={() => (selectedIds = new Set())}>Clear</button>
-			</div>
-		{/if}
 	</div>
 
 	{#if loading}
