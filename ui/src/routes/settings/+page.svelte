@@ -113,7 +113,7 @@
 
 		<!-- Account (cloud mode) -->
 		{#if isCloudMode && (currentUser || org)}
-			<section class="glass-surface rounded-2xl p-5 space-y-3">
+			<section class="bg-bg-secondary border border-border rounded-md p-5 space-y-3">
 				<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Account</h2>
 				<div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
 					{#if currentUser}
@@ -149,7 +149,7 @@
 		{/if}
 
 		<!-- Usage -->
-		<section class="glass-surface rounded-2xl p-5 space-y-4">
+		<section class="bg-bg-secondary border border-border rounded-md p-5 space-y-4">
 			<div class="flex items-center justify-between">
 				<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Usage</h2>
 				{#if isCloudMode}
@@ -206,7 +206,7 @@
 		</section>
 
 		<!-- Server -->
-		<section class="glass-surface rounded-2xl p-5 space-y-3">
+		<section class="bg-bg-secondary border border-border rounded-md p-5 space-y-3">
 			<h2 class="text-sm font-semibold text-text uppercase tracking-wide">Server</h2>
 			{#if health}
 				<div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -241,7 +241,7 @@
 		</section>
 
 		<!-- Danger Zone -->
-		<section class="glass-surface border-danger/30 rounded-2xl p-5 space-y-4">
+		<section class="bg-bg-secondary border border-danger/30 rounded-md p-5 space-y-4">
 			<h2 class="text-sm font-semibold text-danger uppercase tracking-wide">Danger Zone</h2>
 			<div class="space-y-2">
 				<p class="text-text-secondary text-sm">Clear all traces, spans, and file history.</p>

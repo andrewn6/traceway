@@ -94,7 +94,7 @@
 
 	<!-- Newly created key banner -->
 	{#if createdKey}
-		<div class="glass-surface border-success/30 rounded-2xl p-4 space-y-2">
+		<div class="bg-bg-secondary border border-success/30 rounded-md p-4 space-y-2">
 			<p class="text-sm font-semibold text-text">Key created: {createdKey.name}</p>
 			<p class="text-xs text-text-muted">Copy this key now. You won't be able to see it again.</p>
 			<div class="flex items-center gap-2">

@@ -294,7 +294,7 @@
 				{@const prov = getProviderDef(conn.provider)}
 				{#if editingId === conn.id}
 					<!-- Edit form -->
-					<form onsubmit={handleUpdate} class="glass-surface rounded-none p-4 space-y-3">
+					<form onsubmit={handleUpdate} class="bg-bg-secondary border-b border-border p-4 space-y-3">
 						<div class="flex items-center gap-2 mb-1">
 							<div class="w-6 h-6 rounded flex items-center justify-center" style="color: {prov.color}">
 								{@html prov.icon}

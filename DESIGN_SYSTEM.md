@@ -4,27 +4,31 @@ This is the shared visual language for the Traceway product UI.
 
 ## Signature feels
 
-1. Floating command layer
-- Bottom command rails are detached from page edges.
-- Dense controls + one clear primary action.
+1. Grounded sidebar navigation
+- Fixed left sidebar (240px) with logo, project switcher, nav, and settings.
+- All navigation in the sidebar; no floating bottom rails.
 
-2. Detached utility rails
-- Modal-like workflows use right floating panels.
-- Panels support compact/default/wide sizing.
+2. Solid surfaces
+- Opaque backgrounds with clean borders. No backdrop-filter blur or color-mix transparency.
+- Consistent border radius (0.5rem panels, 0.375rem controls).
 
 3. Quiet data plane
 - Tables stay calm and information-dense.
 - Minimal color noise, strong hierarchy, fast scanability.
+
+4. Enterprise typography
+- Inter font for all UI text. Monospace (JetBrains Mono) only for code and data values.
+- Clean, readable at small sizes.
 
 ## Core primitives
 
 Use these classes before adding new styling:
 
 - Surfaces: `surface-panel`, `surface-command`, `surface-quiet`, `table-float`
-- Shells: `app-shell-wide`, `app-toolbar-shell`, `app-page-shell`
+- Sidebar: `sidebar-shell`, `sidebar-nav-item`, `sidebar-nav-item-active`, `sidebar-section-label`
+- Shell: `app-shell-wide`, `app-toolbar-shell`
 - Controls: `control-input`, `control-select`, `control-textarea`
 - Buttons: `btn-primary`, `btn-secondary`, `btn-ghost`
-- Command input: `command-input-shell`, `command-input`
 - Chips: `query-chip`, `query-chip-active`
 - Labels: `label-micro`, `table-head-compact`
 - Alerts: `alert-danger`, `alert-success`, `alert-warning`
@@ -39,13 +43,16 @@ Use these classes before adding new styling:
 
 ## Interaction rules
 
-- Use right floating panel for create/edit/detail flows with structured data.
-- Keep command bars anchored and detached; do not dock full-width edge-to-edge.
+- Sidebar is the primary navigation anchor.
+- Use right docked panels for detail/edit flows with structured data.
 - For tables, put filter/columns/search in a compact toolbar above the grid.
+- Cmd+K opens search modal for quick navigation.
 
 ## Dark/light parity
 
+- Dark theme is primary, light theme has full parity.
 - New components must be legible in both themes.
+- Use CSS custom properties (--color-*) for all colors.
 - Preserve border contrast and focus visibility in light mode.
 
 ## Contribution checklist
