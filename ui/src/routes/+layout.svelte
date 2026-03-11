@@ -102,7 +102,7 @@
 	}
 
 	function isSectionActive(href: string): boolean {
-		if (href === '/traces') return page.url.pathname === '/traces' || page.url.pathname.startsWith('/traces/');
+		if (href === '/traces') return page.url.pathname === '/traces' || page.url.pathname.startsWith('/traces/') || page.url.pathname === '/spans';
 		if (href === '/settings') return page.url.pathname === '/settings' || page.url.pathname.startsWith('/settings/');
 		if (href === '/datasets') return page.url.pathname === '/datasets' || page.url.pathname.startsWith('/datasets/');
 		if (href === '/approvals') return page.url.pathname === '/approvals';

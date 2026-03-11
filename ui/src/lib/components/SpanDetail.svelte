@@ -4,35 +4,29 @@
 	import StatusBadge from './StatusBadge.svelte';
 	import SpanKindIcon from './SpanKindIcon.svelte';
 
-	let { span, onSpanAction, allSpans = [] }: { span: Span | null; onSpanAction?: () => void; allSpans?: Span[] } = $props();
+	let { span, onSpanAction, allSpans = [], onClose }: { span: Span | null; onSpanAction?: () => void; allSpans?: Span[]; onClose?: () => void } = $props();
 
-	// ── Tabs ──────────────────────────────────────────────────────────
-	let activeTab: 'input' | 'output' | 'attributes' | 'events' | 'file' = $state('input');
+	let activeTab: 'messages' | 'metadata' = $state('messages');
+	let formatMode: 'pretty' | 'json' | 'yaml' = $state('pretty');
+	let inputExpanded = $state(true);
+	let outputExpanded = $state(true);
 
-	// ── File content (for fs_read / fs_write spans) ──────────────────
+	// File content (for fs_read / fs_write spans)
 	let fileContent = $state('');
 	let fileContentLoading = $state(false);
 	let fileContentError = $state('');
 	let fileContentLoaded = $state(false);
 
-	const isFileSpan = $derived(
-		span?.kind?.type === 'fs_read' || span?.kind?.type === 'fs_write'
-	);
-
+	const isFileSpan = $derived(span?.kind?.type === 'fs_read' || span?.kind?.type === 'fs_write');
 	const fileHash = $derived(
-		span?.kind?.type === 'fs_read'
-			? span.kind.file_version
-			: span?.kind?.type === 'fs_write'
-				? span.kind.file_version
-				: null
+		span?.kind?.type === 'fs_read' ? span.kind.file_version
+		: span?.kind?.type === 'fs_write' ? span.kind.file_version
+		: null
 	);
-
 	const filePath = $derived(
-		span?.kind?.type === 'fs_read'
-			? span.kind.path
-			: span?.kind?.type === 'fs_write'
-				? span.kind.path
-				: null
+		span?.kind?.type === 'fs_read' ? span.kind.path
+		: span?.kind?.type === 'fs_write' ? span.kind.path
+		: null
 	);
 
 	async function loadFileContent() {
@@ -45,34 +39,19 @@
 		} catch {
 			const out = span?.output as Record<string, unknown> | null | undefined;
 			const fallback = out && typeof out === 'object'
-				? (typeof out.file_content === 'string'
-					? out.file_content
-					: typeof out.content === 'string'
-						? out.content
-						: typeof out.preview === 'string'
-							? out.preview
-							: '')
+				? (typeof out.file_content === 'string' ? out.file_content
+					: typeof out.content === 'string' ? out.content
+					: typeof out.preview === 'string' ? out.preview : '')
 				: '';
-			if (fallback) {
-				fileContent = fallback;
-				fileContentLoaded = true;
-			} else {
-				fileContentError = 'Could not load file content';
-			}
+			if (fallback) { fileContent = fallback; fileContentLoaded = true; }
+			else { fileContentError = 'Could not load file content'; }
 		}
 		fileContentLoading = false;
 	}
 
 	function inferLanguage(path: string): string {
 		const ext = path.split('.').pop()?.toLowerCase() ?? '';
-		const map: Record<string, string> = {
-			ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
-			py: 'python', rs: 'rust', go: 'go', rb: 'ruby',
-			java: 'java', c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp',
-			css: 'css', scss: 'scss', html: 'html', svelte: 'svelte',
-			json: 'json', toml: 'toml', yaml: 'yaml', yml: 'yaml',
-			md: 'markdown', sh: 'bash', sql: 'sql', xml: 'xml',
-		};
+		const map: Record<string, string> = { ts: 'typescript', tsx: 'tsx', js: 'javascript', py: 'python', rs: 'rust', go: 'go', json: 'json', md: 'markdown', sh: 'bash', sql: 'sql', css: 'css', html: 'html', svelte: 'svelte', yaml: 'yaml', toml: 'toml' };
 		return map[ext] ?? 'plaintext';
 	}
 
@@ -82,100 +61,68 @@
 		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 	}
 
-	// ── JSON/Text toggle for payloads ─────────────────────────────────
-	let inputViewMode: 'formatted' | 'raw' = $state('formatted');
-	let outputViewMode: 'formatted' | 'raw' = $state('formatted');
-
-	// ── Export to dataset ─────────────────────────────────────────────
+	// Export to dataset
 	let showExportDropdown = $state(false);
 	let exportDatasets: DatasetWithCount[] = $state([]);
 	let exportLoading = $state(false);
 	let exportSuccess = $state('');
-
-	async function openExportDropdown() {
-		showExportDropdown = !showExportDropdown;
-		showReviewDropdown = false;
-		if (showExportDropdown) {
-			try {
-				const result = await getDatasets();
-				exportDatasets = result.datasets;
-			} catch {
-				exportDatasets = [];
-			}
-		}
-	}
-
-	async function doExport(datasetId: string) {
-		if (!span) return;
-		exportLoading = true;
-		exportSuccess = '';
-		try {
-			await exportSpanToDataset(datasetId, span.id);
-			const ds = exportDatasets.find((d) => d.id === datasetId);
-			exportSuccess = `Exported to ${ds?.name ?? shortId(datasetId)}`;
-			showExportDropdown = false;
-		} catch {
-			exportSuccess = 'Export failed';
-		}
-		exportLoading = false;
-		setTimeout(() => (exportSuccess = ''), 3000);
-	}
-
-	// ── Send to review (export + enqueue) ────────────────────────────
 	let showReviewDropdown = $state(false);
 	let reviewDatasets: DatasetWithCount[] = $state([]);
 	let reviewLoading = $state(false);
 	let reviewSuccess = $state('');
 
+	async function openExportDropdown() {
+		showExportDropdown = !showExportDropdown;
+		showReviewDropdown = false;
+		if (showExportDropdown) {
+			try { const result = await getDatasets(); exportDatasets = result.datasets; } catch { exportDatasets = []; }
+		}
+	}
+
+	async function doExport(datasetId: string) {
+		if (!span) return;
+		exportLoading = true; exportSuccess = '';
+		try {
+			await exportSpanToDataset(datasetId, span.id);
+			const ds = exportDatasets.find((d) => d.id === datasetId);
+			exportSuccess = `Exported to ${ds?.name ?? shortId(datasetId)}`;
+			showExportDropdown = false;
+		} catch { exportSuccess = 'Export failed'; }
+		exportLoading = false;
+		setTimeout(() => (exportSuccess = ''), 3000);
+	}
+
 	async function openReviewDropdown() {
 		showReviewDropdown = !showReviewDropdown;
 		showExportDropdown = false;
 		if (showReviewDropdown) {
-			try {
-				const result = await getDatasets();
-				reviewDatasets = result.datasets;
-			} catch {
-				reviewDatasets = [];
-			}
+			try { const result = await getDatasets(); reviewDatasets = result.datasets; } catch { reviewDatasets = []; }
 		}
 	}
 
 	async function doReview(datasetId: string) {
 		if (!span) return;
-		reviewLoading = true;
-		reviewSuccess = '';
+		reviewLoading = true; reviewSuccess = '';
 		try {
 			await exportSpanAndEnqueue(datasetId, span.id);
 			const ds = reviewDatasets.find((d) => d.id === datasetId);
 			reviewSuccess = `Sent to review in ${ds?.name ?? shortId(datasetId)}`;
 			showReviewDropdown = false;
-		} catch {
-			reviewSuccess = 'Failed to send to review';
-		}
+		} catch { reviewSuccess = 'Failed to send to review'; }
 		reviewLoading = false;
 		setTimeout(() => (reviewSuccess = ''), 3000);
 	}
 
-	// ── Delete span ───────────────────────────────────────────────────
+	// Delete span
 	let confirmDeleteSpan = $state(false);
-
 	async function handleDeleteSpan() {
 		if (!span) return;
-		if (!confirmDeleteSpan) {
-			confirmDeleteSpan = true;
-			setTimeout(() => (confirmDeleteSpan = false), 3000);
-			return;
-		}
-		try {
-			await deleteSpan(span.id);
-			onSpanAction?.();
-		} catch {
-			// error
-		}
+		if (!confirmDeleteSpan) { confirmDeleteSpan = true; setTimeout(() => (confirmDeleteSpan = false), 3000); return; }
+		try { await deleteSpan(span.id); onSpanAction?.(); } catch {}
 		confirmDeleteSpan = false;
 	}
 
-	// ── Complete / Fail actions ───────────────────────────────────────
+	// Complete / Fail
 	let showCompleteForm = $state(false);
 	let completeOutput = $state('');
 	let showFailForm = $state(false);
@@ -188,12 +135,9 @@
 		try {
 			const output = completeOutput.trim() ? JSON.parse(completeOutput) : undefined;
 			await completeSpan(span.id, output);
-			showCompleteForm = false;
-			completeOutput = '';
+			showCompleteForm = false; completeOutput = '';
 			onSpanAction?.();
-		} catch {
-			// error
-		}
+		} catch {}
 		actionLoading = false;
 	}
 
@@ -202,42 +146,51 @@
 		actionLoading = true;
 		try {
 			await failSpan(span.id, failError.trim());
-			showFailForm = false;
-			failError = '';
+			showFailForm = false; failError = '';
 			onSpanAction?.();
-		} catch {
-			// error
-		}
+		} catch {}
 		actionLoading = false;
 	}
 
-	// ── Formatting helpers ────────────────────────────────────────────
+	// Formatting
 	function formatJson(value: unknown): string {
 		if (value === null || value === undefined) return '(none)';
 		if (typeof value === 'string') return value;
 		return JSON.stringify(value, null, 2);
 	}
 
-	function formatJsonRaw(value: unknown): string {
-		if (value === null || value === undefined) return '(none)';
-		return JSON.stringify(value);
+	function jsonToYaml(value: unknown, indent = 0): string {
+		const pfx = '  '.repeat(indent);
+		if (value === null || value === undefined) return 'null';
+		if (typeof value === 'string') return value.includes('\n') ? `|\n${value.split('\n').map(l => pfx + '  ' + l).join('\n')}` : JSON.stringify(value);
+		if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+		if (Array.isArray(value)) {
+			if (value.length === 0) return '[]';
+			return value.map(v => `${pfx}- ${jsonToYaml(v, indent + 1).trimStart()}`).join('\n');
+		}
+		if (typeof value === 'object') {
+			const entries = Object.entries(value);
+			if (entries.length === 0) return '{}';
+			return entries.map(([k, v]) => {
+				const val = jsonToYaml(v, indent + 1);
+				if (typeof v === 'object' && v !== null) return `${pfx}${k}:\n${val}`;
+				return `${pfx}${k}: ${val}`;
+			}).join('\n');
+		}
+		return String(value);
+	}
+
+	function renderValue(value: unknown): string {
+		if (formatMode === 'json') return formatJson(value);
+		if (formatMode === 'yaml') return jsonToYaml(value);
+		return formatJson(value);
 	}
 
 	function kindMeta(s: Span): Record<string, string> {
 		if (!s.kind) return {};
 		switch (s.kind.type) {
-			case 'fs_read':
-				return {
-					'Path': s.kind.path,
-					'Version': s.kind.file_version ?? '-',
-					'Bytes': s.kind.bytes_read.toLocaleString(),
-				};
-			case 'fs_write':
-				return {
-					'Path': s.kind.path,
-					'Version': s.kind.file_version,
-					'Bytes': s.kind.bytes_written.toLocaleString(),
-				};
+			case 'fs_read': return { 'Path': s.kind.path, 'Version': s.kind.file_version ?? '-', 'Bytes': s.kind.bytes_read.toLocaleString() };
+			case 'fs_write': return { 'Path': s.kind.path, 'Version': s.kind.file_version, 'Bytes': s.kind.bytes_written.toLocaleString() };
 			case 'llm_call': {
 				const meta: Record<string, string> = { 'Model': s.kind.model };
 				if (s.kind.provider) meta['Provider'] = s.kind.provider;
@@ -246,34 +199,20 @@
 				if (s.kind.cost != null) meta['Cost'] = `$${s.kind.cost.toFixed(6)}`;
 				return meta;
 			}
-			case 'custom':
-				return { 'Kind': s.kind.kind };
-			default:
-				return {};
+			case 'custom': return { 'Kind': s.kind.kind };
+			default: return {};
 		}
 	}
 
-	// ── LLM message detection ─────────────────────────────────────────
-	// Detect if input/output contains chat messages (array of {role, content})
-	interface ChatMessage {
-		role: string;
-		content: string;
-	}
+	// Chat message detection
+	interface ChatMessage { role: string; content: string; }
 
 	function extractMessages(value: unknown): ChatMessage[] | null {
 		if (!value) return null;
-		// Direct array of messages
-		if (Array.isArray(value)) {
-			if (value.length > 0 && value[0].role && value[0].content !== undefined) {
-				return value as ChatMessage[];
-			}
-		}
-		// Object with messages array
+		if (Array.isArray(value) && value.length > 0 && value[0].role && value[0].content !== undefined) return value as ChatMessage[];
 		if (typeof value === 'object' && value !== null) {
 			const obj = value as Record<string, unknown>;
-			if (Array.isArray(obj.messages) && obj.messages.length > 0 && (obj.messages[0] as Record<string, unknown>).role) {
-				return obj.messages as ChatMessage[];
-			}
+			if (Array.isArray(obj.messages) && obj.messages.length > 0 && (obj.messages[0] as Record<string, unknown>).role) return obj.messages as ChatMessage[];
 		}
 		return null;
 	}
@@ -288,56 +227,36 @@
 		}
 	}
 
-	function roleBgColor(role: string): string {
-		switch (role.toLowerCase()) {
-			case 'system': return 'bg-warning/5 border-warning/20';
-			case 'user': return 'bg-accent/5 border-accent/20';
-			case 'assistant': return 'bg-success/5 border-success/20';
-			case 'tool': return 'bg-purple-400/5 border-purple-400/20';
-			default: return 'bg-bg-tertiary border-border';
-		}
+	function wordCount(text: unknown): number {
+		if (typeof text !== 'string') return 0;
+		return text.trim().split(/\s+/).filter(Boolean).length;
 	}
 
-	// ── Derived values ────────────────────────────────────────────────
+	function charCount(text: unknown): number {
+		if (typeof text !== 'string') return 0;
+		return text.length;
+	}
+
+	function copyText(text: unknown) {
+		const str = typeof text === 'string' ? text : JSON.stringify(text, null, 2);
+		navigator.clipboard.writeText(str);
+	}
+
 	const inputMessages = $derived(span ? extractMessages(span.input) : null);
 	const outputMessages = $derived(span ? extractMessages(span.output) : null);
+	const childSpans = $derived(span ? allSpans.filter((s) => s.parent_id === span.id) : []);
 
-	// Children of current span
-	const childSpans = $derived(
-		span ? allSpans.filter((s) => s.parent_id === span.id) : []
-	);
-
-	// Collapsed state for individual messages
-	let collapsedMessages: Set<number> = $state(new Set());
-
-	function toggleMessage(idx: number) {
-		const next = new Set(collapsedMessages);
-		if (next.has(idx)) next.delete(idx);
-		else next.add(idx);
-		collapsedMessages = next;
-	}
-
-	// Reset tab and collapsed state when span changes
 	$effect(() => {
 		if (span) {
-			collapsedMessages = new Set();
-			// Reset file content state
-			fileContent = '';
-			fileContentLoading = false;
-			fileContentError = '';
-			fileContentLoaded = false;
-			// Auto-select best tab
-			if (span.kind?.type === 'fs_read' || span.kind?.type === 'fs_write') {
-				activeTab = 'file';
-				// Auto-load file content for file spans
-				loadFileContent();
-			} else if (span.input !== undefined && span.input !== null) {
-				activeTab = 'input';
-			} else if (span.output !== undefined && span.output !== null) {
-				activeTab = 'output';
-			} else {
-				activeTab = 'attributes';
-			}
+			inputExpanded = true;
+			outputExpanded = true;
+			formatMode = 'pretty';
+			fileContent = ''; fileContentLoading = false; fileContentError = ''; fileContentLoaded = false;
+			showExportDropdown = false; showReviewDropdown = false;
+			showCompleteForm = false; showFailForm = false;
+			confirmDeleteSpan = false;
+			if (isFileSpan) { activeTab = 'messages'; loadFileContent(); }
+			else { activeTab = 'messages'; }
 		}
 	});
 
@@ -349,440 +268,300 @@
 </script>
 
 {#if span}
-	{@const meta = kindMeta(span)}
 	{@const status = spanStatus(span)}
 	{@const duration = spanDurationMs(span)}
 	{@const error = spanError(span)}
+	{@const meta = kindMeta(span)}
 
 	<div class="flex flex-col h-full min-h-0 text-[13px]">
 		<!-- Header -->
-		<div class="px-4 py-3.5 border-b border-border/55 shrink-0 space-y-3 bg-bg-secondary/20 backdrop-blur-sm">
-			<!-- Row 1: name + status -->
+		<div class="px-4 py-3 border-b border-border/55 shrink-0 space-y-2 bg-bg-secondary/20">
 			<div class="flex items-center gap-2">
 				<SpanKindIcon {span} />
-				<h2 class="text-text font-semibold text-[22px] leading-tight flex-1 truncate tracking-tight">{span.name}</h2>
+				<h2 class="font-semibold text-[15px] text-text flex-1 truncate tracking-tight">Span {shortId(span.id)}</h2>
 				<StatusBadge {status} />
+				{#if onClose}
+					<button onclick={onClose} class="w-7 h-7 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg-tertiary/70 transition-colors" aria-label="Close">
+						<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+					</button>
+				{/if}
 			</div>
 
-			<!-- Row 2: metric chips -->
-			<div class="flex items-center gap-1.5 flex-wrap rounded-xl border border-border/50 bg-bg-tertiary/25 px-2 py-1.5">
-				<span class="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] bg-bg-tertiary border border-border text-text-secondary font-mono">{formatDuration(duration)}</span>
-				{#if span.kind?.type === 'llm_call'}
-					<span class="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] bg-bg-tertiary border border-border text-text-secondary font-mono">
-						{((span.kind.input_tokens ?? 0) + (span.kind.output_tokens ?? 0)).toLocaleString()} tok
-					</span>
-					<span class="inline-flex items-center rounded px-2 py-0.5 text-[11px] bg-success/10 border border-success/20 text-success font-mono">
-						${(span.kind.cost ?? 0).toFixed(4)}
-					</span>
-				{/if}
-				<span class="text-[11px] text-text-muted font-mono bg-bg/35 rounded px-1.5 py-0.5 border border-border/30">
-					{new Date(spanStartedAt(span)).toLocaleString()}
-				</span>
-				{#if span.kind?.type === 'llm_call'}
-					<span class="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] bg-accent/10 border border-accent/25 text-accent truncate max-w-52">
+			{#if span.kind?.type === 'llm_call'}
+				<div class="flex items-center gap-1.5 flex-wrap text-[11px]">
+					<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-bg-tertiary border border-border text-text-secondary font-mono">
+						<svg class="w-3 h-3 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456Z" /></svg>
 						{span.kind.model}
 					</span>
-				{/if}
-			</div>
-
-			<!-- Row 3: action buttons -->
-			<div class="flex items-center gap-1.5 flex-wrap rounded-xl border border-border/50 bg-bg-tertiary/25 px-2 py-1.5">
-				<button class="px-2.5 py-1 text-[11px] border border-border rounded-lg text-text-secondary hover:text-text hover:bg-bg-tertiary/70 transition-colors duration-150">Tags</button>
-
-				<!-- Send to Review -->
-				<div class="relative">
-					<button
-					class="px-2.5 py-1 text-[11px] bg-warning/10 text-warning border border-warning/20 rounded-lg hover:bg-warning/20 transition-colors duration-150"
-						onclick={openReviewDropdown}
-					>Add to labeling queue</button>
-					{#if showReviewDropdown}
-						<div class="absolute left-0 top-full mt-1 w-56 bg-bg-secondary/95 border border-border/70 rounded-lg shadow-[0_24px_36px_-30px_rgba(0,0,0,0.9)] z-10 backdrop-blur-md overflow-hidden">
-							{#if reviewDatasets.length === 0}
-								<div class="px-3 py-2 text-xs text-text-muted">No datasets. Create one first.</div>
-							{:else}
-								{#each reviewDatasets as ds (ds.id)}
-									<button
-										class="w-full text-left px-3 py-2 text-xs hover:bg-bg-tertiary/75 transition-colors duration-150 text-text-secondary"
-										disabled={reviewLoading}
-										onclick={() => doReview(ds.id)}
-									>
-										<div class="text-text">{ds.name}</div>
-										<div class="text-text-muted">{ds.datapoint_count} datapoints</div>
-									</button>
-								{/each}
-							{/if}
-						</div>
-					{/if}
+					<span class="px-2 py-0.5 rounded bg-bg-tertiary border border-border text-text-muted font-mono">
+						{((span.kind.input_tokens ?? 0) + (span.kind.output_tokens ?? 0)).toLocaleString()} tok
+					</span>
+					<span class="px-2 py-0.5 rounded bg-success/10 border border-success/20 text-success font-mono">
+						${(span.kind.cost ?? 0).toFixed(4)}
+					</span>
+					<span class="px-2 py-0.5 rounded bg-bg-tertiary border border-border text-text-muted font-mono">
+						{span.kind.input_tokens ?? 0} &rarr; {span.kind.output_tokens ?? 0}
+					</span>
 				</div>
-
-				<!-- Export to Dataset -->
-				<div class="relative">
-					<button
-					class="px-2.5 py-1 text-[11px] bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded-lg hover:bg-amber-400/20 transition-colors duration-150"
-						onclick={openExportDropdown}
-					>Add to dataset</button>
-					{#if showExportDropdown}
-						<div class="absolute left-0 top-full mt-1 w-56 bg-bg-secondary/95 border border-border/70 rounded-lg shadow-[0_24px_36px_-30px_rgba(0,0,0,0.9)] z-10 backdrop-blur-md overflow-hidden">
-							{#if exportDatasets.length === 0}
-								<div class="px-3 py-2 text-xs text-text-muted">No datasets. Create one first.</div>
-							{:else}
-								{#each exportDatasets as ds (ds.id)}
-									<button
-										class="w-full text-left px-3 py-2 text-xs hover:bg-bg-tertiary/75 transition-colors duration-150 text-text-secondary"
-										disabled={exportLoading}
-										onclick={() => doExport(ds.id)}
-									>
-										<div class="text-text">{ds.name}</div>
-										<div class="text-text-muted">{ds.datapoint_count} datapoints</div>
-									</button>
-								{/each}
-							{/if}
-						</div>
-					{/if}
+			{:else if isFileSpan}
+				<div class="flex items-center gap-1.5 flex-wrap text-[11px]">
+					<span class="px-2 py-0.5 rounded bg-bg-tertiary border border-border text-text-secondary font-mono truncate max-w-80">{filePath}</span>
+					{#if span.kind?.type === 'fs_read'}<span class="px-2 py-0.5 rounded bg-accent/10 border border-accent/20 text-accent">read</span><span class="px-2 py-0.5 rounded bg-bg-tertiary border border-border text-text-muted">{formatFileSize(span.kind.bytes_read)}</span>
+					{:else if span.kind?.type === 'fs_write'}<span class="px-2 py-0.5 rounded bg-success/10 border border-success/20 text-success">write</span><span class="px-2 py-0.5 rounded bg-bg-tertiary border border-border text-text-muted">{formatFileSize(span.kind.bytes_written)}</span>{/if}
 				</div>
-
-				{#if status === 'running'}
-					<button
-					class="px-2.5 py-1 text-[11px] bg-success/10 text-success border border-success/20 rounded-lg hover:bg-success/20 transition-colors duration-150"
-						onclick={() => { showCompleteForm = !showCompleteForm; showFailForm = false; }}
-					>Complete</button>
-					<button
-					class="px-2.5 py-1 text-[11px] bg-danger/10 text-danger border border-danger/20 rounded-lg hover:bg-danger/20 transition-colors duration-150"
-						onclick={() => { showFailForm = !showFailForm; showCompleteForm = false; }}
-					>Fail</button>
-				{/if}
-
-			{#if exportSuccess}
-				<span class="text-[11px] text-success">{exportSuccess}</span>
-			{/if}
-			{#if reviewSuccess}
-				<span class="text-[11px] text-success">{reviewSuccess}</span>
 			{/if}
 
-				<div class="flex-1"></div>
-
-				<button
-				class="px-2.5 py-1 text-[11px] transition-colors duration-150 border rounded-lg {confirmDeleteSpan ? 'bg-danger/10 text-danger border-danger/30 font-semibold' : 'text-text-muted border-border hover:text-danger hover:border-danger/30'}"
-					onclick={handleDeleteSpan}
-				>{confirmDeleteSpan ? 'Confirm?' : 'Delete span'}</button>
+			<div class="flex items-center gap-1.5 text-[11px] text-text-muted">
+				<span class="font-mono">{shortId(span.id)}</span>
+				<span>&middot;</span>
+				<a href="/traces/{span.trace_id}" class="text-accent hover:underline font-mono">trace:{shortId(span.trace_id)}</a>
+				{#if span.parent_id}<span>&middot;</span><span class="font-mono">parent:{shortId(span.parent_id)}</span>{/if}
+				<span>&middot;</span>
+				<span>{new Date(spanStartedAt(span)).toLocaleString()}</span>
 			</div>
-
-			<!-- Complete/Fail forms -->
-			{#if showCompleteForm}
-				<form class="glass-soft rounded-xl p-3 space-y-2 border border-border/55" onsubmit={(e) => { e.preventDefault(); handleComplete(); }}>
-					<label for="complete-output" class="block text-xs text-text-muted">Output (optional JSON)</label>
-					<textarea id="complete-output" bind:value={completeOutput} rows={2} placeholder={'{"result": "success"}'}
-						class="w-full bg-bg border border-border rounded px-2 py-1.5 text-xs text-text font-mono placeholder:text-text-muted"></textarea>
-					<button type="submit" disabled={actionLoading}
-						class="px-3 py-1 text-xs bg-success text-bg font-semibold rounded hover:bg-success/80 transition-colors disabled:opacity-50">
-						{actionLoading ? 'Completing...' : 'Complete Span'}
-					</button>
-				</form>
-			{/if}
-
-			{#if showFailForm}
-				<form class="glass-soft rounded-xl p-3 space-y-2 border border-border/55" onsubmit={(e) => { e.preventDefault(); handleFail(); }}>
-					<label for="fail-error" class="block text-xs text-text-muted">Error message</label>
-					<input id="fail-error" type="text" bind:value={failError} placeholder="What went wrong?"
-						class="w-full bg-bg border border-border rounded px-2 py-1.5 text-xs text-text placeholder:text-text-muted" />
-					<button type="submit" disabled={actionLoading || !failError.trim()}
-						class="px-3 py-1 text-xs bg-danger text-bg font-semibold rounded hover:bg-danger/80 transition-colors disabled:opacity-50">
-						{actionLoading ? 'Failing...' : 'Fail Span'}
-					</button>
-				</form>
-			{/if}
 		</div>
 
-		<!-- Error banner -->
 		{#if error}
-			<div class="px-4 py-2 bg-danger/10 border-b border-danger/20 text-danger text-xs font-mono shrink-0">
-				{error}
-			</div>
+			<div class="px-4 py-2 bg-danger/10 border-b border-danger/20 text-danger text-xs font-mono shrink-0">{error}</div>
 		{/if}
 
 		<!-- Tabs -->
-		<div class="border-b border-border/55 shrink-0 px-3 py-2 bg-bg-secondary/20">
-			<div class="inline-flex items-center gap-1 bg-bg-tertiary/35 border border-border/50 rounded-xl p-1">
-			{#if isFileSpan}
-				<button
-					class="px-3 py-1.5 text-xs rounded-lg transition-all duration-150
-						{activeTab === 'file' ? 'bg-accent/15 text-text font-medium border border-accent/35' : 'text-text-muted hover:text-text-secondary'}"
-					onclick={() => { activeTab = 'file'; loadFileContent(); }}
-				>File</button>
+		<div class="flex items-center border-b border-border/55 shrink-0 bg-bg-secondary/10">
+			<button class="px-4 py-2 text-[12px] font-medium border-b-2 transition-colors {activeTab === 'messages' ? 'border-accent text-text' : 'border-transparent text-text-muted hover:text-text-secondary'}" onclick={() => (activeTab = 'messages')}>
+				{isFileSpan ? 'File' : 'Messages'}
+			</button>
+			<button class="px-4 py-2 text-[12px] font-medium border-b-2 transition-colors {activeTab === 'metadata' ? 'border-accent text-text' : 'border-transparent text-text-muted hover:text-text-secondary'}" onclick={() => (activeTab = 'metadata')}>
+				Metadata
+			</button>
+			<div class="flex-1"></div>
+			{#if activeTab === 'messages' && !isFileSpan}
+				<div class="flex items-center gap-0.5 pr-3 text-[10px]">
+					<button class="px-2 py-1 rounded transition-colors {formatMode === 'pretty' ? 'bg-bg-tertiary text-text border border-border' : 'text-text-muted hover:text-text-secondary'}" onclick={() => (formatMode = 'pretty')}>Pretty</button>
+					<button class="px-2 py-1 rounded transition-colors {formatMode === 'json' ? 'bg-bg-tertiary text-text border border-border' : 'text-text-muted hover:text-text-secondary'}" onclick={() => (formatMode = 'json')}>JSON</button>
+					<button class="px-2 py-1 rounded transition-colors {formatMode === 'yaml' ? 'bg-bg-tertiary text-text border border-border' : 'text-text-muted hover:text-text-secondary'}" onclick={() => (formatMode = 'yaml')}>YAML</button>
+				</div>
 			{/if}
-			<button
-				class="px-3 py-1.5 text-xs rounded-lg transition-all duration-150
-					{activeTab === 'input' ? 'bg-accent/15 text-text font-medium border border-accent/35' : 'text-text-muted hover:text-text-secondary'}"
-				onclick={() => activeTab = 'input'}
-			>Span Input</button>
-			<button
-				class="px-3 py-1.5 text-xs rounded-lg transition-all duration-150
-					{activeTab === 'output' ? 'bg-accent/15 text-text font-medium border border-accent/35' : 'text-text-muted hover:text-text-secondary'}"
-				onclick={() => activeTab = 'output'}
-			>Span Output</button>
-			<button
-				class="px-3 py-1.5 text-xs rounded-lg transition-all duration-150
-					{activeTab === 'attributes' ? 'bg-accent/15 text-text font-medium border border-accent/35' : 'text-text-muted hover:text-text-secondary'}"
-				onclick={() => activeTab = 'attributes'}
-			>Attributes</button>
-			{#if childSpans.length > 0}
-				<button
-					class="px-3 py-1.5 text-xs rounded-lg transition-all duration-150
-						{activeTab === 'events' ? 'bg-accent/15 text-text font-medium border border-accent/35' : 'text-text-muted hover:text-text-secondary'}"
-					onclick={() => activeTab = 'events'}
-				>Children <span class="text-text-muted">({childSpans.length})</span></button>
-			{/if}
-			</div>
 		</div>
 
-		<!-- Tab content -->
+		<!-- Content -->
 		<div class="flex-1 min-h-0 overflow-y-auto">
-			{#if activeTab === 'file' && isFileSpan}
-				<div class="p-4 space-y-3">
-					<!-- File header -->
-					<div class="flex items-center justify-between glass-soft rounded-xl border border-border/50 px-3 py-2">
-						<div class="flex items-center gap-2 text-xs min-w-0">
-							<svg class="w-4 h-4 shrink-0 {span?.kind?.type === 'fs_read' ? 'text-accent' : 'text-success'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-								<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-							</svg>
-							<span class="font-mono text-text truncate" title={filePath ?? ''}>{filePath}</span>
+			{#if activeTab === 'messages'}
+				{#if isFileSpan}
+					<!-- File content view -->
+					<div class="p-4 space-y-3">
+						<div class="flex items-center justify-between glass-soft rounded-xl border border-border/50 px-3 py-2 text-xs">
+							<div class="flex items-center gap-2 min-w-0">
+								<svg class="w-4 h-4 shrink-0 {span?.kind?.type === 'fs_read' ? 'text-accent' : 'text-success'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" /></svg>
+								<span class="font-mono text-text truncate">{filePath}</span>
+							</div>
+							{#if fileHash}<span class="font-mono text-accent text-[10px]">{fileHash.slice(0, 12)}</span>{/if}
 						</div>
-						{#if fileContentLoaded}
-							<button
-								class="shrink-0 px-2 py-1 text-[11px] bg-bg-tertiary text-text-secondary border border-border rounded-lg hover:bg-bg-secondary transition-colors duration-150"
-								onclick={() => {
-									const blob = new Blob([fileContent], { type: 'text/plain' });
-									const url = URL.createObjectURL(blob);
-									const a = document.createElement('a');
-									a.href = url;
-									a.download = filePath?.split('/').pop() ?? 'file';
-									a.click();
-									URL.revokeObjectURL(url);
-								}}
-							>Download</button>
+						{#if fileContentLoading}
+							<div class="text-text-muted text-xs text-center py-8">Loading file content...</div>
+						{:else if fileContentError}
+							<div class="text-text-muted text-xs text-center py-8">{fileContentError}</div>
+						{:else if fileContentLoaded}
+							<div class="glass-soft border border-border/55 rounded-xl overflow-hidden">
+								<div class="px-3 py-1.5 border-b border-border/40 text-[10px] text-text-muted flex items-center justify-between">
+									<span>{inferLanguage(filePath ?? '')}</span>
+									<button class="hover:text-text transition-colors" onclick={() => copyText(fileContent)}>Copy</button>
+								</div>
+								<pre class="p-3 text-xs font-mono text-text overflow-x-auto max-h-[60vh] overflow-y-auto whitespace-pre">{fileContent}</pre>
+							</div>
+						{:else}
+							<div class="text-text-muted text-xs text-center py-8">No file content available</div>
+						{/if}
+					</div>
+				{:else}
+					<!-- Input section -->
+					<div class="border-b border-border/40">
+						<button class="flex items-center gap-2 px-4 py-2.5 w-full text-left text-[12px] text-text-muted hover:bg-bg-secondary/20 transition-colors" onclick={() => (inputExpanded = !inputExpanded)}>
+							<svg class="w-3 h-3 transition-transform {inputExpanded ? '' : '-rotate-90'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
+							Input
+						</button>
+						{#if inputExpanded}
+							<div class="px-4 pb-3">
+								{#if formatMode === 'pretty' && inputMessages}
+									{#each inputMessages as msg, idx}
+										<div class="flex gap-3 py-3 {idx > 0 ? 'border-t border-border/25' : ''}">
+											<div class="w-16 shrink-0 pt-0.5">
+												<span class="text-[12px] font-bold capitalize {roleColor(msg.role)}">{msg.role}</span>
+											</div>
+											<div class="flex-1 min-w-0">
+												<div class="text-[11px] text-text-muted mb-1">{wordCount(msg.content)}w &middot; {charCount(msg.content)}c</div>
+												<div class="text-[13px] text-text whitespace-pre-wrap break-words">{typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}</div>
+											</div>
+											<div class="flex items-start gap-0.5 shrink-0">
+												<button class="w-6 h-6 rounded flex items-center justify-center text-text-muted/40 hover:text-text-muted transition-colors" onclick={() => copyText(msg.content)} aria-label="Copy">
+													<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9.75a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184" /></svg>
+												</button>
+											</div>
+										</div>
+									{/each}
+								{:else if span.input !== undefined && span.input !== null}
+									<pre class="text-[12px] font-mono text-text whitespace-pre-wrap break-words">{renderValue(span.input)}</pre>
+								{:else}
+									<div class="text-[12px] text-text-muted py-4 text-center">No input data</div>
+								{/if}
+							</div>
 						{/if}
 					</div>
 
-					<!-- Metadata badges -->
-					<div class="flex items-center gap-2 flex-wrap text-[11px] glass-soft rounded-xl border border-border/50 px-3 py-2">
-						{#if fileHash}
-							<span class="inline-flex items-center rounded px-2 py-0.5 bg-bg-tertiary border border-border text-accent font-mono">{fileHash.slice(0, 12)}</span>
+					<!-- Output section -->
+					<div class="border-b border-border/40">
+						<button class="flex items-center gap-2 px-4 py-2.5 w-full text-left text-[12px] text-text-muted hover:bg-bg-secondary/20 transition-colors" onclick={() => (outputExpanded = !outputExpanded)}>
+							<svg class="w-3 h-3 transition-transform {outputExpanded ? '' : '-rotate-90'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
+							Output
+						</button>
+						{#if outputExpanded}
+							<div class="px-4 pb-3">
+								{#if span.kind?.type === 'llm_call'}
+									<div class="flex items-center gap-2 mb-3 text-[11px]">
+										<span class="px-2 py-0.5 rounded bg-bg-tertiary border border-border text-text-secondary font-mono">Rerun {span.kind.model}</span>
+									</div>
+								{/if}
+								{#if formatMode === 'pretty' && outputMessages}
+									{#each outputMessages as msg, idx}
+										<div class="flex gap-3 py-3 {idx > 0 ? 'border-t border-border/25' : ''}">
+											<div class="w-16 shrink-0 pt-0.5">
+												<span class="text-[12px] font-bold capitalize {roleColor(msg.role)}">{msg.role}</span>
+											</div>
+											<div class="flex-1 min-w-0">
+												<div class="text-[11px] text-text-muted mb-1">{wordCount(msg.content)}w &middot; {charCount(msg.content)}c</div>
+												<div class="text-[13px] text-text whitespace-pre-wrap break-words">{typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}</div>
+											</div>
+											<div class="flex items-start gap-0.5 shrink-0">
+												<button class="w-6 h-6 rounded flex items-center justify-center text-text-muted/40 hover:text-text-muted transition-colors" onclick={() => copyText(msg.content)} aria-label="Copy">
+													<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9.75a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184" /></svg>
+												</button>
+											</div>
+										</div>
+									{/each}
+								{:else if span.output !== undefined && span.output !== null}
+									<pre class="text-[12px] font-mono text-text whitespace-pre-wrap break-words">{renderValue(span.output)}</pre>
+								{:else}
+									<div class="text-[12px] text-text-muted py-4 text-center">No output data</div>
+								{/if}
+							</div>
 						{/if}
-						{#if span?.kind?.type === 'fs_read' && span.kind.bytes_read != null}
-							<span class="inline-flex items-center rounded px-2 py-0.5 bg-bg-tertiary border border-border text-text-secondary">{formatFileSize(span.kind.bytes_read)}</span>
-						{:else if span?.kind?.type === 'fs_write' && span.kind.bytes_written != null}
-							<span class="inline-flex items-center rounded px-2 py-0.5 bg-bg-tertiary border border-border text-text-secondary">{formatFileSize(span.kind.bytes_written)}</span>
-						{/if}
-						{#if filePath}
-							<span class="inline-flex items-center rounded px-2 py-0.5 bg-bg-tertiary border border-border text-text-muted">{inferLanguage(filePath)}</span>
-						{/if}
-						<span class="inline-flex items-center rounded px-2 py-0.5 {span?.kind?.type === 'fs_read' ? 'bg-accent/10 border-accent/20 text-accent' : 'bg-success/10 border-success/20 text-success'} border">
-							{span?.kind?.type === 'fs_read' ? 'read' : 'write'}
-						</span>
 					</div>
 
-					<!-- File content -->
-					{#if fileContentLoading}
-						<div class="text-text-muted text-xs text-center py-8">Loading file content...</div>
-					{:else if fileContentError}
-						<div class="glass-soft border border-border/55 rounded-xl p-4 text-center">
-							<p class="text-text-muted text-xs">{fileContentError}</p>
-						</div>
-					{:else if !fileHash}
-						<div class="glass-soft border border-border/55 rounded-xl p-4 text-center">
-							<p class="text-text-muted text-xs">No file version hash available</p>
-						</div>
-					{:else if fileContentLoaded}
-						<div class="glass-soft border border-border/55 rounded-xl overflow-hidden">
-							<pre class="p-3 text-xs font-mono text-text overflow-x-auto max-h-[60vh] overflow-y-auto whitespace-pre">{fileContent}</pre>
+					<!-- Model footer -->
+					{#if span.kind?.type === 'llm_call'}
+						<div class="px-4 py-3 flex items-center gap-2 text-[12px] bg-bg-secondary/10">
+							<span class="text-text-secondary font-mono">{span.kind.model}</span>
+							<span class="text-text-muted">&middot;</span>
+							<span class="text-text-muted font-mono">{formatDuration(duration)}</span>
 						</div>
 					{/if}
-				</div>
+				{/if}
 
-			{:else if activeTab === 'input'}
-				<div class="p-4">
-					{#if inputMessages}
-						<!-- Chat message view -->
-						<div class="space-y-2">
-							{#each inputMessages as msg, idx}
-								<div class="border rounded-xl {roleBgColor(msg.role)} transition-colors duration-150">
-									<button
-										class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-bg-secondary/25 transition-colors duration-150 rounded-t-xl"
-										onclick={() => toggleMessage(idx)}
-									>
-										<span class="text-[10px] font-bold uppercase tracking-wider {roleColor(msg.role)}">{msg.role}</span>
-										<div class="flex-1"></div>
-										<span class="text-[10px] text-text-muted">{typeof msg.content === 'string' ? msg.content.length : 0} chars</span>
-										<svg class="w-3 h-3 text-text-muted transition-transform {collapsedMessages.has(idx) ? '' : 'rotate-180'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
-									</button>
-									{#if !collapsedMessages.has(idx)}
-										<div class="px-3 pb-3 text-xs text-text font-mono whitespace-pre-wrap break-words border-t border-inherit">
-											<div class="pt-2">{typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}</div>
-										</div>
-									{/if}
-								</div>
-							{/each}
-						</div>
-					{:else if span.input !== undefined && span.input !== null}
-						<!-- Raw JSON view -->
-						<div class="flex items-center justify-between mb-2">
-							<span class="text-[10px] text-text-muted uppercase tracking-wider">Span Input</span>
-							<div class="flex items-center bg-bg-tertiary/45 border border-border/55 rounded-md text-[10px] p-0.5">
-								<button
-									class="px-2 py-0.5 rounded transition-colors duration-150 {inputViewMode === 'formatted' ? 'bg-accent/20 text-accent border border-accent/30' : 'text-text-muted hover:text-text'}"
-									onclick={() => inputViewMode = 'formatted'}
-								>Formatted</button>
-								<button
-									class="px-2 py-0.5 rounded transition-colors duration-150 {inputViewMode === 'raw' ? 'bg-accent/20 text-accent border border-accent/30' : 'text-text-muted hover:text-text'}"
-									onclick={() => inputViewMode = 'raw'}
-								>Raw</button>
-							</div>
-						</div>
-						<pre class="text-xs text-text glass-soft rounded-xl border border-border/55 p-3 overflow-x-auto whitespace-pre-wrap font-mono break-words">{inputViewMode === 'formatted' ? formatJson(span.input) : formatJsonRaw(span.input)}</pre>
-					{:else}
-						<div class="text-text-muted text-xs text-center py-8">No input data</div>
-					{/if}
-				</div>
-
-			{:else if activeTab === 'output'}
-				<div class="p-4">
-					{#if outputMessages}
-						<!-- Chat message view -->
-						<div class="space-y-2">
-							{#each outputMessages as msg, idx}
-								{@const msgIdx = 1000 + idx}
-								<div class="border rounded-xl {roleBgColor(msg.role)} transition-colors duration-150">
-									<button
-										class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-bg-secondary/25 transition-colors duration-150 rounded-t-xl"
-										onclick={() => toggleMessage(msgIdx)}
-									>
-										<span class="text-[10px] font-bold uppercase tracking-wider {roleColor(msg.role)}">{msg.role}</span>
-										<div class="flex-1"></div>
-										<span class="text-[10px] text-text-muted">{typeof msg.content === 'string' ? msg.content.length : 0} chars</span>
-										<svg class="w-3 h-3 text-text-muted transition-transform {collapsedMessages.has(msgIdx) ? '' : 'rotate-180'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
-									</button>
-									{#if !collapsedMessages.has(msgIdx)}
-										<div class="px-3 pb-3 text-xs text-text font-mono whitespace-pre-wrap break-words border-t border-inherit">
-											<div class="pt-2">{typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}</div>
-										</div>
-									{/if}
-								</div>
-							{/each}
-						</div>
-					{:else if span.output !== undefined && span.output !== null}
-						<!-- Raw JSON view -->
-						<div class="flex items-center justify-between mb-2">
-							<span class="text-[10px] text-text-muted uppercase tracking-wider">Span Output</span>
-							<div class="flex items-center bg-bg-tertiary/45 border border-border/55 rounded-md text-[10px] p-0.5">
-								<button
-									class="px-2 py-0.5 rounded transition-colors duration-150 {outputViewMode === 'formatted' ? 'bg-accent/20 text-accent border border-accent/30' : 'text-text-muted hover:text-text'}"
-									onclick={() => outputViewMode = 'formatted'}
-								>Formatted</button>
-								<button
-									class="px-2 py-0.5 rounded transition-colors duration-150 {outputViewMode === 'raw' ? 'bg-accent/20 text-accent border border-accent/30' : 'text-text-muted hover:text-text'}"
-									onclick={() => outputViewMode = 'raw'}
-								>Raw</button>
-							</div>
-						</div>
-						<pre class="text-xs text-text glass-soft rounded-xl border border-border/55 p-3 overflow-x-auto whitespace-pre-wrap font-mono break-words">{outputViewMode === 'formatted' ? formatJson(span.output) : formatJsonRaw(span.output)}</pre>
-					{:else}
-						<div class="text-text-muted text-xs text-center py-8">No output data</div>
-					{/if}
-				</div>
-
-			{:else if activeTab === 'attributes'}
+			{:else}
+				<!-- Metadata tab -->
 				<div class="p-4 space-y-3">
-					<!-- Span identifiers -->
 					<div class="glass-soft rounded-xl border border-border/55 p-3">
 						<div class="text-[10px] text-text-muted uppercase tracking-wider mb-2">Identifiers</div>
 						<div class="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
-							<div>
-								<span class="text-text-muted">Span ID</span>
-								<div class="text-text font-mono text-[11px]">{span.id}</div>
-							</div>
-							<div>
-								<span class="text-text-muted">Trace ID</span>
-								<div class="font-mono text-[11px]">
-									<a href="/traces/{span.trace_id}" class="text-accent hover:underline">{span.trace_id}</a>
-								</div>
-							</div>
-							{#if span.parent_id}
-								<div>
-									<span class="text-text-muted">Parent ID</span>
-									<div class="text-text font-mono text-[11px]">{span.parent_id}</div>
-								</div>
-							{/if}
+							<div><span class="text-text-muted">Span ID</span><div class="text-text font-mono text-[11px]">{span.id}</div></div>
+							<div><span class="text-text-muted">Trace ID</span><div class="font-mono text-[11px]"><a href="/traces/{span.trace_id}" class="text-accent hover:underline">{span.trace_id}</a></div></div>
+							{#if span.parent_id}<div><span class="text-text-muted">Parent ID</span><div class="text-text font-mono text-[11px]">{span.parent_id}</div></div>{/if}
 						</div>
 					</div>
 
-					<!-- Timing -->
 					<div class="glass-soft rounded-xl border border-border/55 p-3">
 						<div class="text-[10px] text-text-muted uppercase tracking-wider mb-2">Timing</div>
 						<div class="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
-							<div>
-								<span class="text-text-muted">Started</span>
-								<div class="text-text font-mono text-[11px]">{new Date(spanStartedAt(span)).toLocaleString()}</div>
-							</div>
-							{#if spanEndedAt(span)}
-								<div>
-									<span class="text-text-muted">Ended</span>
-									<div class="text-text font-mono text-[11px]">{new Date(spanEndedAt(span)!).toLocaleString()}</div>
-								</div>
-							{/if}
-							{#if duration !== null}
-								<div>
-									<span class="text-text-muted">Duration</span>
-									<div class="text-text font-mono text-[11px]">{formatDuration(duration)}</div>
-								</div>
-							{/if}
+							<div><span class="text-text-muted">Started</span><div class="text-text font-mono text-[11px]">{new Date(spanStartedAt(span)).toLocaleString()}</div></div>
+							{#if spanEndedAt(span)}<div><span class="text-text-muted">Ended</span><div class="text-text font-mono text-[11px]">{new Date(spanEndedAt(span)!).toLocaleString()}</div></div>{/if}
+							{#if duration !== null}<div><span class="text-text-muted">Duration</span><div class="text-text font-mono text-[11px]">{formatDuration(duration)}</div></div>{/if}
 						</div>
 					</div>
 
-					<!-- Kind metadata -->
 					{#if Object.keys(meta).length > 0}
 						<div class="glass-soft rounded-xl border border-border/55 p-3">
 							<div class="text-[10px] text-text-muted uppercase tracking-wider mb-2">{spanKindLabel(span)}</div>
 							<div class="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
 								{#each Object.entries(meta) as [key, value]}
-									<div>
-										<span class="text-text-muted">{key}</span>
-										<div class="text-text font-mono text-[11px] break-all">{value}</div>
-									</div>
+									<div><span class="text-text-muted">{key}</span><div class="text-text font-mono text-[11px] break-all">{value}</div></div>
 								{/each}
 							</div>
 						</div>
 					{/if}
 
-					<!-- Custom kind attributes -->
 					{#if span.kind?.type === 'custom' && span.kind.attributes && Object.keys(span.kind.attributes).length > 0}
 						<div class="glass-soft rounded-xl border border-border/55 p-3">
 							<div class="text-[10px] text-text-muted uppercase tracking-wider mb-2">Custom Attributes</div>
 							<pre class="text-xs text-text bg-bg-tertiary/55 border border-border/45 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap font-mono">{JSON.stringify(span.kind.attributes, null, 2)}</pre>
 						</div>
 					{/if}
-				</div>
 
-			{:else if activeTab === 'events'}
-				<div class="p-4">
 					{#if childSpans.length > 0}
-						<div class="space-y-1">
-							{#each childSpans as child (child.id)}
-								{@const cStatus = spanStatus(child)}
-								{@const cDuration = spanDurationMs(child)}
-								<div class="flex items-center gap-2 px-3 py-2 rounded-lg bg-bg-tertiary/60 border border-border/45 text-xs hover:bg-bg-tertiary/80 transition-colors duration-150">
-									<SpanKindIcon span={child} />
-									<span class="text-text font-medium truncate flex-1">{child.name}</span>
-									{#if child.kind?.type === 'llm_call'}
-										<span class="text-purple-400 text-[10px]">{child.kind.model}</span>
-									{/if}
-									<StatusBadge status={cStatus} />
-									<span class="text-text-muted font-mono text-[11px]">{formatDuration(cDuration)}</span>
-								</div>
-							{/each}
+						<div class="glass-soft rounded-xl border border-border/55 p-3">
+							<div class="text-[10px] text-text-muted uppercase tracking-wider mb-2">Children ({childSpans.length})</div>
+							<div class="space-y-1">
+								{#each childSpans as child (child.id)}
+									{@const cStatus = spanStatus(child)}
+									{@const cDuration = spanDurationMs(child)}
+									<div class="flex items-center gap-2 px-3 py-2 rounded-lg bg-bg-tertiary/60 border border-border/45 text-xs">
+										<SpanKindIcon span={child} />
+										<span class="text-text font-medium truncate flex-1">{child.name}</span>
+										{#if child.kind?.type === 'llm_call'}<span class="text-accent text-[10px]">{child.kind.model}</span>{/if}
+										<StatusBadge status={cStatus} />
+										<span class="text-text-muted font-mono text-[11px]">{formatDuration(cDuration)}</span>
+									</div>
+								{/each}
+							</div>
 						</div>
-					{:else}
-						<div class="text-text-muted text-xs text-center py-8">No child spans</div>
 					{/if}
+
+					<!-- Actions -->
+					<div class="glass-soft rounded-xl border border-border/55 p-3 space-y-2">
+						<div class="text-[10px] text-text-muted uppercase tracking-wider mb-2">Actions</div>
+						<div class="flex items-center gap-1.5 flex-wrap">
+							<div class="relative">
+								<button class="px-2.5 py-1 text-[11px] bg-warning/10 text-warning border border-warning/20 rounded-lg hover:bg-warning/20 transition-colors" onclick={openReviewDropdown}>Add to labeling queue</button>
+								{#if showReviewDropdown}
+									<div class="absolute left-0 top-full mt-1 w-56 bg-bg-secondary/95 border border-border/70 rounded-lg shadow-xl z-10 backdrop-blur-md overflow-hidden">
+										{#if reviewDatasets.length === 0}<div class="px-3 py-2 text-xs text-text-muted">No datasets. Create one first.</div>
+										{:else}{#each reviewDatasets as ds (ds.id)}<button class="w-full text-left px-3 py-2 text-xs hover:bg-bg-tertiary/75 transition-colors text-text-secondary" disabled={reviewLoading} onclick={() => doReview(ds.id)}><div class="text-text">{ds.name}</div><div class="text-text-muted">{ds.datapoint_count} datapoints</div></button>{/each}{/if}
+									</div>
+								{/if}
+							</div>
+							<div class="relative">
+								<button class="px-2.5 py-1 text-[11px] bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded-lg hover:bg-amber-400/20 transition-colors" onclick={openExportDropdown}>Add to dataset</button>
+								{#if showExportDropdown}
+									<div class="absolute left-0 top-full mt-1 w-56 bg-bg-secondary/95 border border-border/70 rounded-lg shadow-xl z-10 backdrop-blur-md overflow-hidden">
+										{#if exportDatasets.length === 0}<div class="px-3 py-2 text-xs text-text-muted">No datasets. Create one first.</div>
+										{:else}{#each exportDatasets as ds (ds.id)}<button class="w-full text-left px-3 py-2 text-xs hover:bg-bg-tertiary/75 transition-colors text-text-secondary" disabled={exportLoading} onclick={() => doExport(ds.id)}><div class="text-text">{ds.name}</div><div class="text-text-muted">{ds.datapoint_count} datapoints</div></button>{/each}{/if}
+									</div>
+								{/if}
+							</div>
+							{#if status === 'running'}
+								<button class="px-2.5 py-1 text-[11px] bg-success/10 text-success border border-success/20 rounded-lg hover:bg-success/20 transition-colors" onclick={() => { showCompleteForm = !showCompleteForm; showFailForm = false; }}>Complete</button>
+								<button class="px-2.5 py-1 text-[11px] bg-danger/10 text-danger border border-danger/20 rounded-lg hover:bg-danger/20 transition-colors" onclick={() => { showFailForm = !showFailForm; showCompleteForm = false; }}>Fail</button>
+							{/if}
+							{#if exportSuccess}<span class="text-[11px] text-success">{exportSuccess}</span>{/if}
+							{#if reviewSuccess}<span class="text-[11px] text-success">{reviewSuccess}</span>{/if}
+							<div class="flex-1"></div>
+							<button class="px-2.5 py-1 text-[11px] transition-colors border rounded-lg {confirmDeleteSpan ? 'bg-danger/10 text-danger border-danger/30 font-semibold' : 'text-text-muted border-border hover:text-danger hover:border-danger/30'}" onclick={handleDeleteSpan}>{confirmDeleteSpan ? 'Confirm?' : 'Delete span'}</button>
+						</div>
+
+						{#if showCompleteForm}
+							<form class="glass-soft rounded-xl p-3 space-y-2 border border-border/55" onsubmit={(e) => { e.preventDefault(); handleComplete(); }}>
+								<label for="complete-output" class="block text-xs text-text-muted">Output (optional JSON)</label>
+								<textarea id="complete-output" bind:value={completeOutput} rows={2} placeholder={'{"result": "success"}'} class="w-full bg-bg border border-border rounded px-2 py-1.5 text-xs text-text font-mono placeholder:text-text-muted"></textarea>
+								<button type="submit" disabled={actionLoading} class="px-3 py-1 text-xs bg-success text-bg font-semibold rounded hover:bg-success/80 transition-colors disabled:opacity-50">{actionLoading ? 'Completing...' : 'Complete Span'}</button>
+							</form>
+						{/if}
+
+						{#if showFailForm}
+							<form class="glass-soft rounded-xl p-3 space-y-2 border border-border/55" onsubmit={(e) => { e.preventDefault(); handleFail(); }}>
+								<label for="fail-error" class="block text-xs text-text-muted">Error message</label>
+								<input id="fail-error" type="text" bind:value={failError} placeholder="What went wrong?" class="w-full bg-bg border border-border rounded px-2 py-1.5 text-xs text-text placeholder:text-text-muted" />
+								<button type="submit" disabled={actionLoading || !failError.trim()} class="px-3 py-1 text-xs bg-danger text-bg font-semibold rounded hover:bg-danger/80 transition-colors disabled:opacity-50">{actionLoading ? 'Failing...' : 'Fail Span'}</button>
+							</form>
+						{/if}
+					</div>
 				</div>
 			{/if}
 		</div>

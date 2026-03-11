@@ -1,55 +1,98 @@
 <script lang="ts">
 	import { getSpans, type Span } from '$lib/api';
 	import { spanDurationMs, spanStatus, shortId } from '$lib/api';
+	import SpanDetail from '$lib/components/SpanDetail.svelte';
 	import { onMount } from 'svelte';
 
 	let spans: Span[] = $state([]);
 	let loading = $state(true);
 	let q = $state('');
+	let selectedSpan: Span | null = $state(null);
 
 	const filtered = $derived.by(() => {
 		const query = q.trim().toLowerCase();
 		if (!query) return spans;
-		return spans.filter((s) => s.name.toLowerCase().includes(query) || s.trace_id.toLowerCase().includes(query) || s.kind.type.toLowerCase().includes(query));
+		return spans.filter((s) => s.name.toLowerCase().includes(query) || s.trace_id.toLowerCase().includes(query) || s.kind.type.toLowerCase().includes(query) || (s.kind.type === 'llm_call' && s.kind.model?.toLowerCase().includes(query)));
 	});
 
 	onMount(async () => {
 		try {
 			const res = await getSpans();
-			spans = res.items;
+			spans = res.items.sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
 		} finally {
 			loading = false;
 		}
 	});
+
+	function formatTime(iso: string): string {
+		const d = new Date(iso);
+		const pad = (n: number) => n.toString().padStart(2, '0');
+		return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+	}
+
+	function formatDuration(ms: number | null): string {
+		if (ms == null) return '-';
+		if (ms < 1000) return `${ms}ms`;
+		return `${(ms / 1000).toFixed(2)}s`;
+	}
+
+	function spanTokenTotal(s: Span): number {
+		if (s.kind?.type !== 'llm_call') return 0;
+		return (s.kind.input_tokens ?? 0) + (s.kind.output_tokens ?? 0);
+	}
 </script>
 
-<div class="app-shell-wide space-y-3">
-	<div class="flex items-center gap-1.5">
-		<a class="query-chip" href="/traces">Traces</a>
-		<button class="query-chip query-chip-active">Spans</button>
-		<a class="query-chip" href="/sessions">Sessions</a>
+<div class="flex flex-col h-[calc(100vh-10rem)] -m-4 lg:-m-5 rounded-xl overflow-hidden border border-border/40 bg-bg-secondary/30">
+	<div class="flex items-center gap-2 px-4 py-2 border-b border-border/55 bg-bg-secondary/40 shrink-0">
+		<div class="flex items-center gap-0.5 rounded-lg border border-border/50 bg-bg-tertiary/35 p-0.5">
+			<a href="/traces" class="px-3 py-1 text-[12px] rounded-md text-text-muted hover:text-text transition-colors">Traces</a>
+			<button class="px-3 py-1 text-[12px] rounded-md bg-bg-tertiary text-text border border-border">Spans</button>
+		</div>
 		<div class="flex-1"></div>
-		<input class="control-input h-8 text-[12px] w-64" bind:value={q} placeholder="Search spans" />
+		<input class="control-input h-8 text-[12px] w-64" bind:value={q} placeholder="Search spans..." />
 	</div>
 
-	<div class="table-float overflow-hidden">
-		<div class="grid grid-cols-[220px_1fr_120px_110px_100px] gap-3 px-3 py-2 table-head-compact border-b border-border/55">
-			<span>ID</span><span>Name</span><span>Kind</span><span>Status</span><span class="text-right">Duration</span>
+	<div class="flex-1 flex min-h-0">
+		<div class="flex-1 flex flex-col min-w-0">
+			<div class="grid grid-cols-[140px_1fr_80px_120px_70px_70px] gap-2 px-4 py-2 table-head-compact border-b border-border/55 bg-bg-secondary/30 shrink-0">
+				<span>Time</span><span>Name</span><span>Kind</span><span>Model</span><span class="text-right">Tokens</span><span class="text-right">Latency</span>
+			</div>
+			<div class="flex-1 overflow-auto">
+				{#if loading}
+					<div class="py-8 text-center text-sm text-text-muted">Loading spans...</div>
+				{:else if filtered.length === 0}
+					<div class="py-8 text-center text-sm text-text-muted">No spans found</div>
+				{:else}
+					{#each filtered as s (s.id)}
+						{@const dur = spanDurationMs(s)}
+						{@const st = spanStatus(s)}
+						<button
+							class="grid grid-cols-[140px_1fr_80px_120px_70px_70px] gap-2 px-4 py-2 border-b border-border/30 w-full text-left text-[12px] transition-colors items-center
+								{selectedSpan?.id === s.id ? 'bg-accent/8 border-l-2 border-l-accent' : 'hover:bg-bg-secondary/40'}"
+							onclick={() => (selectedSpan = s)}
+						>
+							<span class="font-mono text-text-muted text-[11px] truncate">{formatTime(s.started_at)}</span>
+							<span class="truncate text-text flex items-center gap-1.5">
+								<span class="w-1.5 h-1.5 rounded-full shrink-0 {st === 'failed' ? 'bg-danger' : st === 'running' ? 'bg-warning animate-pulse' : 'bg-success'}"></span>
+								{s.name}
+							</span>
+							<span class="text-text-muted truncate">{s.kind.type === 'llm_call' ? 'LLM' : s.kind.type === 'fs_read' ? 'Read' : s.kind.type === 'fs_write' ? 'Write' : 'Custom'}</span>
+							<span class="text-text-muted truncate font-mono">{s.kind.type === 'llm_call' ? s.kind.model : '-'}</span>
+							<span class="text-right text-text-muted font-mono">{spanTokenTotal(s) || '-'}</span>
+							<span class="text-right text-text-muted font-mono">{formatDuration(dur)}</span>
+						</button>
+					{/each}
+				{/if}
+			</div>
+			<div class="flex items-center px-4 py-2 border-t border-border/55 bg-bg-secondary/30 shrink-0 text-[11px] text-text-muted">
+				<span>{filtered.length} of {spans.length} spans</span>
+			</div>
 		</div>
-		{#if loading}
-			<div class="py-8 text-center text-sm text-text-muted">Loading spans...</div>
-		{:else if filtered.length === 0}
-			<div class="py-8 text-center text-sm text-text-muted">No spans found</div>
-		{:else}
-			{#each filtered as s (s.id)}
-				<a href={`/traces/${s.trace_id}`} class="grid grid-cols-[220px_1fr_120px_110px_100px] gap-3 px-3 py-2 border-b border-border/45 hover:bg-bg-secondary/35 motion-row items-center">
-					<span class="font-mono text-[12px] truncate">{shortId(s.id)} <span class="text-text-muted">{shortId(s.trace_id)}</span></span>
-					<span class="truncate text-[13px]">{s.name}</span>
-					<span class="text-[12px] text-text-muted">{s.kind.type}</span>
-					<span class="text-[12px] capitalize {spanStatus(s) === 'failed' ? 'text-danger' : spanStatus(s) === 'running' ? 'text-warning' : 'text-success'}">{spanStatus(s)}</span>
-					<span class="text-right text-[12px] font-mono text-text-muted">{spanDurationMs(s) ?? 0}ms</span>
-				</a>
-			{/each}
+
+		{#if selectedSpan}
+			<div class="w-[560px] shrink-0 border-l border-border/55 overflow-hidden flex flex-col motion-slide-in-right bg-bg-secondary/20">
+				<SpanDetail span={selectedSpan} onClose={() => (selectedSpan = null)} allSpans={spans} />
+			</div>
 		{/if}
 	</div>
 </div>
