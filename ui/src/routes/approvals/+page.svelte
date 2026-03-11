@@ -432,11 +432,11 @@
 			<button class="query-chip {savedView === 'unclaimed' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'unclaimed')}>Unclaimed</button>
 			<button class="query-chip {savedView === 'completed_today' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'completed_today')}>Completed today</button>
 			<div class="flex-1"></div>
-			<select bind:value={sortBy} class="control-select h-8 text-[12px] w-[170px]">
-				<option value="created_desc">Newest first</option>
-				<option value="created_asc">Oldest first</option>
-				<option value="status">Status priority</option>
-			</select>
+			<div class="flex items-center gap-1.5">
+				<input class="control-input h-8 text-[12px] w-[120px]" bind:value={claimName} placeholder="Reviewer" />
+				<button class="btn-secondary h-8 text-[12px]" disabled={!nextPending} onclick={claimNextPending}>Claim next</button>
+				<button class="btn-ghost h-8 text-[12px]" disabled={!nextClaimedByMe} onclick={openNextClaimedByMe}>Open next</button>
+			</div>
 		</div>
 
 		<div class="flex items-center gap-1.5 flex-wrap">
@@ -444,22 +444,22 @@
 			<button class={statusFilterClass('claimed')} onclick={() => (statusFilter = 'claimed')}>Claimed ({counts.claimed})</button>
 			<button class={statusFilterClass('completed')} onclick={() => (statusFilter = 'completed')}>Completed ({counts.completed})</button>
 			<button class={statusFilterClass('all')} onclick={() => (statusFilter = 'all')}>All ({counts.total})</button>
-			<div class="flex-1"></div>
-			<div class="text-[12px] text-text-muted">{filteredItems.length} items</div>
-		</div>
-
-		<div class="grid grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)_150px_auto_auto_auto] gap-2 items-center">
-			<select bind:value={datasetFilter} class="control-select h-8 text-[12px]">
+			<div class="w-px h-5 bg-border/40 mx-1"></div>
+			<select bind:value={datasetFilter} class="control-select h-7 text-[12px]">
 				<option value="all">All datasets</option>
 				{#each datasets as ds (ds.id)}
 					<option value={ds.id}>{ds.name}</option>
 				{/each}
 			</select>
-			<input class="control-input h-8 text-[12px]" bind:value={searchQuery} placeholder="Search item, dataset, reviewer" />
-			<input class="control-input h-8 text-[12px]" bind:value={claimName} placeholder="Reviewer" />
-			<button class="query-chip h-8 {mineOnly ? 'query-chip-active' : ''}" onclick={() => (mineOnly = !mineOnly)}>Mine</button>
-			<button class="btn-secondary h-8 text-[12px]" disabled={!nextPending} onclick={claimNextPending}>Claim next</button>
-			<button class="btn-ghost h-8 text-[12px]" disabled={!nextClaimedByMe} onclick={openNextClaimedByMe}>Open next</button>
+			<select bind:value={sortBy} class="control-select h-7 text-[12px] w-[140px]">
+				<option value="created_desc">Newest first</option>
+				<option value="created_asc">Oldest first</option>
+				<option value="status">Status priority</option>
+			</select>
+			<button class="query-chip h-7 {mineOnly ? 'query-chip-active' : ''}" onclick={() => (mineOnly = !mineOnly)}>Mine</button>
+			<div class="flex-1"></div>
+			<input class="control-input h-7 text-[12px] w-[200px]" bind:value={searchQuery} placeholder="Search..." />
+			<div class="text-[12px] text-text-muted tabular-nums">{filteredItems.length} items</div>
 		</div>
 
 		{#if selectedVisibleCount > 0}
