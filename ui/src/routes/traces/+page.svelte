@@ -3,6 +3,7 @@
 	import { getTraces, getSpans, subscribeEvents, getAuthConfig, createApiKey, shortId, type Span, type Trace, type AuthConfig, type ApiKeyCreated } from '$lib/api';
 	import { spanDurationMs, spanStatus } from '$lib/api';
 	import SpanDetail from '$lib/components/SpanDetail.svelte';
+	import TraceTimeline from '$lib/components/TraceTimeline.svelte';
 	import { onMount } from 'svelte';
 
 	let traces: Trace[] = $state([]);
@@ -13,6 +14,8 @@
 	let viewMode: 'traces' | 'spans' = $state('spans');
 	let selectedDetailSpan: Span | null = $state(null);
 	let selectedTraceId: string | null = $state(null);
+	// When true, show span detail; when false, show trace tree
+	let showSpanDetail = $state(false);
 
 	type TraceStatus = 'failed' | 'running' | 'completed';
 	type TraceInsights = { status: TraceStatus; totalTokens: number; totalDuration: number; totalCost: number; models: string[]; searchables: string[] };
@@ -111,9 +114,9 @@ with client.trace("summarize-doc") as t:
 				traceSpans.delete(event.trace_id);
 				traceSpans = new Map(traceSpans);
 				traces = traces.filter((t) => t.id !== event.trace_id);
-				if (selectedTraceId === event.trace_id) { selectedTraceId = null; selectedDetailSpan = null; }
+				if (selectedTraceId === event.trace_id) { selectedTraceId = null; selectedDetailSpan = null; showSpanDetail = false; }
 			} else if (event.type === 'cleared') {
-				traceSpans = new Map(); traces = []; selectedDetailSpan = null; selectedTraceId = null;
+				traceSpans = new Map(); traces = []; selectedDetailSpan = null; selectedTraceId = null; showSpanDetail = false;
 			}
 		});
 		return unsub;
@@ -182,13 +185,13 @@ with client.trace("summarize-doc") as t:
 	function selectSpanRow(span: Span) {
 		selectedDetailSpan = span;
 		selectedTraceId = span.trace_id;
+		showSpanDetail = true;
 	}
 
 	function selectTraceRow(traceId: string) {
 		selectedTraceId = traceId;
-		const spans = traceSpans.get(traceId) ?? [];
-		const root = spans.find(s => !s.parent_id) ?? spans[0] ?? null;
-		selectedDetailSpan = root;
+		selectedDetailSpan = null;
+		showSpanDetail = false;
 	}
 
 	function onSpanAction() { loadTraces(); }
@@ -379,13 +382,52 @@ with client.trace("summarize-doc") as t:
 			</div>
 
 			<!-- Right: Detail panel -->
-			{#if selectedDetailSpan}
+			{#if selectedDetailSpan && showSpanDetail}
 				<div class="w-[560px] shrink-0 border-l border-border/55 overflow-hidden flex flex-col motion-slide-in-right bg-bg-secondary/20">
+					{#if selectedTraceId && viewMode === 'traces'}
+						<button
+							class="flex items-center gap-1.5 px-3 py-2 text-[11px] text-text-muted hover:text-text border-b border-border/40 shrink-0 transition-colors"
+							onclick={() => { showSpanDetail = false; selectedDetailSpan = null; }}
+						>
+							<svg class="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7.5 2L3.5 6l4 4"/></svg>
+							Back to tree
+						</button>
+					{/if}
 					<SpanDetail
 						span={selectedDetailSpan}
-						onClose={() => { selectedDetailSpan = null; selectedTraceId = null; }}
+						onClose={() => { selectedDetailSpan = null; selectedTraceId = null; showSpanDetail = false; }}
 						{onSpanAction}
 						allSpans={selectedTraceId ? (traceSpans.get(selectedTraceId) ?? []) : allSpansFlat}
+					/>
+				</div>
+			{:else if selectedTraceId && !showSpanDetail}
+				{@const traceSpanList = traceSpans.get(selectedTraceId) ?? []}
+				{@const rootSpan = traceSpanList.find(s => !s.parent_id)}
+				<div class="w-[560px] shrink-0 border-l border-border/55 overflow-hidden flex flex-col motion-slide-in-right bg-bg-secondary/20">
+					<!-- Trace tree header -->
+					<div class="flex items-center gap-2 px-3 py-2.5 border-b border-border/55 shrink-0 bg-bg-secondary/30">
+						<div class="flex-1 min-w-0">
+							<div class="text-[13px] font-medium text-text truncate">{rootSpan?.name ?? 'Trace'}</div>
+							<div class="text-[10px] text-text-muted font-mono">{shortId(selectedTraceId)}</div>
+						</div>
+						<button
+							class="text-[11px] text-accent hover:text-accent/80 transition-colors shrink-0"
+							onclick={() => goto(`/traces/${selectedTraceId}`)}
+						>Open full view</button>
+						<button
+							aria-label="Close trace tree"
+							class="w-6 h-6 flex items-center justify-center text-text-muted hover:text-text transition-colors rounded shrink-0"
+							onclick={() => { selectedTraceId = null; selectedDetailSpan = null; }}
+						>
+							<svg class="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3l8 8M11 3l-8 8"/></svg>
+						</button>
+					</div>
+					<!-- Trace tree -->
+					<TraceTimeline
+						spans={traceSpanList}
+						selectedId={selectedDetailSpan?.id ?? null}
+						onSelect={(span) => { selectedDetailSpan = span; showSpanDetail = true; }}
+						showMetadata={false}
 					/>
 				</div>
 			{/if}
