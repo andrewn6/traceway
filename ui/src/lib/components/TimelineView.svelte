@@ -16,21 +16,27 @@
 	} = $props();
 
 	// ── Constants ──────────────────────────────────────────────────────
-	const ROW_HEIGHT = 44;
+	const ROW_HEIGHT = 40;
 	const INDENT_PX = 16;
-	const LABEL_WIDTH = 420;
+	const LABEL_WIDTH = 340;
 	const MIN_BAR_PX = 3;
 
 	// ── Zoom ──────────────────────────────────────────────────────────
 	let zoom = $state(1);
 	let scrollContainer: HTMLDivElement | undefined = $state(undefined);
+	let viewportScrollLeft = $state(0);
 	type FilterMode = 'all' | 'llm' | 'file' | 'custom' | 'failed';
 	let filterMode: FilterMode = $state('all');
 	let showMetadata = $state(true);
 
-	function zoomIn() { zoom = Math.min(zoom * 1.5, 20); }
+	function zoomIn() { zoom = Math.min(zoom * 1.5, 16); }
 	function zoomOut() { zoom = Math.max(zoom / 1.5, 0.5); }
 	function zoomReset() { zoom = 1; }
+
+	function onViewportScroll(e: Event) {
+		const el = e.currentTarget as HTMLDivElement;
+		viewportScrollLeft = el.scrollLeft;
+	}
 
 	function matchesFilter(s: Span): boolean {
 		if (filterMode === 'all') return true;
@@ -119,14 +125,19 @@
 	// ── Time axis ticks ───────────────────────────────────────────────
 	const ticks = $derived.by(() => {
 		const totalMs = timeRange.duration;
-		const tickCount = Math.min(10, Math.max(4, Math.floor(zoom * 6)));
+		const tickCount = Math.min(12, Math.max(4, Math.floor(zoom * 5)));
 		const result: { pct: number; label: string }[] = [];
+		const step = pickTickStep(totalMs, tickCount);
 
-		for (let i = 0; i <= tickCount; i++) {
-			const pct = (i / tickCount) * 100;
-			const ms = (i / tickCount) * totalMs;
+		for (let ms = 0; ms <= totalMs + 1; ms += step) {
+			const pct = (ms / totalMs) * 100;
 			result.push({ pct, label: formatTickLabel(ms) });
 		}
+
+		if (result.length === 0 || result[result.length - 1].pct < 99.9) {
+			result.push({ pct: 100, label: formatTickLabel(totalMs) });
+		}
+
 		return result;
 	});
 
@@ -171,8 +182,20 @@
 	function formatTickLabel(ms: number): string {
 		if (ms === 0) return '0';
 		if (ms < 1000) return `${Math.round(ms)}ms`;
-		if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+		if (ms < 10000) return `${(ms / 1000).toFixed(1)}s`;
+		if (ms < 60000) return `${Math.round(ms / 1000)}s`;
 		return `${(ms / 60000).toFixed(1)}m`;
+	}
+
+	function pickTickStep(totalMs: number, targetTicks: number): number {
+		if (totalMs <= 0) return 1;
+		const rough = totalMs / targetTicks;
+		const magnitude = 10 ** Math.floor(Math.log10(rough));
+		const residual = rough / magnitude;
+		if (residual <= 1) return 1 * magnitude;
+		if (residual <= 2) return 2 * magnitude;
+		if (residual <= 5) return 5 * magnitude;
+		return 10 * magnitude;
 	}
 
 	function tokenCount(s: Span): string | null {
@@ -216,7 +239,7 @@
 
 	function showBarLabel(startPct: number, widthPct: number): boolean {
 		void startPct;
-		return widthPct * zoom > 10;
+		return widthPct * zoom > 8;
 	}
 </script>
 
@@ -238,9 +261,6 @@
 		<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-accent/35 bg-accent/10 text-accent text-[12px]">
 			<svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M3 4h14v2H3V4Zm0 5h10v2H3V9Zm0 5h14v2H3v-2Z"/></svg>
 			Tree
-		</span>
-		<span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-border/60 bg-bg-tertiary/35 text-[12px] text-text-muted">
-			Dense
 		</span>
 		<label class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-border/60 bg-bg-tertiary/35 text-[12px] text-text-muted whitespace-nowrap">
 			<svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M3 5h14v2H3V5Zm3 4h8v2H6V9Zm2 4h4v2H8v-2Z"/></svg>
@@ -270,7 +290,7 @@
 	<div class="flex shrink-0 border-b border-border/70 bg-bg-secondary/35" style="height: 32px">
 		<div class="shrink-0 sticky left-0 z-20 bg-bg-secondary/85 border-r border-border/60" style="width: {LABEL_WIDTH}px"></div>
 		<div class="flex-1 relative min-w-0 overflow-hidden">
-			<div class="relative h-full" style="width: {zoom * 100}%">
+			<div class="relative h-full" style="width: {zoom * 100}%; transform: translateX(-{viewportScrollLeft}px)">
 				{#each ticks as tick}
 					<div class="absolute top-0 bottom-0 border-l border-border/50" style="left: {tick.pct}%">
 						<span class="absolute top-1 left-1 text-[11px] text-text-muted/85 whitespace-nowrap bg-bg/70 px-1 rounded">{tick.label}</span>
@@ -284,6 +304,7 @@
 	<div
 		bind:this={scrollContainer}
 		class="flex-1 min-h-0 overflow-auto"
+		onscroll={onViewportScroll}
 		onwheel={(e) => {
 			if (e.ctrlKey || e.metaKey) {
 				e.preventDefault();
@@ -303,8 +324,8 @@
 				{@const model = modelBadge(s)}
 				{@const provider = providerBadge(s)}
 				<button
-					class="flex items-center w-full transition-colors group border-b border-border/25
-						{selectedId === s.id ? 'bg-accent/10' : 'hover:bg-bg-tertiary/35 odd:bg-bg-secondary/10'}"
+					class="flex items-center w-full transition-colors group border-b border-border/20
+						{selectedId === s.id ? 'bg-accent/10' : 'hover:bg-bg-tertiary/30 odd:bg-bg-secondary/10'}"
 					style="height: {ROW_HEIGHT}px"
 					onclick={() => onSelect?.(s)}
 				>
@@ -344,7 +365,7 @@
 
 							<!-- Bar -->
 							<div
-								class="absolute top-1 bottom-1 rounded border {barColor(s)} flex items-center overflow-hidden cursor-pointer
+								class="absolute top-1.5 bottom-1.5 rounded-[5px] border {barColor(s)} flex items-center overflow-hidden cursor-pointer shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]
 									{selectedId === s.id ? 'ring-1 ring-accent ring-offset-1 ring-offset-bg' : ''}"
 								style="left: {row.startPct}%; width: max({MIN_BAR_PX}px, {row.widthPct}%)"
 								role="button"

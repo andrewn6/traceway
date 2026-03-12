@@ -31,22 +31,11 @@ function allowOrigin(origin: string | undefined): string | null {
   return allowed.includes(origin) ? origin : null;
 }
 
-export function setCors(req: IncomingMessage, res: ServerResponse): void {
-  if (!req.headers.origin) {
-    return;
-  }
-  // Encore Cloud may already set CORS headers — avoid duplicating them.
-  if (res.getHeader("access-control-allow-origin")) {
-    return;
-  }
-  const origin = allowOrigin(req.headers.origin);
-  if (origin) {
-    res.setHeader("access-control-allow-origin", origin);
-    res.setHeader("vary", "Origin");
-  }
-  res.setHeader("access-control-allow-credentials", "true");
-  res.setHeader("access-control-allow-headers", "content-type");
-  res.setHeader("access-control-allow-methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+export function setCors(_req: IncomingMessage, _res: ServerResponse): void {
+  // No-op: Encore's API gateway (both `encore run` locally and Encore Cloud
+  // in production) automatically sets CORS headers for `expose: true`
+  // endpoints. Setting them here duplicates the headers, which browsers
+  // reject ("multiple Access-Control-Allow-Origin values").
 }
 
 export function handlePreflight(req: IncomingMessage, res: ServerResponse): boolean {
