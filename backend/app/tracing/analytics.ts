@@ -1,3 +1,4 @@
+import { estimateCost } from "./pricing";
 import { listSpans } from "./service";
 
 type Scope = { org_id: string; project_id: string };
@@ -32,7 +33,7 @@ export async function analyticsSummary(scope: Scope) {
 
     const inputTokens = asNumber(kind.input_tokens) ?? 0;
     const outputTokens = asNumber(kind.output_tokens) ?? 0;
-    const cost = asNumber(kind.cost) ?? 0;
+    const cost = asNumber(kind.cost) ?? estimateCost(model, inputTokens, outputTokens) ?? 0;
 
     totalInputTokens += inputTokens;
     totalOutputTokens += outputTokens;
