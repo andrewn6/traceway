@@ -32,7 +32,9 @@ use trace::{
     EvalResultId, EvalRun, EvalRunId, FileVersion, ProviderConnection, ProviderConnectionId,
     QueueItem, QueueItemId, Span, SpanId, Trace, TraceId,
 };
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
+
+const QUERY_PAGE_SIZE: usize = 10_000;
 
 /// Turbopuffer-specific errors
 #[derive(Debug, Error)]
@@ -323,6 +325,68 @@ impl TurbopufferBackend {
         }
     }
 
+    /// Query all documents from a namespace with keyset pagination on `id`.
+    ///
+    /// This avoids silent truncation when collections exceed Turbopuffer `top_k` limits.
+    async fn query_all(
+        &self,
+        collection: &str,
+        filters: Option<serde_json::Value>,
+    ) -> Result<Vec<serde_json::Value>, TurbopufferError> {
+        let mut rows = Vec::new();
+        let mut last_id: Option<String> = None;
+
+        loop {
+            let page_filters = match (&filters, &last_id) {
+                (None, None) => None,
+                (Some(base), None) => Some(base.clone()),
+                (None, Some(id)) => Some(serde_json::json!(["id", "Gt", id])),
+                (Some(base), Some(id)) => {
+                    Some(serde_json::json!(["And", [base.clone(), ["id", "Gt", id]]]))
+                }
+            };
+
+            let page = self
+                .query(collection, page_filters, QUERY_PAGE_SIZE)
+                .await?;
+
+            if page.is_empty() {
+                break;
+            }
+
+            let page_len = page.len();
+            let next_last_id = page
+                .last()
+                .and_then(|row| row.get("id"))
+                .and_then(|v| v.as_str())
+                .map(ToOwned::to_owned);
+
+            rows.extend(page);
+
+            if page_len < QUERY_PAGE_SIZE {
+                break;
+            }
+
+            warn!(collection, page_size = QUERY_PAGE_SIZE, "query page reached top_k; continuing pagination");
+
+            match next_last_id {
+                Some(id) => {
+                    if last_id.as_deref() == Some(id.as_str()) {
+                        warn!(collection, "pagination cursor did not advance; stopping to avoid loop");
+                        break;
+                    }
+                    last_id = Some(id);
+                }
+                None => {
+                    warn!(collection, "missing id in query row; stopping pagination early");
+                    break;
+                }
+            }
+        }
+
+        Ok(rows)
+    }
+
     /// Delete documents by ID.
     /// Returns 0 if the namespace does not exist yet (404).
     #[instrument(skip(self, ids))]
@@ -433,8 +497,11 @@ impl StorageBackend for TurbopufferBackend {
             Some(serde_json::json!(["And", conditions]))
         };
 
-        let limit = filter.limit.unwrap_or(1000);
-        let results = self.query("traces", filters, limit).await?;
+        let results = if let Some(limit) = filter.limit {
+            self.query("traces", filters, limit).await?
+        } else {
+            self.query_all("traces", filters).await?
+        };
 
         let mut traces = Vec::new();
         for row in results {
@@ -519,8 +586,11 @@ impl StorageBackend for TurbopufferBackend {
             Some(serde_json::json!(["And", conditions]))
         };
 
-        let limit = filter.limit.unwrap_or(10000);
-        let results = self.query("spans", filters, limit).await?;
+        let results = if let Some(limit) = filter.limit {
+            self.query("spans", filters, limit).await?
+        } else {
+            self.query_all("spans", filters).await?
+        };
 
         let mut spans = Vec::new();
         for row in results {
@@ -591,7 +661,7 @@ impl StorageBackend for TurbopufferBackend {
     }
 
     async fn list_datasets(&self) -> Result<Vec<Dataset>, StorageError> {
-        let results = self.query("datasets", None, 1000).await?;
+        let results = self.query_all("datasets", None).await?;
 
         let mut datasets = Vec::new();
         for row in results {
@@ -636,7 +706,7 @@ impl StorageBackend for TurbopufferBackend {
 
     async fn list_datapoints(&self, dataset_id: DatasetId) -> Result<Vec<Datapoint>, StorageError> {
         let filter = serde_json::json!(["dataset_id", "Eq", dataset_id.to_string()]);
-        let results = self.query("datapoints", Some(filter), 10000).await?;
+        let results = self.query_all("datapoints", Some(filter)).await?;
 
         let mut datapoints = Vec::new();
         for row in results {
@@ -649,7 +719,7 @@ impl StorageBackend for TurbopufferBackend {
     }
 
     async fn list_datapoints_all(&self) -> Result<Vec<Datapoint>, StorageError> {
-        let results = self.query("datapoints", None, 10000).await?;
+        let results = self.query_all("datapoints", None).await?;
 
         let mut datapoints = Vec::new();
         for row in results {
@@ -711,7 +781,7 @@ impl StorageBackend for TurbopufferBackend {
         dataset_id: DatasetId,
     ) -> Result<Vec<QueueItem>, StorageError> {
         let filter = serde_json::json!(["dataset_id", "Eq", dataset_id.to_string()]);
-        let results = self.query("queue_items", Some(filter), 10000).await?;
+        let results = self.query_all("queue_items", Some(filter)).await?;
 
         let mut items = Vec::new();
         for row in results {
@@ -724,7 +794,7 @@ impl StorageBackend for TurbopufferBackend {
     }
 
     async fn list_queue_items_all(&self) -> Result<Vec<QueueItem>, StorageError> {
-        let results = self.query("queue_items", None, 10000).await?;
+        let results = self.query_all("queue_items", None).await?;
 
         let mut items = Vec::new();
         for row in results {
@@ -766,7 +836,7 @@ impl StorageBackend for TurbopufferBackend {
 
     async fn list_eval_runs(&self, dataset_id: DatasetId) -> Result<Vec<EvalRun>, StorageError> {
         let filter = serde_json::json!(["dataset_id", "Eq", dataset_id.to_string()]);
-        let results = self.query("eval_runs", Some(filter), 10000).await?;
+        let results = self.query_all("eval_runs", Some(filter)).await?;
         let mut runs = Vec::new();
         for row in results {
             if let Some(run) = Self::extract_data::<EvalRun>(&row) {
@@ -777,7 +847,7 @@ impl StorageBackend for TurbopufferBackend {
     }
 
     async fn list_eval_runs_all(&self) -> Result<Vec<EvalRun>, StorageError> {
-        let results = self.query("eval_runs", None, 10000).await?;
+        let results = self.query_all("eval_runs", None).await?;
         let mut runs = Vec::new();
         for row in results {
             if let Some(run) = Self::extract_data::<EvalRun>(&row) {
@@ -818,7 +888,7 @@ impl StorageBackend for TurbopufferBackend {
 
     async fn list_eval_results(&self, run_id: EvalRunId) -> Result<Vec<EvalResult>, StorageError> {
         let filter = serde_json::json!(["run_id", "Eq", run_id.to_string()]);
-        let results = self.query("eval_results", Some(filter), 10000).await?;
+        let results = self.query_all("eval_results", Some(filter)).await?;
         let mut eval_results = Vec::new();
         for row in results {
             if let Some(r) = Self::extract_data::<EvalResult>(&row) {
@@ -829,7 +899,7 @@ impl StorageBackend for TurbopufferBackend {
     }
 
     async fn list_eval_results_all(&self) -> Result<Vec<EvalResult>, StorageError> {
-        let results = self.query("eval_results", None, 10000).await?;
+        let results = self.query_all("eval_results", None).await?;
         let mut eval_results = Vec::new();
         for row in results {
             if let Some(r) = Self::extract_data::<EvalResult>(&row) {
@@ -872,7 +942,7 @@ impl StorageBackend for TurbopufferBackend {
 
     async fn list_capture_rules(&self, dataset_id: DatasetId) -> Result<Vec<CaptureRule>, StorageError> {
         let filter = serde_json::json!(["dataset_id", "Eq", dataset_id.to_string()]);
-        let results = self.query("capture_rules", Some(filter), 10000).await?;
+        let results = self.query_all("capture_rules", Some(filter)).await?;
         let mut rules = Vec::new();
         for row in results {
             if let Some(rule) = Self::extract_data::<CaptureRule>(&row) {
@@ -883,7 +953,7 @@ impl StorageBackend for TurbopufferBackend {
     }
 
     async fn list_capture_rules_all(&self) -> Result<Vec<CaptureRule>, StorageError> {
-        let results = self.query("capture_rules", None, 10000).await?;
+        let results = self.query_all("capture_rules", None).await?;
         let mut rules = Vec::new();
         for row in results {
             if let Some(rule) = Self::extract_data::<CaptureRule>(&row) {
@@ -921,7 +991,7 @@ impl StorageBackend for TurbopufferBackend {
     }
 
     async fn list_provider_connections(&self) -> Result<Vec<ProviderConnection>, StorageError> {
-        let results = self.query("provider_connections", None, 10000).await?;
+        let results = self.query_all("provider_connections", None).await?;
         let mut conns = Vec::new();
         for row in results {
             if let Some(conn) = Self::extract_data::<ProviderConnection>(&row) {
@@ -955,7 +1025,7 @@ impl StorageBackend for TurbopufferBackend {
     }
 
     async fn list_file_versions(&self) -> Result<Vec<FileVersion>, StorageError> {
-        let results = self.query("file_versions", None, 10000).await?;
+        let results = self.query_all("file_versions", None).await?;
 
         let mut versions = Vec::new();
         for row in results {
