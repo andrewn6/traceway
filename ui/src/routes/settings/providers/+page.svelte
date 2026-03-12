@@ -367,8 +367,8 @@
 							</div>
 							<div>
 								<label for="edit-model" class="block text-xs text-text-secondary mb-1">Default Model</label>
-								{@const editModels = getModelsForProvider(conn.provider)}
-								{#if editModels.length > 0}
+								{#if getModelsForProvider(conn.provider).length > 0}
+									{@const editModels = getModelsForProvider(conn.provider)}
 									<div class="relative">
 										<select
 											id="edit-model"
@@ -533,8 +533,8 @@
 					<!-- Default model -->
 					<div>
 						<label for="modal-model" class="label-micro block mb-1.5">Default Model</label>
-						{@const models = getModelsForProvider(selectedProvider.id)}
-						{#if models.length > 0}
+						{#if getModelsForProvider(selectedProvider.id).length > 0}
+							{@const models = getModelsForProvider(selectedProvider.id)}
 							<div class="relative">
 								<select
 									id="modal-model"
