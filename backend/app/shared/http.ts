@@ -35,6 +35,10 @@ export function setCors(req: IncomingMessage, res: ServerResponse): void {
   if (!req.headers.origin) {
     return;
   }
+  // Encore Cloud may already set CORS headers — avoid duplicating them.
+  if (res.getHeader("access-control-allow-origin")) {
+    return;
+  }
   const origin = allowOrigin(req.headers.origin);
   if (origin) {
     res.setHeader("access-control-allow-origin", origin);
