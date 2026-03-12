@@ -12,96 +12,21 @@
 	let selectedSpan: Span | null = $state(null);
 	let loading = $state(true);
 
-	// Search
+	// Search & filters
 	let searchQuery = $state('');
-	let searchFocused = $state(false);
 	let searchInputEl: HTMLInputElement | undefined = $state(undefined);
 	let showFilters = $state(false);
 	let showMetadata = $state(true);
 	let statusFilter: 'all' | 'running' | 'completed' | 'failed' = $state('all');
 	let kindFilter: 'all' | 'llm_call' | 'fs_read' | 'fs_write' | 'custom' = $state('all');
 
-	// Build suggestion list from current spans
-	const searchSuggestions = $derived.by((): Array<{ label: string; category: string }> => {
-		if (!searchQuery.trim()) return [];
-		const q = searchQuery.toLowerCase().trim();
-		const seen = new Set<string>();
-		const results: Array<{ label: string; category: string }> = [];
-
-		// Span names
-		for (const s of spans) {
-			const key = `name:${s.name}`;
-			if (!seen.has(key) && s.name.toLowerCase().includes(q)) {
-				seen.add(key);
-				results.push({ label: s.name, category: 'span' });
-			}
-		}
-		// Models
-		for (const s of spans) {
-			if (s.kind?.type === 'llm_call' && s.kind.model) {
-				const key = `model:${s.kind.model}`;
-				if (!seen.has(key) && s.kind.model.toLowerCase().includes(q)) {
-					seen.add(key);
-					results.push({ label: s.kind.model, category: 'model' });
-				}
-			}
-		}
-		// Providers
-		for (const s of spans) {
-			if (s.kind?.type === 'llm_call' && s.kind.provider) {
-				const key = `provider:${s.kind.provider}`;
-				if (!seen.has(key) && s.kind.provider.toLowerCase().includes(q)) {
-					seen.add(key);
-					results.push({ label: s.kind.provider, category: 'provider' });
-				}
-			}
-		}
-		// Kind types
-		const kindLabels: Record<string, string> = { llm_call: 'LLM Call', fs_read: 'File Read', fs_write: 'File Write', custom: 'Custom' };
-		const seenKinds = new Set<string>();
-		for (const s of spans) {
-			const kt = s.kind?.type ?? 'custom';
-			if (!seenKinds.has(kt)) {
-				seenKinds.add(kt);
-				const label = kindLabels[kt] ?? kt;
-				if (label.toLowerCase().includes(q) || kt.toLowerCase().includes(q)) {
-					const key = `kind:${kt}`;
-					if (!seen.has(key)) {
-						seen.add(key);
-						results.push({ label, category: 'kind' });
-					}
-				}
-			}
-		}
-		// Custom kind values
-		for (const s of spans) {
-			if (s.kind?.type === 'custom' && s.kind.kind) {
-				const key = `customkind:${s.kind.kind}`;
-				if (!seen.has(key) && s.kind.kind.toLowerCase().includes(q)) {
-					seen.add(key);
-					results.push({ label: s.kind.kind, category: 'kind' });
-				}
-			}
-		}
-
-		return results.slice(0, 8);
-	});
-
-	function applySuggestion(label: string) {
-		searchQuery = label;
-		searchFocused = false;
-		searchInputEl?.blur();
-	}
-
-	// Keyboard shortcut: / to focus search
 	function onKeydown(e: KeyboardEvent) {
 		if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
 			e.preventDefault();
 			searchInputEl?.focus();
 		}
-		if (e.key === 'Escape' && searchFocused) {
+		if (e.key === 'Escape' && document.activeElement === searchInputEl) {
 			searchQuery = '';
-			searchFocused = false;
 			searchInputEl?.blur();
 		}
 	}
@@ -150,7 +75,6 @@
 				const updated = spans.find((s) => s.id === selectedSpan!.id);
 				if (updated) selectedSpan = updated;
 			}
-			// Auto-select root span if nothing selected
 			if (!selectedSpan && spans.length > 0) {
 				const root = spans.find((s) => !s.parent_id);
 				if (root) selectedSpan = root;
@@ -236,13 +160,6 @@
 		addingSpan = false;
 	}
 
-	function addChildSpan() {
-		if (selectedSpan) {
-			newSpanParent = selectedSpan.id;
-		}
-		showAddSpan = true;
-	}
-
 	function onSpanAction() {
 		loadTrace(traceId);
 	}
@@ -324,320 +241,181 @@
 
 	const hasActiveFilters = $derived(statusFilter !== 'all' || kindFilter !== 'all');
 
-	const compactTime = $derived.by(() => {
-		if (spans.length === 0) return { min: 0, duration: 1 };
-		const starts = spans.map((s) => new Date(s.started_at).getTime());
-		const ends = spans.map((s) => new Date(s.ended_at ?? s.started_at).getTime());
-		const min = Math.min(...starts);
-		const max = Math.max(...ends, min + 1);
-		return { min, duration: max - min };
-	});
-
-	const compactTicks = $derived.by(() => {
-		const count = 6;
-		return Array.from({ length: count + 1 }, (_, i) => {
-			const ms = (i / count) * compactTime.duration;
-			return {
-				left: (i / count) * 100,
-				label: ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(0)}s`
-			};
-		});
-	});
-
-	const spanDepth = $derived.by(() => {
-		const byParent = new Map<string | null, Span[]>();
-		for (const s of spans) {
-			const key = s.parent_id ?? null;
-			const arr = byParent.get(key) ?? [];
-			arr.push(s);
-			byParent.set(key, arr);
-		}
-		const depth = new Map<string, number>();
-		const walk = (parentId: string | null, d: number) => {
-			for (const s of byParent.get(parentId) ?? []) {
-				depth.set(s.id, d);
-				walk(s.id, d + 1);
-			}
-		};
-		walk(null, 0);
-		return depth;
-	});
-
-	const compactBars = $derived.by(() => {
-		return timelineSpans.map((s) => {
-			const start = new Date(s.started_at).getTime() - compactTime.min;
-			const end = new Date(s.ended_at ?? s.started_at).getTime() - compactTime.min;
-			const left = (start / compactTime.duration) * 100;
-			const width = Math.max(0.8, ((end - start) / compactTime.duration) * 100);
-			const depth = spanDepth.get(s.id) ?? 0;
-			return {
-				span: s,
-				left,
-				width,
-				top: 26 + Math.min(depth, 5) * 7
-			};
-		});
-	});
-
-	function compactBarTone(s: Span): string {
-		if (selectedSpan?.id === s.id) return 'bg-warning';
-		if (!s.kind) return 'bg-accent/75';
-		switch (s.kind.type) {
-			case 'llm_call':
-				return 'bg-accent/90';
-			case 'fs_read':
-			case 'fs_write':
-				return 'bg-warning/85';
-			case 'custom':
-				return 'bg-blue-400/85';
-			default:
-				return 'bg-accent/75';
-		}
-	}
-
 	function clearFilters() {
 		statusFilter = 'all';
 		kindFilter = 'all';
 	}
-
-	function openTraceQuery() {
-		goto(`/query?q=${encodeURIComponent(`trace:${traceId}`)}`);
-	}
 </script>
 
-<div class="w-full max-w-[1880px] mx-auto px-1 h-[calc(100vh-8rem)] flex flex-col gap-3">
-	<!-- Header -->
-	<div class="flex items-center gap-2.5 px-3.5 py-2.5 shrink-0 app-toolbar-shell rounded-xl flex-nowrap min-w-0 overflow-hidden">
-		<a href="/traces" class="text-text-secondary hover:text-text text-[13px]">&larr; Traces</a>
-		<span class="text-text-muted">/</span>
-		<h1 class="text-[13px] font-semibold font-mono min-w-0 truncate max-w-[11rem] sm:max-w-none">{shortId(traceId)}</h1>
+{#if loading}
+	<div class="text-text-muted text-sm text-center py-16">Loading...</div>
+{:else if spans.length === 0}
+	<div class="text-text-muted text-sm text-center py-16">Trace not found</div>
+{:else}
+	<div class="flex flex-col h-[calc(100vh-8rem)] -m-4 lg:-m-5 rounded-xl overflow-hidden border border-border/40 bg-bg-secondary/20">
+		<!-- Header -->
+		<div class="flex items-center gap-2.5 px-4 py-2 border-b border-border/55 bg-bg-secondary/30 shrink-0">
+			<a href="/traces" class="text-text-secondary hover:text-text text-[13px] shrink-0">&larr; Traces</a>
+			<span class="text-border/50">/</span>
+			<h1 class="text-[13px] font-semibold font-mono truncate max-w-[10rem]">{shortId(traceId)}</h1>
 
-		{#if !loading && spans.length > 0}
-			<span class="px-2 py-0.5 rounded text-xs border
-				{traceStatus === 'completed' ? 'bg-success/20 text-success border-success/30' :
-				 traceStatus === 'running' ? 'bg-warning/20 text-warning border-warning/30' :
-				 'bg-danger/20 text-danger border-danger/30'}">
+			<span class="px-2 py-0.5 rounded text-[11px] border shrink-0
+				{traceStatus === 'completed' ? 'bg-success/15 text-success border-success/25' :
+				 traceStatus === 'running' ? 'bg-warning/15 text-warning border-warning/25' :
+				 'bg-danger/15 text-danger border-danger/25'}">
 				{traceStatus}
 			</span>
 
-			<!-- Summary stats -->
-			<div class="hidden md:flex items-center gap-1.5 text-[12px] text-text-secondary font-mono bg-bg-tertiary/35 rounded-md px-2.5 py-1 border border-border/45 shrink-0">
+			<div class="hidden md:flex items-center gap-1.5 text-[11px] text-text-secondary font-mono shrink-0">
 				{#if totalDuration !== null}
-					<span class="inline-flex items-center gap-1">
-						<svg class="w-3.5 h-3.5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
-						{totalDuration < 1000 ? `${totalDuration}ms` : `${(totalDuration / 1000).toFixed(2)}s`}
-					</span>
+					<span>{totalDuration < 1000 ? `${totalDuration}ms` : `${(totalDuration / 1000).toFixed(2)}s`}</span>
 				{/if}
 				{#if totalTokens}
-					<span class="text-border mx-0.5">|</span>
-					<span class="inline-flex items-center gap-1">
-						<svg class="w-3.5 h-3.5 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" /></svg>
-						{totalTokens.toLocaleString()}
-					</span>
+					<span class="text-border/60">&middot;</span>
+					<span>{totalTokens.toLocaleString()} tok</span>
 				{/if}
 				{#if totalCost}
-					<span class="text-border mx-0.5">|</span>
-					<span class="inline-flex items-center gap-1 text-success">
-						<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
-						${totalCost.toFixed(4)}
-					</span>
+					<span class="text-border/60">&middot;</span>
+					<span class="text-success">${totalCost.toFixed(4)}</span>
 				{/if}
-				<span class="text-border mx-0.5">|</span>
+				<span class="text-border/60">&middot;</span>
 				<span class="text-text-muted">{spans.length} spans</span>
 			</div>
 
-			<div class="ml-auto flex items-center gap-2 shrink-0">
+			<div class="ml-auto flex items-center gap-1 shrink-0">
 				<button
-					class="px-3 py-1.5 text-[12px] bg-accent/10 text-accent border border-accent/20 rounded-lg hover:bg-accent/20 transition-colors duration-150 whitespace-nowrap"
-					onclick={() => { showAddSpan = !showAddSpan; if (!showAddSpan) newSpanParent = ''; }}
-				>
-					{showAddSpan ? 'Cancel' : '+ Span'}
-				</button>
+					class="btn-ghost h-7 text-[11px] px-2.5"
+					onclick={() => { showAddSpan = !showAddSpan; }}
+				>{showAddSpan ? 'Cancel' : '+ Span'}</button>
+				<button class="btn-ghost h-7 text-[11px] px-2.5" onclick={handleExportTrace}>Export</button>
 				<button
-					class="px-3 py-1.5 text-[12px] bg-bg-tertiary/70 text-text-secondary border border-border rounded-lg hover:text-text hover:bg-bg-tertiary transition-colors duration-150 whitespace-nowrap"
-					onclick={handleExportTrace}
-				>Export</button>
-				<button
-					class="px-3 py-1.5 text-[12px] transition-colors duration-150 border rounded-lg whitespace-nowrap {confirmDeleteTrace ? 'bg-danger/10 text-danger border-danger/30 font-semibold' : 'bg-bg-tertiary/70 text-text-muted border-border hover:text-danger hover:border-danger/30'}"
+					class="btn-ghost h-7 text-[11px] px-2.5 {confirmDeleteTrace ? '!text-danger !border-danger/30' : ''}"
 					onclick={handleDeleteTrace}
-				>{confirmDeleteTrace ? 'Confirm?' : 'Delete'}</button>
+				>{confirmDeleteTrace ? 'Confirm delete?' : 'Delete'}</button>
 			</div>
-		{/if}
-	</div>
+		</div>
 
-	<!-- Add span form (slides down) -->
-	{#if showAddSpan}
-		<form
-			class="px-4 py-3 table-float rounded-xl space-y-3 shrink-0"
-			onsubmit={(e) => { e.preventDefault(); handleAddSpan(); }}
-		>
-			<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-				<div>
-					<label for="span-name" class="block text-xs text-text-muted uppercase mb-1">Name</label>
-					<input id="span-name" type="text" bind:value={newSpanName} placeholder="e.g. llm-call"
-						class="w-full bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text placeholder:text-text-muted" />
-				</div>
-				<div>
-					<label for="span-kind" class="block text-xs text-text-muted uppercase mb-1">Kind</label>
-					<select id="span-kind" bind:value={newSpanKindType}
-						class="w-full bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text">
-						<option value="custom">Custom</option>
-						<option value="llm_call">LLM Call</option>
-						<option value="fs_read">File Read</option>
-						<option value="fs_write">File Write</option>
-					</select>
-				</div>
-				<div>
-					<label for="span-parent" class="block text-xs text-text-muted uppercase mb-1">Parent</label>
-					<select id="span-parent" bind:value={newSpanParent}
-						class="w-full bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text">
-						<option value="">None (root)</option>
-						{#each parentOptions as opt}
-							<option value={opt.id}>{opt.name} ({shortId(opt.id)})</option>
-						{/each}
-					</select>
-				</div>
-				{#if newSpanKindType === 'llm_call'}
+		<!-- Add span form (collapsible) -->
+		{#if showAddSpan}
+			<form
+				class="px-4 py-3 border-b border-border/55 bg-bg-tertiary/25 space-y-3 shrink-0 motion-rise-in"
+				onsubmit={(e) => { e.preventDefault(); handleAddSpan(); }}
+			>
+				<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
 					<div>
-						<label for="llm-model" class="block text-xs text-text-muted uppercase mb-1">Model</label>
-						<input id="llm-model" type="text" bind:value={llmModel} placeholder="gpt-4"
-							class="w-full bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text placeholder:text-text-muted" />
+						<label for="span-name" class="block text-[10px] text-text-muted uppercase tracking-wider mb-1">Name</label>
+						<input id="span-name" type="text" bind:value={newSpanName} placeholder="e.g. llm-call"
+							class="control-input h-8 text-xs" />
 					</div>
-				{:else if newSpanKindType === 'fs_read' || newSpanKindType === 'fs_write'}
 					<div>
-						<label for="fs-path" class="block text-xs text-text-muted uppercase mb-1">Path</label>
-						<input id="fs-path" type="text" bind:value={fsPath} placeholder="/path/to/file"
-							class="w-full bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text placeholder:text-text-muted" />
+						<label for="span-kind" class="block text-[10px] text-text-muted uppercase tracking-wider mb-1">Kind</label>
+						<select id="span-kind" bind:value={newSpanKindType} class="control-select h-8 text-xs">
+							<option value="custom">Custom</option>
+							<option value="llm_call">LLM Call</option>
+							<option value="fs_read">File Read</option>
+							<option value="fs_write">File Write</option>
+						</select>
 					</div>
-				{:else}
 					<div>
-						<label for="custom-kind" class="block text-xs text-text-muted uppercase mb-1">Kind</label>
-						<input id="custom-kind" type="text" bind:value={customKind} placeholder="task"
-							class="w-full bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text placeholder:text-text-muted" />
+						<label for="span-parent" class="block text-[10px] text-text-muted uppercase tracking-wider mb-1">Parent</label>
+						<select id="span-parent" bind:value={newSpanParent} class="control-select h-8 text-xs">
+							<option value="">None (root)</option>
+							{#each parentOptions as opt}
+								<option value={opt.id}>{opt.name} ({shortId(opt.id)})</option>
+							{/each}
+						</select>
 					</div>
-				{/if}
-			</div>
-			<div class="flex items-center gap-3">
-				<button type="submit" disabled={addingSpan || !newSpanName.trim()}
-					class="px-4 py-1.5 text-xs bg-accent text-bg font-semibold rounded hover:bg-accent/80 transition-colors disabled:opacity-50">
-					{addingSpan ? 'Creating...' : 'Create Span'}
-				</button>
-				<details class="text-xs">
-					<summary class="text-text-muted cursor-pointer hover:text-text transition-colors">Input JSON</summary>
-					<textarea bind:value={newSpanInput} rows={2} placeholder={'{"prompt": "..."}'}
-						class="w-full mt-1 bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text font-mono placeholder:text-text-muted"></textarea>
-				</details>
-			</div>
-		</form>
-	{/if}
-
-	{#if loading}
-		<div class="text-text-muted text-sm text-center py-8 flex-1">Loading...</div>
-	{:else if spans.length === 0}
-		<div class="text-text-muted text-sm text-center py-8 flex-1">Trace not found</div>
-	{:else}
-		<!-- Split panel: tree left, detail right -->
-		<div
-			bind:this={containerEl}
-			class="flex-1 min-h-0 flex gap-3"
-			class:select-none={isDragging}
-		>
-			<!-- Left panel: search + span tree -->
-			<div class="min-h-0 min-w-[380px] overflow-hidden flex flex-col table-float rounded-xl" style="width: {splitPercent}%">
-				<div class="px-3 py-2 border-b border-border/55 bg-bg-secondary/20 flex items-center gap-2">
-					<button class="query-chip h-8">Trace</button>
-					<button class="query-chip h-8 text-warning border-warning/45">Chat with trace</button>
-					<div class="flex-1"></div>
-					<button class="query-chip h-8 {showMetadata ? 'query-chip-active' : ''}" onclick={() => (showMetadata = !showMetadata)}>Metadata</button>
-				</div>
-
-				<div class="relative shrink-0 border-b border-border/55 bg-bg-secondary/20">
-					<div class="flex items-center px-3 py-2 gap-2">
-						<svg class="w-3.5 h-3.5 text-text-muted shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-							<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-						</svg>
-						<input
-							bind:this={searchInputEl}
-							bind:value={searchQuery}
-							onfocus={() => searchFocused = true}
-							onblur={() => setTimeout(() => searchFocused = false, 150)}
-							type="text"
-							placeholder="Search text, name, id, tags..."
-							class="flex-1 bg-transparent text-[13px] text-text placeholder:text-text-muted/50 focus:outline-none"
-						/>
-					</div>
-				</div>
-
-				<div class="px-3 py-2 border-b border-border/55 bg-bg-secondary/20">
-					<div class="relative h-20 rounded-md border border-border/50 bg-bg-secondary/35 overflow-hidden">
-						{#each compactTicks as tick}
-							<div class="absolute top-0 bottom-0 border-l border-border/35" style={`left:${tick.left}%`}>
-								<span class="absolute top-1 left-1 text-[10px] text-text-muted font-mono">{tick.label}</span>
-							</div>
-						{/each}
-						<div class="absolute left-0 right-0 top-5 border-t border-border/35"></div>
-						{#each compactBars as b (b.span.id)}
-							<button
-								type="button"
-								class="absolute h-1.5 rounded {compactBarTone(b.span)}"
-								style={`left:${b.left}%; width:${b.width}%; top:${b.top}px`}
-								onclick={() => selectSpan(b.span)}
-								aria-label={`Select ${b.span.name}`}
-							></button>
-						{/each}
-					</div>
-				</div>
-				<div class="px-3 py-2 border-b border-border/55 bg-gradient-to-r from-bg-secondary/70 via-bg-secondary/45 to-transparent space-y-2">
-					<div class="flex items-center gap-2 flex-wrap min-w-0">
-						<p class="text-[11px] uppercase tracking-[0.14em] text-text-muted">Trace timeline</p>
-						<div class="flex-1"></div>
-						<button class="query-chip h-7 whitespace-nowrap {searchFocused ? 'query-chip-active' : ''}" onclick={() => searchInputEl?.focus()}>Search</button>
-						<button class="query-chip h-7" onclick={() => (showFilters = !showFilters)}>
-							Filters
-							{#if hasActiveFilters}
-								<span class="ml-1 text-[10px] text-warning">{statusFilter !== 'all' ? statusFilter : kindFilter}</span>
-							{/if}
-						</button>
-						<button class="query-chip h-7 whitespace-nowrap {showMetadata ? 'query-chip-active' : ''}" onclick={() => (showMetadata = !showMetadata)}>Metadata</button>
-						<button class="query-chip h-7 whitespace-nowrap" onclick={openTraceQuery}>Ask</button>
-					</div>
-					{#if showFilters}
-						<div class="flex flex-wrap items-center gap-1.5 bg-bg-tertiary/35 border border-border/50 rounded-lg p-1.5">
-							<select bind:value={statusFilter} class="control-select h-7 text-[12px] w-28">
-								<option value="all">All status</option>
-								<option value="running">Running</option>
-								<option value="completed">Completed</option>
-								<option value="failed">Failed</option>
-							</select>
-							<select bind:value={kindFilter} class="control-select h-7 text-[12px] w-28">
-								<option value="all">All kinds</option>
-								<option value="llm_call">LLM call</option>
-								<option value="fs_read">File read</option>
-								<option value="fs_write">File write</option>
-								<option value="custom">Custom</option>
-							</select>
-							<button class="btn-ghost h-7 text-[12px]" onclick={clearFilters}>Reset</button>
-							<div class="text-[11px] text-text-muted ml-auto">{timelineSpans.length}/{spans.length}</div>
+					{#if newSpanKindType === 'llm_call'}
+						<div>
+							<label for="llm-model" class="block text-[10px] text-text-muted uppercase tracking-wider mb-1">Model</label>
+							<input id="llm-model" type="text" bind:value={llmModel} placeholder="gpt-4"
+								class="control-input h-8 text-xs" />
+						</div>
+					{:else if newSpanKindType === 'fs_read' || newSpanKindType === 'fs_write'}
+						<div>
+							<label for="fs-path" class="block text-[10px] text-text-muted uppercase tracking-wider mb-1">Path</label>
+							<input id="fs-path" type="text" bind:value={fsPath} placeholder="/path/to/file"
+								class="control-input h-8 text-xs" />
+						</div>
+					{:else}
+						<div>
+							<label for="custom-kind" class="block text-[10px] text-text-muted uppercase tracking-wider mb-1">Kind</label>
+							<input id="custom-kind" type="text" bind:value={customKind} placeholder="task"
+								class="control-input h-8 text-xs" />
 						</div>
 					{/if}
 				</div>
-				<!-- Autocomplete suggestions -->
-				{#if searchFocused && searchQuery.trim() && searchSuggestions.length > 0}
-					<div class="relative">
-						<div class="absolute left-3 right-3 top-0 z-20 bg-bg-secondary/95 border border-border rounded-lg shadow-[0_20px_36px_-30px_rgba(0,0,0,0.9)] overflow-hidden backdrop-blur-sm">
-							{#each searchSuggestions as suggestion}
-								<button
-									class="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-bg-tertiary/85 transition-colors duration-150"
-									onmousedown={() => applySuggestion(suggestion.label)}
-								>
-									<span class="text-[11px] uppercase tracking-wider text-text-muted/60 w-12 shrink-0">{suggestion.category}</span>
-									<span class="text-[13px] text-text truncate">{suggestion.label}</span>
-								</button>
-							{/each}
-						</div>
+				<div class="flex items-center gap-3">
+					<button type="submit" disabled={addingSpan || !newSpanName.trim()}
+						class="btn-primary h-7 text-xs">
+						{addingSpan ? 'Creating...' : 'Create Span'}
+					</button>
+					<details class="text-xs">
+						<summary class="text-text-muted cursor-pointer hover:text-text transition-colors">Input JSON</summary>
+						<textarea bind:value={newSpanInput} rows={2} placeholder={'{"prompt": "..."}'}
+							class="w-full mt-1 bg-bg-tertiary border border-border rounded px-2 py-1.5 text-xs text-text font-mono placeholder:text-text-muted"></textarea>
+					</details>
+				</div>
+			</form>
+		{/if}
+
+		<!-- Split: tree left, detail right -->
+		<div
+			bind:this={containerEl}
+			class="flex-1 min-h-0 flex"
+			class:select-none={isDragging}
+		>
+			<!-- Left panel: search + tree -->
+			<div class="min-h-0 flex flex-col" style="width: {splitPercent}%">
+				<!-- Search toolbar -->
+				<div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/55 bg-bg-secondary/20 shrink-0">
+					<svg class="w-3.5 h-3.5 text-text-muted shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+					</svg>
+					<input
+						bind:this={searchInputEl}
+						bind:value={searchQuery}
+						type="text"
+						placeholder="Search spans..."
+						class="flex-1 bg-transparent text-[12px] text-text placeholder:text-text-muted/50 focus:outline-none min-w-0"
+					/>
+					<button
+						class="query-chip h-6 text-[11px] {showFilters ? 'query-chip-active' : ''}"
+						onclick={() => (showFilters = !showFilters)}
+					>
+						Filters
+						{#if hasActiveFilters}
+							<span class="w-1.5 h-1.5 rounded-full bg-warning shrink-0"></span>
+						{/if}
+					</button>
+					<button
+						class="query-chip h-6 text-[11px] {showMetadata ? 'query-chip-active' : ''}"
+						onclick={() => (showMetadata = !showMetadata)}
+					>Meta</button>
+				</div>
+
+				<!-- Filter row (collapsible) -->
+				{#if showFilters}
+					<div class="flex items-center gap-1.5 px-3 py-1.5 border-b border-border/55 bg-bg-tertiary/20 shrink-0 motion-rise-in">
+						<select bind:value={statusFilter} class="control-select h-7 text-[11px] w-28">
+							<option value="all">All status</option>
+							<option value="running">Running</option>
+							<option value="completed">Completed</option>
+							<option value="failed">Failed</option>
+						</select>
+						<select bind:value={kindFilter} class="control-select h-7 text-[11px] w-28">
+							<option value="all">All kinds</option>
+							<option value="llm_call">LLM call</option>
+							<option value="fs_read">File read</option>
+							<option value="fs_write">File write</option>
+							<option value="custom">Custom</option>
+						</select>
+						<button class="btn-ghost h-7 text-[11px]" onclick={clearFilters}>Reset</button>
+						<span class="text-[10px] text-text-muted ml-auto">{timelineSpans.length}/{spans.length}</span>
 					</div>
 				{/if}
 
+				<!-- Tree -->
 				<TraceTimeline
 					spans={timelineSpans}
 					{searchQuery}
@@ -650,20 +428,18 @@
 			<!-- Resizable divider -->
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
-				class="w-1.5 shrink-0 cursor-col-resize relative group"
+				class="w-px shrink-0 cursor-col-resize relative group"
 				onpointerdown={onDividerPointerDown}
 				onpointermove={onDividerPointerMove}
 				onpointerup={onDividerPointerUp}
 			>
-				<div class="absolute inset-y-1 -left-0.5 -right-0.5 bg-border/45 rounded-full group-hover:bg-accent/55 transition-colors duration-150"
-					class:bg-accent={isDragging}></div>
+				<div class="absolute inset-y-0 -left-[3px] -right-[3px] z-10"></div>
+				<div class="absolute inset-y-0 left-0 right-0 bg-border/55 group-hover:bg-accent/60 transition-colors"
+					class:!bg-accent={isDragging}></div>
 			</div>
 
 			<!-- Right panel: span detail -->
-			<div class="flex-1 min-h-0 min-w-[440px] max-w-[44%] overflow-y-auto table-float rounded-xl">
-				<div class="px-3 py-2 border-b border-border/55 bg-gradient-to-r from-bg-secondary/70 via-bg-secondary/45 to-transparent sticky top-0 z-10 backdrop-blur-md">
-					<p class="text-[11px] uppercase tracking-[0.14em] text-text-muted">Span inspection</p>
-				</div>
+			<div class="flex-1 min-h-0 overflow-hidden">
 				{#if selectedSpan}
 					<SpanDetail span={selectedSpan} {onSpanAction} allSpans={spans} />
 				{:else}
@@ -673,5 +449,5 @@
 				{/if}
 			</div>
 		</div>
-	{/if}
-</div>
+	</div>
+{/if}

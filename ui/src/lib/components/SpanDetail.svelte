@@ -325,6 +325,74 @@
 			<div class="px-4 py-2 bg-danger/10 border-b border-danger/20 text-danger text-xs font-mono shrink-0">{error}</div>
 		{/if}
 
+		<!-- Action bar -->
+		<div class="flex items-center gap-1.5 px-4 py-1.5 border-b border-border/55 shrink-0 bg-bg-secondary/10 flex-wrap">
+			<div class="relative">
+				<button class="query-chip h-6 text-[11px] gap-1" onclick={openExportDropdown}>
+					Add to dataset
+					<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
+				</button>
+				{#if showExportDropdown}
+					<div class="absolute left-0 top-full mt-1 w-56 bg-bg-secondary border border-border rounded-lg shadow-xl z-20 overflow-hidden">
+						{#if exportDatasets.length === 0}
+							<div class="px-3 py-2 text-xs text-text-muted">No datasets. Create one first.</div>
+						{:else}
+							{#each exportDatasets as ds (ds.id)}
+								<button class="w-full text-left px-3 py-2 text-xs hover:bg-bg-tertiary transition-colors" disabled={exportLoading} onclick={() => doExport(ds.id)}>
+									<div class="text-text">{ds.name}</div>
+									<div class="text-text-muted text-[10px]">{ds.datapoint_count} datapoints</div>
+								</button>
+							{/each}
+						{/if}
+					</div>
+				{/if}
+			</div>
+			<div class="relative">
+				<button class="query-chip h-6 text-[11px] gap-1" onclick={openReviewDropdown}>
+					Send to review
+					<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
+				</button>
+				{#if showReviewDropdown}
+					<div class="absolute left-0 top-full mt-1 w-56 bg-bg-secondary border border-border rounded-lg shadow-xl z-20 overflow-hidden">
+						{#if reviewDatasets.length === 0}
+							<div class="px-3 py-2 text-xs text-text-muted">No datasets. Create one first.</div>
+						{:else}
+							{#each reviewDatasets as ds (ds.id)}
+								<button class="w-full text-left px-3 py-2 text-xs hover:bg-bg-tertiary transition-colors" disabled={reviewLoading} onclick={() => doReview(ds.id)}>
+									<div class="text-text">{ds.name}</div>
+									<div class="text-text-muted text-[10px]">{ds.datapoint_count} datapoints</div>
+								</button>
+							{/each}
+						{/if}
+					</div>
+				{/if}
+			</div>
+			{#if exportSuccess}<span class="text-[10px] text-success">{exportSuccess}</span>{/if}
+			{#if reviewSuccess}<span class="text-[10px] text-success">{reviewSuccess}</span>{/if}
+			<div class="flex-1"></div>
+			{#if status === 'running'}
+				<button class="query-chip h-6 text-[11px] text-success border-success/30 hover:bg-success/10" onclick={() => { showCompleteForm = !showCompleteForm; showFailForm = false; }}>Complete</button>
+				<button class="query-chip h-6 text-[11px] text-danger border-danger/30 hover:bg-danger/10" onclick={() => { showFailForm = !showFailForm; showCompleteForm = false; }}>Fail</button>
+			{/if}
+			<button class="query-chip h-6 text-[11px] {confirmDeleteSpan ? 'text-danger border-danger/30' : ''}" onclick={handleDeleteSpan}>{confirmDeleteSpan ? 'Confirm?' : 'Delete'}</button>
+		</div>
+
+		<!-- Complete/Fail forms (expandable) -->
+		{#if showCompleteForm}
+			<form class="px-4 py-2 border-b border-border/55 bg-bg-tertiary/20 shrink-0 space-y-2 motion-rise-in" onsubmit={(e) => { e.preventDefault(); handleComplete(); }}>
+				<label for="complete-output" class="block text-[10px] text-text-muted uppercase">Output (optional JSON)</label>
+				<textarea id="complete-output" bind:value={completeOutput} rows={2} placeholder={'{"result": "success"}'} class="w-full bg-bg border border-border rounded px-2 py-1.5 text-xs text-text font-mono placeholder:text-text-muted"></textarea>
+				<button type="submit" disabled={actionLoading} class="btn-primary h-7 text-xs">{actionLoading ? 'Completing...' : 'Complete Span'}</button>
+			</form>
+		{/if}
+		{#if showFailForm}
+			<form class="px-4 py-2 border-b border-border/55 bg-bg-tertiary/20 shrink-0 space-y-2 motion-rise-in" onsubmit={(e) => { e.preventDefault(); handleFail(); }}>
+				<label for="fail-error" class="block text-[10px] text-text-muted uppercase">Error message</label>
+				<input id="fail-error" type="text" bind:value={failError} placeholder="What went wrong?" class="w-full bg-bg border border-border rounded px-2 py-1.5 text-xs text-text placeholder:text-text-muted" />
+				<button type="submit" disabled={actionLoading || !failError.trim()} class="px-3 py-1 text-xs bg-danger text-bg font-semibold rounded hover:bg-danger/80 transition-colors disabled:opacity-50">{actionLoading ? 'Failing...' : 'Fail Span'}</button>
+			</form>
+		{/if}
+
 		<!-- Tabs -->
 		<div class="flex items-center border-b border-border/55 shrink-0 bg-bg-secondary/10">
 			<button class="px-4 py-2 text-[12px] font-medium border-b-2 transition-colors {activeTab === 'messages' ? 'border-accent text-text' : 'border-transparent text-text-muted hover:text-text-secondary'}" onclick={() => (activeTab = 'messages')}>
@@ -514,55 +582,7 @@
 						</div>
 					{/if}
 
-					<!-- Actions -->
-					<div class="glass-soft rounded-xl border border-border/55 p-3 space-y-2">
-						<div class="text-[10px] text-text-muted uppercase tracking-wider mb-2">Actions</div>
-						<div class="flex items-center gap-1.5 flex-wrap">
-							<div class="relative">
-								<button class="px-2.5 py-1 text-[11px] bg-warning/10 text-warning border border-warning/20 rounded-lg hover:bg-warning/20 transition-colors" onclick={openReviewDropdown}>Add to labeling queue</button>
-								{#if showReviewDropdown}
-									<div class="absolute left-0 top-full mt-1 w-56 bg-bg-secondary/95 border border-border/70 rounded-lg shadow-xl z-10 backdrop-blur-md overflow-hidden">
-										{#if reviewDatasets.length === 0}<div class="px-3 py-2 text-xs text-text-muted">No datasets. Create one first.</div>
-										{:else}{#each reviewDatasets as ds (ds.id)}<button class="w-full text-left px-3 py-2 text-xs hover:bg-bg-tertiary/75 transition-colors text-text-secondary" disabled={reviewLoading} onclick={() => doReview(ds.id)}><div class="text-text">{ds.name}</div><div class="text-text-muted">{ds.datapoint_count} datapoints</div></button>{/each}{/if}
-									</div>
-								{/if}
-							</div>
-							<div class="relative">
-								<button class="px-2.5 py-1 text-[11px] bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded-lg hover:bg-amber-400/20 transition-colors" onclick={openExportDropdown}>Add to dataset</button>
-								{#if showExportDropdown}
-									<div class="absolute left-0 top-full mt-1 w-56 bg-bg-secondary/95 border border-border/70 rounded-lg shadow-xl z-10 backdrop-blur-md overflow-hidden">
-										{#if exportDatasets.length === 0}<div class="px-3 py-2 text-xs text-text-muted">No datasets. Create one first.</div>
-										{:else}{#each exportDatasets as ds (ds.id)}<button class="w-full text-left px-3 py-2 text-xs hover:bg-bg-tertiary/75 transition-colors text-text-secondary" disabled={exportLoading} onclick={() => doExport(ds.id)}><div class="text-text">{ds.name}</div><div class="text-text-muted">{ds.datapoint_count} datapoints</div></button>{/each}{/if}
-									</div>
-								{/if}
-							</div>
-							{#if status === 'running'}
-								<button class="px-2.5 py-1 text-[11px] bg-success/10 text-success border border-success/20 rounded-lg hover:bg-success/20 transition-colors" onclick={() => { showCompleteForm = !showCompleteForm; showFailForm = false; }}>Complete</button>
-								<button class="px-2.5 py-1 text-[11px] bg-danger/10 text-danger border border-danger/20 rounded-lg hover:bg-danger/20 transition-colors" onclick={() => { showFailForm = !showFailForm; showCompleteForm = false; }}>Fail</button>
-							{/if}
-							{#if exportSuccess}<span class="text-[11px] text-success">{exportSuccess}</span>{/if}
-							{#if reviewSuccess}<span class="text-[11px] text-success">{reviewSuccess}</span>{/if}
-							<div class="flex-1"></div>
-							<button class="px-2.5 py-1 text-[11px] transition-colors border rounded-lg {confirmDeleteSpan ? 'bg-danger/10 text-danger border-danger/30 font-semibold' : 'text-text-muted border-border hover:text-danger hover:border-danger/30'}" onclick={handleDeleteSpan}>{confirmDeleteSpan ? 'Confirm?' : 'Delete span'}</button>
-						</div>
-
-						{#if showCompleteForm}
-							<form class="glass-soft rounded-xl p-3 space-y-2 border border-border/55" onsubmit={(e) => { e.preventDefault(); handleComplete(); }}>
-								<label for="complete-output" class="block text-xs text-text-muted">Output (optional JSON)</label>
-								<textarea id="complete-output" bind:value={completeOutput} rows={2} placeholder={'{"result": "success"}'} class="w-full bg-bg border border-border rounded px-2 py-1.5 text-xs text-text font-mono placeholder:text-text-muted"></textarea>
-								<button type="submit" disabled={actionLoading} class="px-3 py-1 text-xs bg-success text-bg font-semibold rounded hover:bg-success/80 transition-colors disabled:opacity-50">{actionLoading ? 'Completing...' : 'Complete Span'}</button>
-							</form>
-						{/if}
-
-						{#if showFailForm}
-							<form class="glass-soft rounded-xl p-3 space-y-2 border border-border/55" onsubmit={(e) => { e.preventDefault(); handleFail(); }}>
-								<label for="fail-error" class="block text-xs text-text-muted">Error message</label>
-								<input id="fail-error" type="text" bind:value={failError} placeholder="What went wrong?" class="w-full bg-bg border border-border rounded px-2 py-1.5 text-xs text-text placeholder:text-text-muted" />
-								<button type="submit" disabled={actionLoading || !failError.trim()} class="px-3 py-1 text-xs bg-danger text-bg font-semibold rounded hover:bg-danger/80 transition-colors disabled:opacity-50">{actionLoading ? 'Failing...' : 'Fail Span'}</button>
-							</form>
-						{/if}
 					</div>
-				</div>
 			{/if}
 		</div>
 	</div>
