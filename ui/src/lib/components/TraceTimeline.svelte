@@ -110,7 +110,7 @@
 		return count;
 	}
 
-	// ── Time range for relative offset display ────────────────────────
+	// ── Time range for gantt bar positioning ──────────────────────────
 	const timeRange = $derived.by(() => {
 		if (spans.length === 0) return { min: 0, max: 1 };
 		const starts = spans.map((s) => new Date(spanStartedAt(s)).getTime());
@@ -277,11 +277,24 @@
 		return `${(ms / 1000).toFixed(2)}s`;
 	}
 
-	function relativeOffset(s: Span): string {
+	function barProps(s: Span): { left: string; width: string; color: string } {
 		const start = new Date(spanStartedAt(s)).getTime();
-		const offset = start - timeRange.min;
-		if (offset < 1000) return `+${offset}ms`;
-		return `+${(offset / 1000).toFixed(2)}s`;
+		const endStr = spanEndedAt(s);
+		const end = endStr ? new Date(endStr).getTime() : Date.now();
+		const range = timeRange.max - timeRange.min;
+		const leftPct = range > 0 ? ((start - timeRange.min) / range) * 100 : 0;
+		const widthPct = range > 0 ? Math.max(1.5, ((end - start) / range) * 100) : 100;
+
+		const kind = kindType(s);
+		let color: string;
+		switch (kind) {
+			case 'llm_call': color = '#ec4899'; break;
+			case 'fs_read': color = '#06b6d4'; break;
+			case 'fs_write': color = '#10b981'; break;
+			default: color = '#6366f1'; break;
+		}
+
+		return { left: `${leftPct}%`, width: `${widthPct}%`, color };
 	}
 
 	function statusDotClass(s: Span): string {
@@ -354,7 +367,7 @@
 	});
 </script>
 
-	<div class="flex flex-col h-full min-h-0 bg-transparent">
+<div class="flex flex-col h-full min-h-0 bg-transparent">
 	<!-- Toolbar -->
 	<div class="flex items-center gap-2 px-3 py-2.5 border-b border-border/55 shrink-0 bg-bg-secondary/30 backdrop-blur-sm">
 		{#if viewMode === 'tree' || viewMode === 'flat'}
@@ -391,7 +404,7 @@
 		<div
 			bind:this={scrollContainer}
 			bind:clientHeight={containerHeight}
-			class="flex-1 min-h-0 overflow-y-auto bg-[radial-gradient(120%_140%_at_50%_0%,rgba(255,255,255,0.02),transparent_65%)]"
+			class="flex-1 min-h-0 overflow-y-auto"
 			onscroll={onScroll}
 		>
 			<div class="relative" style="height: {totalHeight}px">
@@ -403,7 +416,7 @@
 					{#if node.type === 'preview'}
 						<!-- Content preview block -->
 						<div
-							class="absolute left-0 right-0 cursor-pointer transition-colors duration-150
+							class="absolute left-0 right-0 cursor-pointer transition-colors duration-100
 								{selectedId === s.id ? 'bg-accent/8 border-l-2 border-l-accent' : 'border-l-2 border-l-transparent hover:bg-bg-tertiary/50'}"
 							style="top: {topPx}px; height: {node.height}px"
 							role="button"
@@ -421,13 +434,10 @@
 						{@const status = spanStatus(s)}
 						{@const duration = spanDurationMs(s)}
 						{@const model = modelBadge(s)}
-						{@const provider = providerBadge(s)}
-						{@const tokens = tokenCount(s)}
-						{@const cost = costBadge(s)}
-						{@const bytes = bytesBadge(s)}
+						{@const bar = barProps(s)}
 						<div
-							class="absolute left-0 right-0 flex items-center text-xs transition-all duration-150 group
-								{selectedId === s.id ? 'bg-warning/14 border-l-2 border-l-warning shadow-[inset_0_0_0_1px_rgba(245,158,11,0.22)]' : 'hover:bg-bg-tertiary/70 border-l-2 border-l-transparent'}"
+							class="absolute left-0 right-0 flex items-center text-xs transition-colors duration-100 group
+								{selectedId === s.id ? 'bg-accent/10 border-l-2 border-l-accent' : 'hover:bg-bg-tertiary/40 border-l-2 border-l-transparent'}"
 							style="top: {topPx}px; height: {node.height}px"
 							role="button"
 							tabindex={0}
@@ -435,75 +445,62 @@
 							onclick={() => onSelect?.(s)}
 							onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect?.(s); } }}
 						>
-							<!-- Span info -->
-							<div class="flex items-center gap-1.5 flex-1 px-2 overflow-hidden min-w-0">
-								<!-- Indent + collapse -->
+							<!-- Span info (left) -->
+							<div class="flex items-center gap-1.5 pl-2 overflow-hidden min-w-0" style="width: 52%">
 								{#if viewMode === 'tree'}
 									<div class="relative flex items-center shrink-0" style="width: {node.depth * INDENT_PX + 20}px">
 										{#if node.depth > 0}
-											<div class="absolute top-0 bottom-0 border-l border-border/35" style="left: {node.depth * INDENT_PX - 10}px"></div>
-											<div class="absolute top-1/2 border-t border-border/35 w-2.5" style="left: {node.depth * INDENT_PX - 10}px"></div>
+											<div class="absolute top-0 bottom-0 border-l border-border/25" style="left: {node.depth * INDENT_PX - 10}px"></div>
+											<div class="absolute top-1/2 border-t border-border/25 w-2" style="left: {node.depth * INDENT_PX - 10}px"></div>
 										{/if}
 										<div style="width: {node.depth * INDENT_PX}px"></div>
 										{#if node.hasChildren}
-										<button
-											type="button"
-											aria-label={collapsed.has(s.id) ? `Expand ${s.name}` : `Collapse ${s.name}`}
-											class="w-5 h-5 flex items-center justify-center text-text-muted hover:text-text transition-colors duration-150 rounded-sm hover:bg-bg-tertiary/80"
-											onclick={(e: MouseEvent) => { e.stopPropagation(); toggleCollapse(s.id); }}
-										>
+											<button
+												type="button"
+												aria-label={collapsed.has(s.id) ? `Expand ${s.name}` : `Collapse ${s.name}`}
+												class="w-5 h-5 flex items-center justify-center text-text-muted hover:text-text transition-colors duration-100 rounded-sm hover:bg-bg-tertiary/80"
+												onclick={(e: MouseEvent) => { e.stopPropagation(); toggleCollapse(s.id); }}
+											>
 												{#if collapsed.has(s.id)}
 													<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M4 2l6 4-6 4V2z"/></svg>
 												{:else}
 													<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M2 4l4 6 4-6H2z"/></svg>
 												{/if}
-										</button>
-									{:else}
-										<div class="w-5"></div>
+											</button>
+										{:else}
+											<div class="w-5"></div>
 										{/if}
 									</div>
 								{/if}
 
-								<!-- Status dot -->
-								<span class="w-2 h-2 rounded-full shrink-0 {statusDotClass(s)}"></span>
+								<span class="w-1.5 h-1.5 rounded-full shrink-0 {statusDotClass(s)}"></span>
 
-								<!-- Icon -->
 								<div class="shrink-0">
 									<SpanKindIcon span={s} />
 								</div>
 
-							<!-- Name -->
-							<span class="text-text truncate text-[12px] font-medium max-w-[42%] tracking-[0.01em]">{s.name}</span>
+								<span class="text-text truncate text-[12px] font-medium tracking-[0.01em]">{s.name}</span>
 
-							<!-- Primary metadata -->
-							<span class="shrink-0 text-[10px] text-text-secondary bg-bg-tertiary/55 border border-border/55 rounded px-1.5 py-px font-mono">{formatDuration(duration)}</span>
-
-							<!-- Inline badges -->
-							{#if showMetadata && model}
-								<span class="shrink-0 text-[10px] text-accent bg-accent/10 border border-accent/30 rounded px-1.5 py-px max-w-[30%] truncate">{model}</span>
-							{/if}
-							{#if showMetadata && provider}
-								<span class="shrink-0 text-[10px] text-text-muted bg-bg-tertiary/50 border border-border/50 rounded px-1.5 py-px">{provider}</span>
-							{/if}
-							{#if showMetadata && tokens}
-								<span class="shrink-0 text-text-muted text-[10px] bg-bg-tertiary/45 border border-border/45 rounded px-1.5 py-px">{tokens}</span>
-							{/if}
-							{#if showMetadata && cost}
-								<span class="shrink-0 text-success text-[10px] bg-success/10 border border-success/25 rounded px-1.5 py-px">{cost}</span>
-							{/if}
-							{#if showMetadata && bytes}
-								<span class="shrink-0 text-text-muted text-[10px] bg-bg-tertiary/45 border border-border/45 rounded px-1.5 py-px">{bytes}</span>
-							{/if}
-
-								<!-- Collapsed count -->
 								{#if node.hasChildren && collapsed.has(s.id)}
 									<span class="shrink-0 text-text-muted text-[10px] bg-bg-tertiary rounded px-1.5 py-px">+{node.descendantCount}</span>
 								{/if}
 							</div>
 
-							<!-- Duration / offset (right side) -->
-							<div class="shrink-0 flex flex-col items-end pr-2.5 text-right min-w-14">
-								<span class="text-[10px] text-text-muted font-mono">{relativeOffset(s)}</span>
+							<!-- Duration -->
+							<div class="shrink-0 w-16 text-right pr-3">
+								<span class="text-[11px] text-text-muted font-mono">{formatDuration(duration)}</span>
+							</div>
+
+							<!-- Gantt bar -->
+							<div class="flex-1 relative h-[14px] mr-3">
+								<div
+									class="absolute top-0 h-full rounded-[3px] {status === 'running' ? 'animate-pulse' : ''}"
+									style="left: {bar.left}; width: {bar.width}; background-color: {bar.color}; opacity: 0.85"
+								>
+									{#if showMetadata && model}
+										<span class="absolute inset-0 flex items-center justify-end pr-1.5 text-[9px] text-white/75 font-medium truncate pointer-events-none">{model}</span>
+									{/if}
+								</div>
 							</div>
 						</div>
 					{/if}
