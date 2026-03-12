@@ -3,6 +3,7 @@ import { and, asc, desc, eq, gt } from "drizzle-orm";
 import { db } from "../core/database";
 import { eventLog, fileContents, fileVersions, spans, traces } from "../core/schema";
 import { newId } from "../core/utils";
+import { enrichKindWithCost, estimateCost } from "./pricing";
 import { mirrorSpan, mirrorTrace } from "../search/turbopuffer";
 
 type Scope = { org_id: string; project_id: string };
@@ -56,7 +57,7 @@ function mapSpan(row: typeof spans.$inferSelect): SpanItem {
     trace_id: row.traceId,
     parent_id: row.parentId ?? undefined,
     name: row.name,
-    kind: row.kind as Record<string, unknown>,
+    kind: enrichKindWithCost(row.kind as Record<string, unknown>),
     status: row.status,
     input: row.input ?? undefined,
     output: row.output ?? undefined,
@@ -120,7 +121,9 @@ export async function listSessions(scope: Scope): Promise<SessionItem[]> {
         const input = typeof kind.input_tokens === "number" ? kind.input_tokens : 0;
         const output = typeof kind.output_tokens === "number" ? kind.output_tokens : 0;
         tokens += input + output;
-        if (typeof kind.cost === "number") cost += kind.cost;
+        const model = typeof kind.model === "string" ? kind.model : "";
+        const spanCost = typeof kind.cost === "number" ? kind.cost : (estimateCost(model, input, output) ?? 0);
+        cost += spanCost;
       }
     }
 
@@ -252,6 +255,7 @@ export async function createSpan(
     input?: unknown;
   }
 ): Promise<{ id: string; trace_id: string }> {
+  const kind = enrichKindWithCost(input.kind);
   const [row] = await db
     .insert(spans)
     .values({
@@ -261,7 +265,7 @@ export async function createSpan(
       traceId: input.trace_id,
       parentId: input.parent_id ?? null,
       name: input.name,
-      kind: input.kind,
+      kind,
       status: "running",
       input: input.input ?? null,
       output: null,
