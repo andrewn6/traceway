@@ -31,8 +31,11 @@ export const listTracesEndpoint = api.raw(
     const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
+    const params = query(req);
+    const limit = Number(params.get("limit") ?? "") || undefined;
+    const cursor = params.get("cursor") ?? undefined;
     const items = await listTraces(session);
-    json(res, 200, page(items));
+    json(res, 200, page(items, { cursor, limit }));
   }
 );
 
@@ -113,7 +116,9 @@ export const listSpansEndpoint = api.raw(
       const q = nameContains.toLowerCase();
       items = items.filter((s) => s.name.toLowerCase().includes(q));
     }
-    json(res, 200, page(items));
+    const limit = Number(params.get("limit") ?? "") || undefined;
+    const cursor = params.get("cursor") ?? undefined;
+    json(res, 200, page(items, { cursor, limit }));
   }
 );
 
@@ -124,8 +129,11 @@ export const listSessionsEndpoint = api.raw(
     const session = await requireScope(req, res);
     if (!session) return;
     setCors(req, res);
+    const params = query(req);
+    const limit = Number(params.get("limit") ?? "") || undefined;
+    const cursor = params.get("cursor") ?? undefined;
     const items = await listSessions(session);
-    json(res, 200, page(items));
+    json(res, 200, page(items, { cursor, limit }));
   }
 );
 
@@ -308,7 +316,11 @@ export const eventsEndpoint = api.raw(
     if (!session) return;
     setCors(req, res);
 
-    const since = Number(query(req).get("since") ?? "0") || 0;
+    const sinceFromQuery = Number(query(req).get("since") ?? "0") || 0;
+    const rawLastEventId = req.headers["last-event-id"];
+    const lastEventIdHeader = Array.isArray(rawLastEventId) ? rawLastEventId[0] : rawLastEventId;
+    const sinceFromHeader = Number(lastEventIdHeader ?? "0") || 0;
+    const since = sinceFromQuery > 0 ? sinceFromQuery : sinceFromHeader;
     let cursor = since;
 
     res.setHeader("content-type", "text/event-stream");

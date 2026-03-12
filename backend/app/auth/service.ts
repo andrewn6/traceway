@@ -1,5 +1,5 @@
 import { randomBytes, scryptSync, timingSafeEqual, createHash, randomUUID } from "node:crypto";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 
 import { db } from "../core/database";
 import { sendInviteEmail, sendPasswordResetEmail } from "../email/resend";
@@ -100,6 +100,14 @@ function makeApiKeyToken(): string {
   return `tw_${randomBytes(24).toString("base64url")}`;
 }
 
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function emailEqualsInsensitive(email: string) {
+  return sql`lower(${users.email}) = ${normalizeEmail(email)}`;
+}
+
 function planLimits(plan: string): OrgInfo["plan_limits"] {
   if (plan === "pro") {
     return { spans_per_month: 1000000, max_team_members: 50, retention_days: 90 };
@@ -138,11 +146,11 @@ export async function signup(input: {
   name?: string;
   org_name?: string;
 }): Promise<{ user: AuthUser; token: string }> {
-  const email = input.email.trim().toLowerCase();
+  const email = normalizeEmail(input.email);
   const existing = await db
     .select({ id: users.id })
     .from(users)
-    .where(eq(users.email, email))
+    .where(emailEqualsInsensitive(email))
     .limit(1);
   if (existing.length > 0) {
     throw new Error("Email already in use");
@@ -218,11 +226,11 @@ export async function login(input: {
   email: string;
   password: string;
 }): Promise<{ user: AuthUser; token: string }> {
-  const email = input.email.trim().toLowerCase();
+  const email = normalizeEmail(input.email);
   const [user] = await db
     .select()
     .from(users)
-    .where(eq(users.email, email))
+    .where(emailEqualsInsensitive(email))
     .limit(1);
   if (!user || !verifyPassword(input.password, user.passwordHash)) {
     throw new Error("Invalid email or password");
@@ -536,7 +544,7 @@ export async function createInvite(token: string | undefined, email: string, rol
   if (!me || !me.user_id) return null;
   const inviteToken = randomBytes(32).toString("base64url");
   const [inviter] = await db.select({ name: users.name }).from(users).where(eq(users.id, me.user_id)).limit(1);
-  await sendInviteEmail(email.toLowerCase().trim(), inviteToken, inviter?.name ?? undefined);
+  await sendInviteEmail(normalizeEmail(email), inviteToken, inviter?.name ?? undefined);
   const now = new Date();
   const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
   const [inv] = await db
@@ -544,7 +552,7 @@ export async function createInvite(token: string | undefined, email: string, rol
     .values({
       id: randomUUID(),
       orgId: me.org_id,
-      email: email.toLowerCase().trim(),
+      email: normalizeEmail(email),
       role: role ?? "member",
       invitedBy: me.user_id,
       tokenHash: hashToken(inviteToken),
@@ -603,8 +611,8 @@ export async function acceptInviteToken(input: {
     .limit(1);
   if (!inv) return null;
 
-  const email = inv.email.toLowerCase().trim();
-  let [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  const email = normalizeEmail(inv.email);
+  let [user] = await db.select().from(users).where(emailEqualsInsensitive(email)).limit(1);
   if (!user) {
     [user] = await db
       .insert(users)
@@ -665,7 +673,7 @@ export async function acceptInviteToken(input: {
 }
 
 export async function issuePasswordReset(email: string): Promise<{ ok: boolean; token?: string }> {
-  const [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase().trim())).limit(1);
+  const [user] = await db.select().from(users).where(emailEqualsInsensitive(email)).limit(1);
   if (!user) return { ok: true };
 
   const token = randomBytes(32).toString("base64url");

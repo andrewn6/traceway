@@ -32,7 +32,7 @@ function allowOrigin(origin: string | undefined): string | null {
 }
 
 export function setCors(req: IncomingMessage, res: ServerResponse): void {
-  if (req.headers.origin) {
+  if (!req.headers.origin) {
     return;
   }
   const origin = allowOrigin(req.headers.origin);
@@ -144,6 +144,38 @@ export async function requireScope(req: IncomingMessage, res: ServerResponse): P
   };
 }
 
-export function page<T>(items: T[]): { items: T[]; total: number; next_cursor: null; has_more: false } {
-  return { items, total: items.length, next_cursor: null, has_more: false };
+type PageOptions = {
+  cursor?: string | null;
+  limit?: number | null;
+  maxLimit?: number;
+};
+
+export function page<T>(
+  items: T[],
+  options?: PageOptions,
+): { items: T[]; total: number; next_cursor: string | null; has_more: boolean } {
+  const hasPaginationInput = options?.cursor != null || options?.limit != null;
+  if (!hasPaginationInput) {
+    return { items, total: items.length, next_cursor: null, has_more: false };
+  }
+
+  const maxLimit = options?.maxLimit ?? 200;
+  const parsedLimit = Number(options?.limit ?? 50);
+  const limit = Number.isFinite(parsedLimit)
+    ? Math.max(1, Math.min(maxLimit, Math.floor(parsedLimit)))
+    : 50;
+
+  const parsedOffset = Number(options?.cursor ?? 0);
+  const offset = Number.isFinite(parsedOffset) ? Math.max(0, Math.floor(parsedOffset)) : 0;
+
+  const pagedItems = items.slice(offset, offset + limit);
+  const nextOffset = offset + pagedItems.length;
+  const hasMore = nextOffset < items.length;
+
+  return {
+    items: pagedItems,
+    total: items.length,
+    next_cursor: hasMore ? String(nextOffset) : null,
+    has_more: hasMore,
+  };
 }

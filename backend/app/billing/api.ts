@@ -139,7 +139,7 @@ export const createCheckout = api.raw(
     const [row] = await db.select({ email: users.email }).from(users).where(eq(users.id, session.user_id ?? "")).limit(1);
     const members = await db.select({ id: users.id }).from(users).where(eq(users.orgId, session.org_id));
 
-    const appUrl = process.env.APP_URL ?? "https://app.traceway.ai";
+    const appUrl = process.env.APP_URL ?? "https://platform.traceway.ai";
     const payload: Record<string, unknown> = {
       products: [productId],
       success_url: `${appUrl}/settings/billing?checkout=success`,
