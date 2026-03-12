@@ -231,93 +231,130 @@
 				</InView>
 			</div>
 
-			<!-- Right: Abstract node graph -->
-			<div class="hidden lg:flex items-center justify-center">
+			<!-- Right: Abstract node graph — large, colorful -->
+			<div class="hidden lg:flex items-center justify-center lg:-mr-8 xl:-mr-16">
 				<InView delay={200}>
-					<svg viewBox="0 0 480 400" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full max-w-[480px] hero-graph">
-						<!-- Connection lines (animated) -->
-						<path d="M120 80 L240 140" stroke="#e5e5e5" stroke-width="1.5" class="graph-line" style="--delay:0.3s"/>
-						<path d="M120 200 L240 140" stroke="#e5e5e5" stroke-width="1.5" class="graph-line" style="--delay:0.4s"/>
-						<path d="M120 320 L240 260" stroke="#e5e5e5" stroke-width="1.5" class="graph-line" style="--delay:0.5s"/>
-						<path d="M240 140 L360 80" stroke="#e5e5e5" stroke-width="1.5" class="graph-line" style="--delay:0.6s"/>
-						<path d="M240 140 L360 200" stroke="#e5e5e5" stroke-width="1.5" class="graph-line" style="--delay:0.65s"/>
-						<path d="M240 260 L360 200" stroke="#e5e5e5" stroke-width="1.5" class="graph-line" style="--delay:0.7s"/>
-						<path d="M240 260 L360 320" stroke="#e5e5e5" stroke-width="1.5" class="graph-line" style="--delay:0.75s"/>
+					<div class="relative w-[560px] h-[480px]">
+						<!-- Glow effects behind key nodes -->
+						<div class="absolute w-[140px] h-[140px] rounded-full bg-emerald-400/10 blur-3xl" style="top:120px;left:200px"></div>
+						<div class="absolute w-[120px] h-[120px] rounded-full bg-violet-400/10 blur-3xl" style="top:280px;left:210px"></div>
 
-						<!-- Animated signal dots traveling along paths -->
-						<circle r="3" fill="#0a0a0a" opacity="0.5">
-							<animateMotion dur="3s" repeatCount="indefinite" begin="0s" path="M120 80 L240 140 L360 80" />
-						</circle>
-						<circle r="3" fill="#0a0a0a" opacity="0.5">
-							<animateMotion dur="3.5s" repeatCount="indefinite" begin="0.5s" path="M120 200 L240 140 L360 200" />
-						</circle>
-						<circle r="3" fill="#0a0a0a" opacity="0.5">
-							<animateMotion dur="4s" repeatCount="indefinite" begin="1s" path="M120 320 L240 260 L360 320" />
-						</circle>
-						<circle r="2.5" fill="#10b981" opacity="0.6">
-							<animateMotion dur="3.2s" repeatCount="indefinite" begin="1.5s" path="M120 200 L240 140 L360 80" />
-						</circle>
-						<circle r="2.5" fill="#10b981" opacity="0.6">
-							<animateMotion dur="3.8s" repeatCount="indefinite" begin="2s" path="M120 320 L240 260 L360 200" />
-						</circle>
+						<svg viewBox="0 0 560 480" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
+							<defs>
+								<!-- Gradient for connection lines -->
+								<linearGradient id="lineGradL" x1="0%" y1="0%" x2="100%" y2="0%">
+									<stop offset="0%" stop-color="#a3a3a3" stop-opacity="0.3"/>
+									<stop offset="100%" stop-color="#10b981" stop-opacity="0.5"/>
+								</linearGradient>
+								<linearGradient id="lineGradR" x1="0%" y1="0%" x2="100%" y2="0%">
+									<stop offset="0%" stop-color="#10b981" stop-opacity="0.5"/>
+									<stop offset="100%" stop-color="#6366f1" stop-opacity="0.4"/>
+								</linearGradient>
+								<!-- Glow filter -->
+								<filter id="glow">
+									<feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+									<feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+								</filter>
+							</defs>
 
-						<!-- Left column: Source nodes -->
-						<g class="graph-node" style="--delay:0.1s">
-							<rect x="40" y="56" width="160" height="48" rx="8" fill="white" stroke="#e5e5e5" stroke-width="1"/>
-							<circle cx="62" cy="80" r="4" fill="#0a0a0a"/>
-							<text x="76" y="76" font-size="11" font-weight="600" fill="#0a0a0a" font-family="Inter, sans-serif">chat-api</text>
-							<text x="76" y="92" font-size="9" fill="#a3a3a3" font-family="Inter, sans-serif">POST /v1/chat</text>
-						</g>
-						<g class="graph-node" style="--delay:0.2s">
-							<rect x="40" y="176" width="160" height="48" rx="8" fill="white" stroke="#e5e5e5" stroke-width="1"/>
-							<circle cx="62" cy="200" r="4" fill="#0a0a0a"/>
-							<text x="76" y="196" font-size="11" font-weight="600" fill="#0a0a0a" font-family="Inter, sans-serif">review-agent</text>
-							<text x="76" y="212" font-size="9" fill="#a3a3a3" font-family="Inter, sans-serif">7 spans &middot; 4.1s</text>
-						</g>
-						<g class="graph-node" style="--delay:0.3s">
-							<rect x="40" y="296" width="160" height="48" rx="8" fill="white" stroke="#e5e5e5" stroke-width="1"/>
-							<circle cx="62" cy="320" r="4" fill="#0a0a0a"/>
-							<text x="76" y="316" font-size="11" font-weight="600" fill="#0a0a0a" font-family="Inter, sans-serif">data-pipeline</text>
-							<text x="76" y="332" font-size="9" fill="#a3a3a3" font-family="Inter, sans-serif">5 spans &middot; 3.2s</text>
-						</g>
+							<!-- Connection lines — thicker, colored -->
+							<path d="M170 95 Q250 130 268 170" stroke="url(#lineGradL)" stroke-width="2" fill="none"/>
+							<path d="M170 240 Q250 220 268 195" stroke="url(#lineGradL)" stroke-width="2" fill="none"/>
+							<path d="M170 385 Q250 370 268 340" stroke="url(#lineGradL)" stroke-width="2" fill="none"/>
+							<path d="M295 170 Q330 130 390 95" stroke="url(#lineGradR)" stroke-width="2" fill="none"/>
+							<path d="M295 195 Q340 230 390 240" stroke="url(#lineGradR)" stroke-width="2" fill="none"/>
+							<path d="M295 320 Q330 280 390 240" stroke="url(#lineGradR)" stroke-width="2" fill="none"/>
+							<path d="M295 340 Q340 370 390 385" stroke="url(#lineGradR)" stroke-width="2" fill="none"/>
 
-						<!-- Center column: Traceway node -->
-						<g class="graph-node" style="--delay:0.35s">
-							<rect x="200" y="112" width="80" height="56" rx="8" fill="#0a0a0a" stroke="#0a0a0a" stroke-width="1"/>
-							<text x="240" y="138" font-size="9" font-weight="700" fill="white" text-anchor="middle" font-family="Inter, sans-serif" letter-spacing="0.05em">TRACEWAY</text>
-							<text x="240" y="154" font-size="8" fill="white" opacity="0.5" text-anchor="middle" font-family="Inter, sans-serif">observe</text>
-						</g>
-						<g class="graph-node" style="--delay:0.4s">
-							<rect x="200" y="232" width="80" height="56" rx="8" fill="#0a0a0a" stroke="#0a0a0a" stroke-width="1"/>
-							<text x="240" y="258" font-size="9" font-weight="700" fill="white" text-anchor="middle" font-family="Inter, sans-serif" letter-spacing="0.05em">TRACEWAY</text>
-							<text x="240" y="274" font-size="8" fill="white" opacity="0.5" text-anchor="middle" font-family="Inter, sans-serif">observe</text>
-						</g>
+							<!-- Animated signal dots — colored and glowing -->
+							<circle r="4" fill="#10b981" filter="url(#glow)">
+								<animateMotion dur="2.5s" repeatCount="indefinite" begin="0s" path="M170 95 Q250 130 268 170 Q290 150 295 170 Q330 130 390 95" />
+							</circle>
+							<circle r="4" fill="#6366f1" filter="url(#glow)">
+								<animateMotion dur="3s" repeatCount="indefinite" begin="0.8s" path="M170 240 Q250 220 268 195 Q290 210 295 195 Q340 230 390 240" />
+							</circle>
+							<circle r="4" fill="#10b981" filter="url(#glow)">
+								<animateMotion dur="3.5s" repeatCount="indefinite" begin="1.2s" path="M170 385 Q250 370 268 340 Q290 350 295 340 Q340 370 390 385" />
+							</circle>
+							<circle r="3" fill="#f59e0b" filter="url(#glow)" opacity="0.8">
+								<animateMotion dur="2.8s" repeatCount="indefinite" begin="1.8s" path="M170 240 Q250 220 268 195 Q290 150 295 170 Q330 130 390 95" />
+							</circle>
+							<circle r="3" fill="#6366f1" filter="url(#glow)" opacity="0.8">
+								<animateMotion dur="3.2s" repeatCount="indefinite" begin="2.2s" path="M170 385 Q250 370 268 340 Q290 310 295 320 Q330 280 390 240" />
+							</circle>
 
-						<!-- Right column: Model nodes -->
-						<g class="graph-node" style="--delay:0.5s">
-							<rect x="320" y="56" width="140" height="48" rx="8" fill="white" stroke="#e5e5e5" stroke-width="1"/>
-							<circle cx="342" cy="80" r="4" fill="#10b981"/>
-							<text x="356" y="76" font-size="11" font-weight="600" fill="#0a0a0a" font-family="Inter, sans-serif">gpt-4o</text>
-							<text x="356" y="92" font-size="9" fill="#a3a3a3" font-family="Inter, sans-serif">340ms &middot; $0.04</text>
-						</g>
-						<g class="graph-node" style="--delay:0.55s">
-							<rect x="320" y="176" width="140" height="48" rx="8" fill="white" stroke="#e5e5e5" stroke-width="1"/>
-							<circle cx="342" cy="200" r="4" fill="#10b981"/>
-							<text x="356" y="196" font-size="11" font-weight="600" fill="#0a0a0a" font-family="Inter, sans-serif">claude-3.5</text>
-							<text x="356" y="212" font-size="9" fill="#a3a3a3" font-family="Inter, sans-serif">520ms &middot; $0.08</text>
-						</g>
-						<g class="graph-node" style="--delay:0.6s">
-							<rect x="320" y="296" width="140" height="48" rx="8" fill="white" stroke="#e5e5e5" stroke-width="1"/>
-							<circle cx="342" cy="320" r="4" fill="#10b981"/>
-							<text x="356" y="316" font-size="11" font-weight="600" fill="#0a0a0a" font-family="Inter, sans-serif">llama-3.1</text>
-							<text x="356" y="332" font-size="9" fill="#a3a3a3" font-family="Inter, sans-serif">180ms &middot; $0.01</text>
-						</g>
+							<!-- Left column: Source nodes — larger, with colored left border -->
+							<g>
+								<rect x="16" y="62" width="200" height="66" rx="10" fill="white" stroke="#e5e5e5" stroke-width="1"/>
+								<rect x="16" y="62" width="4" height="66" rx="2" fill="#0a0a0a"/>
+								<circle cx="40" cy="86" r="5" fill="#0a0a0a"/>
+								<text x="56" y="83" font-size="14" font-weight="700" fill="#0a0a0a" font-family="Inter, sans-serif">chat-api</text>
+								<text x="56" y="102" font-size="11" fill="#a3a3a3" font-family="Inter, sans-serif">POST /v1/chat/completions</text>
+								<text x="180" y="83" font-size="10" fill="#10b981" font-weight="600" font-family="Inter, sans-serif" text-anchor="end">2.3s</text>
+							</g>
+							<g>
+								<rect x="16" y="207" width="200" height="66" rx="10" fill="white" stroke="#e5e5e5" stroke-width="1"/>
+								<rect x="16" y="207" width="4" height="66" rx="2" fill="#6366f1"/>
+								<circle cx="40" cy="231" r="5" fill="#6366f1"/>
+								<text x="56" y="228" font-size="14" font-weight="700" fill="#0a0a0a" font-family="Inter, sans-serif">review-agent</text>
+								<text x="56" y="248" font-size="11" fill="#a3a3a3" font-family="Inter, sans-serif">7 spans &middot; 4.1s</text>
+								<text x="180" y="228" font-size="10" fill="#6366f1" font-weight="600" font-family="Inter, sans-serif" text-anchor="end">$0.09</text>
+							</g>
+							<g>
+								<rect x="16" y="352" width="200" height="66" rx="10" fill="white" stroke="#e5e5e5" stroke-width="1"/>
+								<rect x="16" y="352" width="4" height="66" rx="2" fill="#f59e0b"/>
+								<circle cx="40" cy="376" r="5" fill="#f59e0b"/>
+								<text x="56" y="373" font-size="14" font-weight="700" fill="#0a0a0a" font-family="Inter, sans-serif">data-pipeline</text>
+								<text x="56" y="393" font-size="11" fill="#a3a3a3" font-family="Inter, sans-serif">5 spans &middot; 3.2s</text>
+								<text x="180" y="373" font-size="10" fill="#f59e0b" font-weight="600" font-family="Inter, sans-serif" text-anchor="end">$0.06</text>
+							</g>
 
-						<!-- Column labels -->
-						<text x="120" y="38" font-size="10" fill="#a3a3a3" text-anchor="middle" font-family="Inter, sans-serif" font-weight="500" letter-spacing="0.05em">YOUR APP</text>
-						<text x="240" y="100" font-size="10" fill="#a3a3a3" text-anchor="middle" font-family="Inter, sans-serif" font-weight="500" letter-spacing="0.05em">PROXY</text>
-						<text x="390" y="38" font-size="10" fill="#a3a3a3" text-anchor="middle" font-family="Inter, sans-serif" font-weight="500" letter-spacing="0.05em">MODELS</text>
-					</svg>
+							<!-- Center column: Traceway hub — prominent -->
+							<g>
+								<rect x="234" y="150" width="96" height="72" rx="12" fill="#0a0a0a"/>
+								<rect x="234" y="150" width="96" height="72" rx="12" stroke="#10b981" stroke-width="1" stroke-opacity="0.3"/>
+								<text x="282" y="183" font-size="11" font-weight="800" fill="white" text-anchor="middle" font-family="Inter, sans-serif" letter-spacing="0.08em">TRACEWAY</text>
+								<text x="282" y="201" font-size="9" fill="#10b981" text-anchor="middle" font-family="Inter, sans-serif">observe</text>
+							</g>
+							<g>
+								<rect x="234" y="300" width="96" height="72" rx="12" fill="#0a0a0a"/>
+								<rect x="234" y="300" width="96" height="72" rx="12" stroke="#10b981" stroke-width="1" stroke-opacity="0.3"/>
+								<text x="282" y="333" font-size="11" font-weight="800" fill="white" text-anchor="middle" font-family="Inter, sans-serif" letter-spacing="0.08em">TRACEWAY</text>
+								<text x="282" y="351" font-size="9" fill="#10b981" text-anchor="middle" font-family="Inter, sans-serif">observe</text>
+							</g>
+
+							<!-- Right column: Model nodes — with colored accents -->
+							<g>
+								<rect x="356" y="62" width="188" height="66" rx="10" fill="white" stroke="#e5e5e5" stroke-width="1"/>
+								<circle cx="378" cy="86" r="5" fill="#10b981"/>
+								<text x="394" y="83" font-size="14" font-weight="700" fill="#0a0a0a" font-family="Inter, sans-serif">gpt-4o</text>
+								<text x="394" y="102" font-size="11" fill="#a3a3a3" font-family="Inter, sans-serif">340ms &middot; $0.043</text>
+								<rect x="490" y="76" width="40" height="18" rx="4" fill="#dcfce7"/>
+								<text x="510" y="89" font-size="9" font-weight="600" fill="#16a34a" text-anchor="middle" font-family="Inter, sans-serif">200</text>
+							</g>
+							<g>
+								<rect x="356" y="207" width="188" height="66" rx="10" fill="white" stroke="#e5e5e5" stroke-width="1"/>
+								<circle cx="378" cy="231" r="5" fill="#6366f1"/>
+								<text x="394" y="228" font-size="14" font-weight="700" fill="#0a0a0a" font-family="Inter, sans-serif">claude-3.5</text>
+								<text x="394" y="248" font-size="11" fill="#a3a3a3" font-family="Inter, sans-serif">520ms &middot; $0.082</text>
+								<rect x="490" y="221" width="40" height="18" rx="4" fill="#dcfce7"/>
+								<text x="510" y="234" font-size="9" font-weight="600" fill="#16a34a" text-anchor="middle" font-family="Inter, sans-serif">200</text>
+							</g>
+							<g>
+								<rect x="356" y="352" width="188" height="66" rx="10" fill="white" stroke="#e5e5e5" stroke-width="1"/>
+								<circle cx="378" cy="376" r="5" fill="#f59e0b"/>
+								<text x="394" y="373" font-size="14" font-weight="700" fill="#0a0a0a" font-family="Inter, sans-serif">llama-3.1-70b</text>
+								<text x="394" y="393" font-size="11" fill="#a3a3a3" font-family="Inter, sans-serif">180ms &middot; $0.012</text>
+								<rect x="490" y="366" width="40" height="18" rx="4" fill="#dcfce7"/>
+								<text x="510" y="379" font-size="9" font-weight="600" fill="#16a34a" text-anchor="middle" font-family="Inter, sans-serif">200</text>
+							</g>
+
+							<!-- Column labels — larger -->
+							<text x="116" y="44" font-size="11" fill="#a3a3a3" text-anchor="middle" font-family="Inter, sans-serif" font-weight="600" letter-spacing="0.08em">YOUR APP</text>
+							<text x="282" y="138" font-size="11" fill="#a3a3a3" text-anchor="middle" font-family="Inter, sans-serif" font-weight="600" letter-spacing="0.08em">PROXY</text>
+							<text x="450" y="44" font-size="11" fill="#a3a3a3" text-anchor="middle" font-family="Inter, sans-serif" font-weight="600" letter-spacing="0.08em">MODELS</text>
+						</svg>
+					</div>
 				</InView>
 			</div>
 		</div>
@@ -367,14 +404,12 @@
 					<!-- Sidebar -->
 					<div class="hidden md:flex flex-col w-[180px] border-r border-[#e5e5e5] bg-[#fafafa] p-3 pt-4 shrink-0">
 						<!-- Logo -->
-						<div class="flex items-center gap-2 px-2 mb-5">
-							<svg class="h-4 w-auto" viewBox="0 0 164 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+						<div class="flex items-center gap-1.5 px-2 mb-5">
+							<svg class="w-4 h-4 shrink-0" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
 								<path d="M27.375 27.375H18.0938V24.2814H24.2814V18.0938H27.375V27.375Z" fill="#0a0a0a"/>
 								<path fill-rule="evenodd" clip-rule="evenodd" d="M11.7656 0.375C18.0565 0.375 23.1562 5.47476 23.1562 11.7656C23.1562 18.0565 18.0565 23.1562 11.7656 23.1562C5.47476 23.1562 0.375 18.0565 0.375 11.7656C0.375 5.47476 5.47476 0.375 11.7656 0.375ZM11.8711 3.75C7.38594 3.75 3.75 7.38594 3.75 11.8711C3.75 16.3562 7.38594 19.9922 11.8711 19.9922C16.3562 19.9922 19.9922 16.3562 19.9922 11.8711C19.9922 7.38594 16.3562 3.75 11.8711 3.75Z" fill="#0a0a0a"/>
-								<path d="M37.967 20.007V9.735H35.375V7.271H37.967V2.375H40.815V7.271H44.623V9.735H40.815V19.559C40.815 21.319 41.679 21.639 43.151 21.639C43.823 21.639 44.303 21.575 44.975 21.447V23.911C44.239 24.071 43.407 24.167 42.447 24.167C39.599 24.167 37.967 23.207 37.967 20.007Z" fill="#0a0a0a"/>
-								<path d="M57.066 7.207V10.119C56.586 10.023 56.202 9.991 55.658 9.991C53.226 9.991 51.274 11.911 51.274 14.855V24.007H48.394V7.271H51.274V10.119C52.01 8.423 53.642 7.143 55.914 7.143C56.362 7.143 56.778 7.175 57.066 7.207Z" fill="#0a0a0a"/>
-								<path d="M64.086 24.295C61.046 24.295 58.582 22.503 58.582 19.495C58.582 16.167 61.174 14.791 64.918 14.023L68.982 13.191V12.487C68.982 10.567 67.926 9.479 65.686 9.479C63.574 9.479 62.326 10.471 61.814 12.327L59.094 11.623C59.894 8.903 62.358 6.951 65.782 6.951C69.526 6.951 71.83 8.775 71.83 12.359V20.519C71.83 21.607 72.502 21.959 73.622 21.703V24.007C71.062 24.327 69.59 23.719 69.238 22.119C68.214 23.431 66.358 24.295 64.086 24.295ZM68.982 18.311V15.431L65.718 16.135C63.158 16.647 61.43 17.351 61.43 19.367C61.43 20.999 62.614 21.959 64.438 21.959C66.902 21.959 68.982 20.455 68.982 18.311Z" fill="#0a0a0a"/>
 							</svg>
+							<span class="text-[13px] font-semibold text-text">traceway</span>
 						</div>
 						<!-- Nav items -->
 						{#each [
