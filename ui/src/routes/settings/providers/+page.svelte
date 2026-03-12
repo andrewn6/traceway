@@ -110,6 +110,63 @@
 		},
 	];
 
+	const PROVIDER_MODELS: Record<string, string[]> = {
+		openai: [
+			'gpt-4o',
+			'gpt-4o-mini',
+			'gpt-4.1',
+			'gpt-4.1-mini',
+			'gpt-4.1-nano',
+			'o3',
+			'o3-mini',
+			'o4-mini',
+		],
+		anthropic: [
+			'claude-opus-4-20250514',
+			'claude-sonnet-4-20250514',
+			'claude-haiku-4-20250414',
+		],
+		gemini: [
+			'gemini-2.5-pro',
+			'gemini-2.5-flash',
+			'gemini-2.0-flash',
+			'gemini-2.0-flash-lite',
+		],
+		groq: [
+			'llama-3.3-70b-versatile',
+			'llama-3.1-8b-instant',
+			'llama-guard-3-8b',
+			'gemma2-9b-it',
+			'mixtral-8x7b-32768',
+		],
+		mistral: [
+			'mistral-large-latest',
+			'mistral-medium-latest',
+			'mistral-small-latest',
+			'codestral-latest',
+			'open-mistral-nemo',
+		],
+		azure: [
+			'gpt-4o',
+			'gpt-4o-mini',
+			'gpt-4.1',
+			'gpt-4.1-mini',
+		],
+		ollama: [
+			'llama3.2',
+			'llama3.1',
+			'gemma2',
+			'mistral',
+			'codellama',
+			'phi3',
+		],
+		custom: [],
+	};
+
+	function getModelsForProvider(providerId: string): string[] {
+		return PROVIDER_MODELS[providerId] ?? [];
+	}
+
 	function getProviderDef(id: string): ProviderDef {
 		return PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[PROVIDERS.length - 1];
 	}
@@ -310,8 +367,28 @@
 							</div>
 							<div>
 								<label for="edit-model" class="block text-xs text-text-secondary mb-1">Default Model</label>
-								<input id="edit-model" type="text" bind:value={editDefaultModel} placeholder={prov.defaultModel}
-									class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent font-mono" />
+								{@const editModels = getModelsForProvider(conn.provider)}
+								{#if editModels.length > 0}
+									<div class="relative">
+										<select
+											id="edit-model"
+											bind:value={editDefaultModel}
+											class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-1.5 text-sm text-text focus:outline-none focus:border-accent font-mono appearance-none cursor-pointer"
+										>
+											{#each editModels as model}
+												<option value={model}>{model}</option>
+											{/each}
+										</select>
+										<div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted">
+											<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+												<path stroke-linecap="round" stroke-linejoin="round" d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+											</svg>
+										</div>
+									</div>
+								{:else}
+									<input id="edit-model" type="text" bind:value={editDefaultModel} placeholder={prov.defaultModel}
+										class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent font-mono" />
+								{/if}
 							</div>
 						</div>
 						<div>
@@ -456,8 +533,28 @@
 					<!-- Default model -->
 					<div>
 						<label for="modal-model" class="label-micro block mb-1.5">Default Model</label>
-						<input id="modal-model" type="text" bind:value={formDefaultModel} placeholder={selectedProvider.defaultModel || 'e.g. gpt-4o'}
-							class="control-input font-mono" />
+						{@const models = getModelsForProvider(selectedProvider.id)}
+						{#if models.length > 0}
+							<div class="relative">
+								<select
+									id="modal-model"
+									bind:value={formDefaultModel}
+									class="control-select appearance-none cursor-pointer font-mono"
+								>
+									{#each models as model}
+										<option value={model}>{model}</option>
+									{/each}
+								</select>
+								<div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted">
+									<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+									</svg>
+								</div>
+							</div>
+						{:else}
+							<input id="modal-model" type="text" bind:value={formDefaultModel} placeholder="e.g. gpt-4o"
+								class="control-input font-mono" />
+						{/if}
 					</div>
 
 					<!-- Base URL (only for custom/azure or if changed) -->
