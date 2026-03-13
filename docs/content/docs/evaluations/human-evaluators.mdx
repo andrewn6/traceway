@@ -1,0 +1,124 @@
+---
+title: Human Evaluators
+description: Use the review queue as a human evaluation pipeline.
+---
+
+Automated scoring works well for factual tasks with clear right answers. But many LLM outputs — summaries, explanations, creative writing, customer-facing responses — require human judgment. Traceway's review queue lets you route eval results to human reviewers for manual scoring and feedback.
+
+## When to use human evaluation
+
+- **Subjective quality** — The output needs to be helpful, polite, or well-written, and no automated metric captures that reliably.
+- **Complex correctness** — The answer is technically correct but misses important nuance, or is correct in a way the automated scorer can't recognize.
+- **Building trust** — You're deploying a new model or prompt and want humans to verify the outputs before committing.
+- **Scoring calibration** — You want to validate that your `LlmJudge` scores align with human judgments before relying on them at scale.
+
+## Setting up the pipeline
+
+The workflow connects eval runs to the review queue:
+
+### 1. Run an eval with `None` scoring
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/eval" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "gpt-4o-mini for human review",
+    "config": {
+      "connection_id": "01J...",
+      "model": "gpt-4o-mini",
+      "system_prompt": "You are a customer support agent. Be helpful and concise.",
+      "temperature": 0.0
+    },
+    "scoring": "None"
+  }'
+```
+
+The eval generates outputs for every datapoint but assigns no scores. The outputs are ready for human review.
+
+### 2. Enqueue results for review
+
+After the run completes, send the datapoints to the review queue:
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/queue" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"datapoint_ids": ["01J...", "01J...", "01J..."]}'
+```
+
+In the dashboard, select datapoints from the eval results view and click "Send to Review".
+
+### 3. Review items
+
+Reviewers open the Review tab on the dataset. Each queue item shows:
+
+- The original input (the question or conversation)
+- The model's actual output from the eval run
+- The expected output (if one exists)
+
+## The claim/review/approve workflow
+
+1. **Claim** — Click "Claim" on a pending item. This locks it so no other reviewer can work on it simultaneously. The API returns `409 Conflict` if someone else already claimed it.
+2. **Review** — Read the input and output. Assess whether the output is correct, complete, and appropriate.
+3. **Submit** — Provide your judgment. The `edited_data` field accepts any JSON, so you can include a score, pass/fail flag, notes, or corrected output:
+
+```bash
+curl -X POST "https://api.traceway.ai/api/queue/${ITEM_ID}/submit" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "edited_data": {
+      "score": 0.8,
+      "pass": true,
+      "notes": "Answer is correct but could be more concise.",
+      "corrected_output": null
+    }
+  }'
+```
+
+If the output is wrong, provide a `corrected_output` to update the expected output in the dataset for future evals.
+
+## Keyboard shortcuts
+
+The dashboard review interface supports keyboard navigation for fast reviewing:
+
+| Key | Action |
+|-----|--------|
+| `j` | Move to next item |
+| `k` | Move to previous item |
+| `a` | Approve / submit the current item |
+| `s` | Skip — release the claim, return item to pending |
+| `e` | Open the edit pane for the current item |
+
+These shortcuts let an experienced reviewer process 50+ items in a single sitting without touching the mouse.
+
+## Building consensus with multiple reviewers
+
+For high-stakes datasets, have multiple people review the same items:
+
+1. **Duplicate the queue entries.** Enqueue each datapoint multiple times (e.g., 3 times for 3 reviewers). Each reviewer claims and reviews their own copy.
+2. **Compare judgments.** Export the completed queue items and compare scores across reviewers. Items where reviewers disagree need discussion or a tiebreaker.
+3. **Measure inter-rater agreement.** Calculate agreement rates (e.g., Cohen's kappa) to ensure your reviewers are calibrated. If agreement is low, clarify the scoring rubric.
+
+## Exporting human judgments
+
+After review is complete, query the queue to extract all submitted judgments:
+
+```bash
+curl "https://api.traceway.ai/api/datasets/${DATASET_ID}/queue?status=completed" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+Each completed item includes the `original_data` and `edited_data` side by side. Use this to:
+
+- Calculate aggregate human scores for the eval run
+- Compare human scores against `LlmJudge` scores to calibrate automated scoring
+- Update expected outputs in the dataset based on reviewer corrections
+
+## Practical tips
+
+- **Write a scoring rubric.** Before reviewers start, define what 0.0, 0.5, and 1.0 mean for your task. Vague criteria lead to inconsistent scoring.
+- **Start small.** Have reviewers do 10 items, compare results, calibrate, then do the rest. Don't review 200 items before checking alignment.
+- **Track reviewer identity.** Use consistent `claimed_by` values (email or user ID) so you can spot systematic differences between reviewers.
+- **Don't let the queue stagnate.** Claimed items that sit for days block other reviewers. Set expectations for turnaround time.

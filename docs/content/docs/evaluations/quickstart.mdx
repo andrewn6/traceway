@@ -1,0 +1,164 @@
+---
+title: Quickstart
+description: Run your first evaluation in under 5 minutes.
+---
+
+This guide walks you through running your first eval — create a dataset, add test cases, configure a run, and view the results.
+
+## Prerequisites
+
+You need:
+- A Traceway account (or a local instance running via `traceway serve`)
+- An API key for the model you want to evaluate (e.g., OpenAI, Anthropic)
+
+## Step 1: Create a dataset
+
+A dataset holds the test cases your eval will run against.
+
+**Dashboard:** Go to the Datasets tab and click "New Dataset". Name it `quickstart-eval`.
+
+**API:**
+
+```bash
+curl -X POST https://api.traceway.ai/api/datasets \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"name": "quickstart-eval", "description": "First eval test cases"}'
+```
+
+Save the `id` from the response — you'll need it in every subsequent step.
+
+## Step 2: Add datapoints
+
+Add a few test cases. Each datapoint has an input and an expected output.
+
+```bash
+DATASET_ID="01J..."
+
+# Datapoint 1
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/datapoints" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "kind": {
+      "Generic": {
+        "input": { "question": "What is the capital of France?" },
+        "expected_output": { "answer": "Paris" }
+      }
+    }
+  }'
+
+# Datapoint 2
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/datapoints" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "kind": {
+      "Generic": {
+        "input": { "question": "What is 12 * 8?" },
+        "expected_output": { "answer": "96" }
+      }
+    }
+  }'
+```
+
+For a real eval you'd want at least 20 datapoints. For this quickstart, two is enough to see the workflow.
+
+## Step 3: Set up a provider connection
+
+Provider connections store the credentials Traceway uses to call your model.
+
+```bash
+curl -X POST https://api.traceway.ai/api/provider-connections \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "openai-quickstart",
+    "provider": "openai",
+    "api_key": "sk-proj-...",
+    "default_model": "gpt-4o-mini"
+  }'
+```
+
+Save the `id` from the response. You can also create this in the dashboard under Settings > Provider Connections.
+
+## Step 4: Start the eval run
+
+```bash
+CONNECTION_ID="01J..."
+
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/eval" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "quickstart baseline",
+    "config": {
+      "connection_id": "'${CONNECTION_ID}'",
+      "model": "gpt-4o-mini",
+      "system_prompt": "Answer the question in as few words as possible.",
+      "temperature": 0.0
+    },
+    "scoring": "Contains"
+  }'
+```
+
+The response includes the run `id` and `status: "pending"`. Traceway starts processing datapoints in the background.
+
+## Step 5: Check progress
+
+Poll the run or watch it live in the dashboard:
+
+```bash
+RUN_ID="01J..."
+
+curl "https://api.traceway.ai/api/eval/${RUN_ID}" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+The `progress` and `total` fields tell you how many datapoints have been processed. In the dashboard, a live progress bar updates via SSE.
+
+## Step 6: View results
+
+Once `status` is `completed`, the `result_items` array contains one entry per datapoint:
+
+```json
+{
+  "status": "completed",
+  "progress": 2,
+  "total": 2,
+  "result_items": [
+    {
+      "datapoint_id": "01J...",
+      "output": "Paris",
+      "expected": "Paris",
+      "score": 1.0,
+      "latency_ms": 290,
+      "cost": 0.00003
+    },
+    {
+      "datapoint_id": "01J...",
+      "output": "96",
+      "expected": "96",
+      "score": 1.0,
+      "latency_ms": 310,
+      "cost": 0.00003
+    }
+  ]
+}
+```
+
+In the dashboard, click on any result to see the full input, output, and expected output side by side.
+
+## Next steps
+
+Now that you've run your first eval, try:
+
+- Changing the scoring strategy to `LlmJudge` and re-running to see how LLM-based scoring works
+- Adding more datapoints and running with a different model to [compare results](/docs/evaluations/comparing-runs)
+- Setting up a [capture rule](/docs/datasets/capture-rules) to automatically build datasets from production traffic
+
+<Cards>
+  <Card title="Scoring Strategies" href="/docs/evaluations/scoring-strategies" />
+  <Card title="Configuration" href="/docs/evaluations/configuration" />
+  <Card title="Comparing Runs" href="/docs/evaluations/comparing-runs" />
+</Cards>

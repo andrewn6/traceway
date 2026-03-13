@@ -1,0 +1,173 @@
+---
+title: Configuration
+description: Configure evaluation runs — models, scoring, parameters, and provider connections.
+---
+
+Every eval run is defined by two things: a **model configuration** (which model to call and how) and a **scoring strategy** (how to judge the outputs). This page covers all the configuration options.
+
+## Model configuration
+
+The `config` object in an eval run request controls how Traceway calls the model for each datapoint.
+
+```json
+{
+  "config": {
+    "connection_id": "01J...",
+    "model": "gpt-4o-mini",
+    "system_prompt": "You are a helpful assistant. Answer concisely.",
+    "temperature": 0.0
+  }
+}
+```
+
+### connection_id (required)
+
+The ID of the [provider connection](#provider-connections) to use. This determines the API endpoint and credentials.
+
+### model (required)
+
+The model identifier passed to the provider's API. Examples:
+
+| Provider | Model examples |
+|----------|---------------|
+| OpenAI | `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `o1-mini` |
+| Anthropic | `claude-sonnet-4-20250514`, `claude-3-haiku-20240307` |
+| Custom/Ollama | `llama3.1`, `mistral`, `codellama` |
+
+The model must be available through the provider connection. If you specify a model the provider doesn't support, the eval will fail with an error on each datapoint.
+
+### system_prompt (optional)
+
+A system prompt prepended to every datapoint's input. This is useful when you want to test different system prompts against the same dataset.
+
+For `LlmConversation` datapoints that already include a system message, the eval config's `system_prompt` is prepended before the existing messages. If a datapoint already has a system message and you don't want to override it, leave `system_prompt` unset.
+
+For `Generic` datapoints, the system prompt becomes the first message, and the datapoint's `input` is sent as the user message.
+
+### temperature (optional)
+
+Controls the model's randomness. Range: `0.0` to `2.0`. Default: provider-specific (usually `1.0`).
+
+For eval runs, **set temperature to `0.0`** unless you have a specific reason not to. Non-zero temperatures introduce randomness, which means running the same eval twice may produce different scores. This makes comparisons unreliable.
+
+```json
+{
+  "config": {
+    "connection_id": "01J...",
+    "model": "gpt-4o-mini",
+    "temperature": 0.0
+  }
+}
+```
+
+## Scoring strategy
+
+The `scoring` field determines how Traceway scores each result. Set it at the top level of the eval run request.
+
+| Strategy | Description | Score range |
+|----------|-------------|-------------|
+| `ExactMatch` | Output must exactly equal expected output (case-sensitive) | 0.0 or 1.0 |
+| `Contains` | Output must contain expected output as substring (case-insensitive) | 0.0 or 1.0 |
+| `LlmJudge` | A second LLM call rates the output's quality | 0.0 to 1.0 |
+| `None` | No scoring — outputs are recorded but not judged | null |
+
+See [Scoring Strategies](/docs/evaluations/scoring-strategies) for detailed behavior, examples, and tradeoffs.
+
+### Choosing a strategy
+
+- Use `ExactMatch` for classification, yes/no, or structured outputs where exact precision matters.
+- Use `Contains` for factual Q&A where the model may include extra context around the answer.
+- Use `LlmJudge` for natural language tasks where multiple phrasings are valid.
+- Use `None` when you plan to [review results manually](/docs/evaluations/manual-evaluation) or send them to [human evaluators](/docs/evaluations/human-evaluators).
+
+## Provider connections
+
+Provider connections store the credentials and endpoint configuration for a model provider. You create them once and reference them by ID in eval runs.
+
+### Creating a connection
+
+**Dashboard:** Settings > Provider Connections > "New Connection".
+
+**API:**
+
+```bash
+curl -X POST https://api.traceway.ai/api/provider-connections \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "openai-prod",
+    "provider": "openai",
+    "api_key": "sk-proj-...",
+    "base_url": "https://api.openai.com/v1",
+    "default_model": "gpt-4o-mini"
+  }'
+```
+
+### Connection fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Human-readable label (e.g., "openai-prod", "anthropic-test") |
+| `provider` | Yes | `openai`, `anthropic`, or `custom` |
+| `api_key` | Yes | API key for the provider |
+| `base_url` | No | Override the default API endpoint |
+| `default_model` | No | Model to use when the eval config doesn't specify one |
+
+### Supported providers
+
+**OpenAI** — Works with the standard OpenAI API. Set `provider: "openai"` and provide your OpenAI API key.
+
+**Anthropic** — Uses the Anthropic messages API. Set `provider: "anthropic"` and provide your Anthropic API key.
+
+**Custom (OpenAI-compatible)** — For self-hosted models, Ollama, Azure OpenAI, or any endpoint that implements the OpenAI chat completions format. Set `provider: "custom"` and provide the `base_url`:
+
+```bash
+curl -X POST https://api.traceway.ai/api/provider-connections \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "ollama-local",
+    "provider": "custom",
+    "api_key": "not-needed",
+    "base_url": "http://localhost:11434/v1",
+    "default_model": "llama3.1"
+  }'
+```
+
+### Security
+
+Provider connections are stored encrypted. The API key is never returned in API responses after creation. You can list connections (which returns names and IDs but not keys) and delete them, but you cannot read back the key.
+
+## Timeout and retry behavior
+
+Traceway applies the following defaults when calling the model for each datapoint:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Request timeout | 60 seconds | Maximum time to wait for a model response |
+| Retries | 1 | Number of retries on transient errors (429, 500, 502, 503) |
+| Retry delay | 2 seconds | Wait time between retries |
+
+If a datapoint fails after all retries, it's marked as `failed` with the error message. The eval run continues with the next datapoint — a single failure doesn't stop the entire run.
+
+These defaults are not currently configurable per-run. If you need different timeout behavior, use a provider connection with a custom `base_url` that proxies requests with your own timeout settings.
+
+## Full example
+
+Putting it all together — a complete eval run request:
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/eval" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "gpt-4o-mini v3 prompt regression test",
+    "config": {
+      "connection_id": "01J...",
+      "model": "gpt-4o-mini",
+      "system_prompt": "You are a concise assistant. Answer factual questions in 1-2 sentences. If unsure, say so.",
+      "temperature": 0.0
+    },
+    "scoring": "Contains"
+  }'
+```

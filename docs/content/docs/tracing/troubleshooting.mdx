@@ -1,0 +1,153 @@
+---
+title: Troubleshooting
+description: Common issues with tracing and how to resolve them.
+---
+
+## Traces not appearing
+
+If you're sending traces but nothing shows up in the dashboard:
+
+1. **Check the URL.** The SDK defaults to `http://localhost:3000`. If you're running Traceway on a different port or host, set the `url` option or the `TRACEWAY_URL` environment variable.
+
+```ts
+const tw = new Traceway({
+  url: 'http://localhost:3000', // verify this matches your running instance
+});
+```
+
+2. **Check the API key.** In cloud mode, every request must include a valid API key. Set the `apiKey` option or the `TRACEWAY_API_KEY` environment variable. In local mode, authentication is disabled by default.
+
+3. **Check network connectivity.** If the SDK can't reach the Traceway server, traces are silently dropped. Test with a direct HTTP request:
+
+```bash
+curl http://localhost:3000/api/health
+```
+
+4. **Flush before exit.** The SDK batches trace data for performance. If your process exits immediately after creating traces, the batch may not have been sent yet. Call `await tw.flush()` before exiting, or use `tw.trace()` which flushes automatically when the callback completes.
+
+<Callout type="warn">
+Short-lived processes like serverless functions and CLI scripts are the most common cause of missing traces. Always flush before the process exits.
+</Callout>
+
+## Missing spans
+
+Traces appear but some spans are missing:
+
+- **Ensure spans are properly closed.** Every `startSpan()` call must be followed by either `completeSpan()` or `failSpan()`. If a span is never closed, it stays in `running` status indefinitely but may not appear in default dashboard views that filter to completed spans.
+
+- **Check for unhandled errors.** If an error is thrown inside a `ctx.span()` callback but isn't caught, the SDK marks the span as failed. However, if the error propagates and crashes the process before the failure is recorded, the span is lost. Wrap risky code in try/catch:
+
+```ts
+await ctx.span('risky-step', async (span) => {
+  try {
+    const result = await riskyOperation();
+    span.setOutput(result);
+    return result;
+  } catch (err) {
+    span.setOutput({ error: err.message });
+    throw err; // re-throw so the span is marked failed
+  }
+});
+```
+
+- **Check the trace ID.** If you're using the low-level API, make sure each span references a valid `traceId`. Spans with a non-existent `traceId` are rejected by the server.
+
+## Incorrect cost data
+
+If cost estimates look wrong:
+
+- **Verify model names.** Cost estimation relies on matching the `model` field to Traceway's pricing table. If you pass `gpt4o` instead of `gpt-4o`, there's no match and cost is left empty. Use the exact model identifier from the provider.
+
+- **Check for custom models.** Fine-tuned models (e.g., `ft:gpt-4o-mini:my-org:custom:abc123`) aren't in the default pricing table. You can provide cost manually:
+
+```ts
+span.setKind({
+  type: 'llm_call',
+  model: 'ft:gpt-4o-mini:my-org:custom:abc123',
+  provider: 'openai',
+  input_tokens: 150,
+  output_tokens: 42,
+  cost: 0.00087, // provide your own cost
+});
+```
+
+- **Pricing table lag.** New models may not be in the pricing table until the next Traceway release. Provide cost explicitly for recently released models.
+
+## High latency traces
+
+If spans show unexpectedly high durations:
+
+- **Span timing vs. network overhead.** Span duration measures wall-clock time from `startSpan()` to `completeSpan()`. This includes network round-trip time to the LLM provider, not just model inference time. High latency in a span usually reflects slow API responses, not a problem with Traceway.
+
+- **Queued requests.** If you're making many concurrent LLM calls, provider rate limits may cause requests to queue. Each span's duration includes time spent waiting.
+
+- **Check `started_at` and `ended_at`.** Use the span detail view to see exact timestamps. If `started_at` is much earlier than expected, the span may have been created before the actual work began.
+
+## Proxy not recording
+
+If the proxy is running but traces aren't being created:
+
+1. **Check the proxy port.** The proxy runs on port `3001` by default (one port above the API server). Verify your LLM client's `baseURL` points to the proxy port, not the API port.
+
+```ts
+const client = new OpenAI({
+  baseURL: 'http://localhost:3001/v1', // proxy port, not 3000
+  apiKey: process.env.OPENAI_API_KEY,
+});
+```
+
+2. **Check provider compatibility.** The proxy auto-detects OpenAI, Anthropic, and Ollama. For other providers, set the `X-Forward-URL` header. If detection fails, the proxy may forward to the wrong endpoint and get an error.
+
+3. **Check capture mode.** If capture mode is set to `Off`, spans are created with metadata (model, tokens, cost) but no input/output. The traces exist but may look empty in the dashboard.
+
+4. **Verify the API server is running.** The proxy records traces by calling the local API server. If the API server is down, the proxy can forward requests but can't record them.
+
+## Session IDs not grouping
+
+If traces with the same session ID aren't appearing together:
+
+- **Verify consistent format.** Session IDs are compared as exact strings. `session-123`, `Session-123`, and `session_123` are three different sessions. Pick one format and stick with it.
+
+- **Check for whitespace.** Leading or trailing spaces in session IDs cause mismatches. Trim session IDs before passing them:
+
+```ts
+const sessionId = rawSessionId.trim();
+await tw.trace('chat', callback, { sessionId });
+```
+
+- **Check the dashboard filter.** The sessions page may have active filters (date range, status) that exclude some traces. Clear all filters to see all sessions.
+
+## Rate limiting
+
+If you're seeing `429 Too Many Requests` responses:
+
+- **Cloud mode limits.** The hosted Traceway API enforces rate limits per organization. The default is 100 requests per second. If you're ingesting a large volume of traces, batch your requests.
+
+- **Batch ingestion.** Instead of creating spans one at a time, use the SDK's built-in batching. The `tw.trace()` high-level API batches automatically. If you're using the low-level API, group span creation into fewer requests.
+
+- **Local mode.** The local Traceway server has no rate limits. If you're hitting limits, verify you're not accidentally pointing at the cloud API.
+
+<Callout type="info">
+If you need higher rate limits on the cloud API, contact the Traceway team. Limits can be increased per organization.
+</Callout>
+
+## Local vs. cloud differences
+
+Traceway runs in two modes with different behavior:
+
+| Behavior | Local | Cloud |
+|----------|-------|-------|
+| **Storage** | SQLite | Postgres |
+| **Authentication** | Disabled | API key required |
+| **Rate limits** | None | Per-org limits |
+| **Data retention** | Unlimited | Per-plan (7/30/90 days) |
+| **Multi-org** | Single implicit org | Full org/project scoping |
+| **Vector search** | Not available | Turbopuffer integration |
+
+Common issues from mode differences:
+
+- **Auth errors in cloud.** If you're switching from local to cloud, you need to set an API key. Requests without a valid `apiKey` return `401 Unauthorized`.
+
+- **Data not persisting.** In local mode, SQLite stores data in a file on disk. If the file is deleted or the daemon restarts with a different data directory, previous traces are gone. Check your `--data-dir` flag.
+
+- **Search behaving differently.** Full-text and vector search are only available in cloud mode with the Turbopuffer integration. In local mode, filtering is limited to exact-match fields (model, status, tags).

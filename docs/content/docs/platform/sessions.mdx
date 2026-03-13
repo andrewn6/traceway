@@ -1,0 +1,94 @@
+---
+title: Sessions
+description: Track multi-turn conversations and group related traces by session.
+---
+
+Sessions let you group related traces into a single conversation thread. When your users interact with an LLM-powered feature across multiple turns, each turn creates a separate trace. Sessions tie those traces together so you can follow the full conversation.
+
+## How sessions work
+
+A session is created automatically when you send a `session_id` with a trace. Any trace that shares the same `session_id` belongs to the same session. Sessions are scoped to a project — two different projects can use the same `session_id` without conflict.
+
+Set the session ID from the SDK:
+
+```ts
+import { Traceway } from 'traceway';
+
+const tw = new Traceway({ apiKey: 'tw_sk_...' });
+
+const trace = tw.trace('chat-turn', {
+  sessionId: 'sess_abc123',
+});
+```
+
+Or pass it as a header when using the proxy:
+
+```bash
+curl -X POST "https://api.traceway.ai/api/proxy/openai/v1/chat/completions" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "X-Traceway-Session-Id: sess_abc123" \
+  -d '{"model": "gpt-4o", "messages": [...]}'
+```
+
+The `session_id` is a free-form string. Use whatever makes sense for your application — a UUID, a user-facing conversation ID, or a composite key like `user_123:conv_456`.
+
+## Session list
+
+The Sessions page (`/sessions`) shows all sessions in the current project, ordered by most recent activity. Each row displays:
+
+- **Session ID** — The identifier you assigned
+- **Traces** — Number of traces in the session
+- **Spans** — Total span count across all traces
+- **Tokens** — Aggregate input + output tokens
+- **Cost** — Total estimated cost for the session
+- **Duration** — Time from the first trace to the last
+- **Last active** — When the most recent trace was created
+
+Use the search bar to filter sessions by ID or by aggregate metrics:
+
+```
+session:sess_abc123
+cost:>0.50
+tokens:>10000
+```
+
+## Session detail
+
+Click a session row to open the session detail view. This page shows all traces in the session, ordered chronologically — the first turn at the top, the most recent at the bottom.
+
+Each trace row shows the same columns as the Traces page (name, span count, duration, cost, tokens, status). Click a trace to navigate to its detail view, then use the browser back button or breadcrumbs to return to the session.
+
+### Conversation flow
+
+The session detail view is designed for reading multi-turn conversations. When traces represent chat turns, you can follow the conversation in order — seeing what the user asked, what the LLM responded, and how each turn performed in terms of latency and cost.
+
+## Aggregate metrics
+
+The top of the session detail page shows aggregate metrics for the entire session:
+
+| Metric | Description |
+|--------|-------------|
+| **Total cost** | Sum of cost across all traces |
+| **Total tokens** | Sum of input + output tokens |
+| **Total duration** | Wall-clock time from first trace start to last trace end |
+| **Avg latency** | Average duration per trace |
+| **Trace count** | Number of traces in the session |
+| **Error rate** | Percentage of traces with at least one failed span |
+
+These metrics update in real time when new traces arrive (if the SSE connection is active).
+
+## API access
+
+Retrieve sessions and their traces via the API:
+
+```bash
+# List sessions
+curl "https://api.traceway.ai/api/sessions?limit=20" \
+  -H "Authorization: Bearer tw_sk_..."
+
+# Get a specific session with its traces
+curl "https://api.traceway.ai/api/sessions/sess_abc123" \
+  -H "Authorization: Bearer tw_sk_..."
+```
+
+The session detail response includes the full list of traces, each with summary fields (span count, cost, tokens, duration, status).

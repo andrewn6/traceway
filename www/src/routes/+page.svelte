@@ -858,7 +858,7 @@
 				<p class="text-text-secondary mt-4 max-w-md">Self-host for free forever, or let us handle the infrastructure.</p>
 			</div>
 		</InView>
-		<div class="grid md:grid-cols-3 gap-4 max-w-3xl">
+		<div class="grid md:grid-cols-3 gap-4 w-full">
 			{#each [
 				{ name: 'Free', price: '$0', period: '/mo', pop: false, desc: 'Local dev and getting started.', features: ['10K spans/month', '7-day retention', '1 team member', 'Community support'], cta: 'Get started' },
 				{ name: 'Pro', price: '$20', period: '/user/mo', pop: true, desc: 'Teams shipping AI to production.', features: ['1M spans/month', '30-day retention', '5 team members', 'Email support'], cta: 'Start free trial' },
@@ -892,7 +892,7 @@
 				</InView>
 			{/each}
 		</div>
-		<div class="grid md:grid-cols-2 gap-4 max-w-3xl mt-4">
+		<div class="grid md:grid-cols-2 gap-4 w-full mt-4">
 			{#each [
 				{ name: 'Enterprise', desc: 'Unlimited everything. SSO, SAML, dedicated support.', cta: 'Contact', href: 'mailto:support@traceway.ai' },
 				{ name: 'Self-hosted', desc: 'Free forever. Unlimited traces. No account needed.', cta: 'GitHub', href: 'https://github.com/blastgits/traceway' },
