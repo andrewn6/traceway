@@ -1,0 +1,95 @@
+---
+title: Manual Evaluation
+description: Review evaluation results by hand without automated scoring.
+---
+
+Not every eval needs automated scoring. Sometimes you want to generate outputs and review them yourself — reading each one, deciding if it's good enough, and annotating the ones that aren't. The `None` scoring strategy is designed for this workflow.
+
+## When manual evaluation makes sense
+
+- **Small datasets.** You have 10-30 test cases and it's faster to read the outputs than to set up a scoring rubric.
+- **New tasks.** You're exploring a new use case and don't yet know what "correct" looks like. You need to see outputs before you can define a scoring strategy.
+- **Qualitative assessment.** The outputs are creative, conversational, or stylistic, and no automated metric would capture what you care about.
+- **Spot checks.** You've been using automated scoring for a while and want to manually verify a sample of results to make sure the scores are trustworthy.
+
+## Running an eval with no scoring
+
+Start the eval with `scoring: "None"`:
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/eval" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "manual review - new system prompt",
+    "config": {
+      "connection_id": "01J...",
+      "model": "gpt-4o-mini",
+      "system_prompt": "You are a technical writer. Explain concepts clearly and accurately.",
+      "temperature": 0.0
+    },
+    "scoring": "None"
+  }'
+```
+
+The eval runs as normal — Traceway calls the model for each datapoint and records the output. But no scores are assigned. Every result has `score: null`.
+
+## Reviewing results in the dashboard
+
+Once the run completes, open it in the dashboard. The results view shows each datapoint with:
+
+- **Input** — What was sent to the model
+- **Expected output** — What the correct answer should be (if provided)
+- **Actual output** — What the model returned
+- **Score** — Blank (no automated scoring)
+
+Click on any result to expand it and see the full input/output side by side.
+
+### Marking pass/fail
+
+In the results view, each result has a thumbs-up and thumbs-down button. Click to mark a result as passing or failing. This is a lightweight annotation — it doesn't change the underlying score but gives you a quick way to tag results as you review them.
+
+### Adding notes
+
+Click on a result and use the notes field to record why a result is good or bad. Notes are stored with the result and visible to anyone who views the run later.
+
+```
+Good — accurate and concise, exactly the tone we want.
+```
+
+```
+Fail — technically correct but way too verbose. Should be 2 sentences, not 5 paragraphs.
+```
+
+Notes help you build a shared understanding of quality criteria, which is valuable when you later define automated scoring rules.
+
+## A workflow for small datasets
+
+For datasets under 50 datapoints, manual review is often the most efficient approach:
+
+1. **Run the eval** with `scoring: "None"`.
+2. **Read every output.** Start at the top and work through them sequentially.
+3. **Mark pass/fail.** Use the thumbs buttons for a binary judgment.
+4. **Add notes on failures.** Record what went wrong — this helps you improve the prompt.
+5. **Calculate your own pass rate.** Count passing results divided by total. This is your manual score.
+6. **Iterate.** Change the system prompt or model, run again, and compare.
+
+This is less rigorous than automated scoring but much faster to set up. You can always graduate to `ExactMatch`, `Contains`, or `LlmJudge` once you understand your data well enough to define automated criteria.
+
+## Comparing manual runs
+
+You can still use the [comparison view](/docs/evaluations/comparing-runs) with manually-reviewed runs. The comparison shows outputs side by side even when scores are null. This is useful for:
+
+- Seeing how two models respond differently to the same inputs
+- Spotting cases where a prompt change caused a regression, even without numeric scores
+- Sharing a visual diff with teammates who weren't part of the review
+
+## Transitioning to automated scoring
+
+After a round of manual review, you'll have a sense of what "correct" means for your task. Use that knowledge to pick an automated strategy:
+
+- If correct answers are short and exact, switch to `ExactMatch`.
+- If correct answers appear as substrings in longer responses, switch to `Contains`.
+- If correctness is nuanced and subjective, switch to `LlmJudge`.
+
+You can re-run the same dataset with the new strategy and compare against your manual run to validate that the automated scores align with your human judgments.

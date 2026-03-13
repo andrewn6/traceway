@@ -1,0 +1,148 @@
+---
+title: Debugger
+description: Deep-dive into individual traces with the trace detail view.
+---
+
+The debugger is the trace detail page (`/traces/:id`). It shows the complete span tree for a single trace, with tools for inspecting inputs, outputs, timing, cost, and errors at every level.
+
+## Span tree
+
+The left panel displays the span tree — a hierarchical view of all spans in the trace. The root span is at the top, and child spans are nested underneath.
+
+Each span row shows:
+
+- **Name** — The span name, e.g., `chat-completion`, `retrieve-documents`, `score-answer`
+- **Kind icon** — Visual indicator: chat bubble for `llm_call`, wrench for `tool_call`, magnifying glass for `retrieval`, code brackets for `custom`
+- **Status** — Color-coded dot: green (completed), red (failed), yellow (running)
+- **Duration bar** — Horizontal bar showing this span's duration relative to the trace total
+
+Click a span to select it. The right panel updates to show its details.
+
+### Expand and collapse
+
+Click the arrow next to a span with children to expand or collapse its subtree. By default, the first two levels are expanded and deeper levels are collapsed.
+
+Keyboard shortcuts:
+
+| Key | Action |
+|-----|--------|
+| `ArrowDown` | Select the next span |
+| `ArrowUp` | Select the previous span |
+| `ArrowRight` | Expand the selected span |
+| `ArrowLeft` | Collapse the selected span |
+
+## Waterfall view
+
+Toggle between tree view and waterfall view using the button group above the span list.
+
+The waterfall view shows spans as horizontal bars on a shared time axis. The x-axis represents wall-clock time from trace start to trace end. Each span is a bar positioned at its start time and sized by its duration.
+
+The waterfall makes it easy to spot:
+
+- **Sequential bottlenecks** — Spans that execute one after another when they could run in parallel
+- **Gaps** — Time between spans where your application code is running but no spans are active
+- **Long tails** — A single slow span that dominates the trace duration
+- **Parallelism** — Multiple spans running concurrently (e.g., parallel tool calls)
+
+## Span detail panel
+
+The right panel shows full details for the selected span.
+
+### Overview tab
+
+Summary fields:
+
+| Field | Description |
+|-------|-------------|
+| Name | Span name |
+| Kind | `llm_call`, `tool_call`, `retrieval`, `embedding`, `custom` |
+| Status | `running`, `completed`, or `failed` |
+| Start time | Absolute timestamp |
+| End time | Absolute timestamp (if completed) |
+| Duration | Wall-clock duration in milliseconds |
+| Parent | Link to the parent span (if not root) |
+
+### Input tab
+
+The full input data, displayed as syntax-highlighted JSON. For `llm_call` spans, this is typically the messages array:
+
+```json
+[
+  { "role": "system", "content": "You are a helpful assistant." },
+  { "role": "user", "content": "What is the capital of France?" }
+]
+```
+
+Long inputs are collapsed by default. Click **Expand** to see the full content. Use `Cmd+F` / `Ctrl+F` to search within the input.
+
+### Output tab
+
+The full output data. For `llm_call` spans, this is the model's response:
+
+```json
+{
+  "content": "The capital of France is Paris.",
+  "finish_reason": "stop"
+}
+```
+
+For failed spans, the output tab shows whatever partial output was available before the failure.
+
+### Metadata tab
+
+Additional information depending on the span kind:
+
+**LLM call spans:**
+
+| Field | Description |
+|-------|-------------|
+| Model | `gpt-4o`, `claude-3-5-sonnet`, etc. |
+| Provider | `openai`, `anthropic`, etc. |
+| Input tokens | Number of input tokens |
+| Output tokens | Number of output tokens |
+| Total tokens | Input + output |
+| Cost | Estimated cost in USD |
+| Temperature | Sampling temperature |
+| Max tokens | Token limit for the response |
+
+**Custom spans:**
+
+| Field | Description |
+|-------|-------------|
+| Kind string | The custom kind value you set |
+| Attributes | Key-value pairs of custom metadata |
+
+## Timing breakdown
+
+At the bottom of the overview tab, a timing breakdown shows how the trace's total duration is distributed:
+
+- **LLM time** — Time spent waiting for model responses
+- **Tool time** — Time spent in tool calls
+- **Application time** — Time between spans (your code)
+
+This helps answer "where did the time go?" for slow traces. If LLM time dominates, consider a faster model or shorter prompts. If application time dominates, look for inefficiencies in your orchestration code.
+
+## Cost per span
+
+Each `llm_call` span displays its estimated cost based on the model's published pricing and the token counts. The trace header shows the total cost as the sum of all span costs.
+
+Cost is estimated — it uses the token counts reported by the provider and the pricing data Traceway has for each model. If pricing changes or a custom model is used, the estimate may not match your actual bill exactly.
+
+## Error highlighting
+
+Failed spans are highlighted in red throughout the debugger:
+
+- The span tree row has a red status dot and red text
+- The waterfall bar is red
+- The detail panel shows a prominent error banner with the error message
+- Parent spans of failed children show a warning indicator
+
+Click a failed span to see the full error message and stack trace (if available) in the detail panel.
+
+## Navigating between traces
+
+From the trace detail page:
+
+- **Session link** — If the trace has a `session_id`, click it to see all traces in the session
+- **Breadcrumbs** — Navigate back to the traces list with filters preserved
+- **Arrow navigation** — Use the left/right arrows in the header to move to the previous/next trace in the list without going back to the list page

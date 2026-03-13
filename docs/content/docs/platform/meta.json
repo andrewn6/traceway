@@ -3,7 +3,15 @@
   "pages": [
     "index",
     "viewing-traces",
+    "debugger",
     "filtering",
-    "real-time-events"
+    "search",
+    "sessions",
+    "analytics",
+    "approvals",
+    "live-tracing",
+    "real-time-events",
+    "providers",
+    "settings"
   ]
 }

@@ -2,8 +2,15 @@
   "title": "Evaluations",
   "pages": [
     "index",
+    "quickstart",
     "running-evaluations",
+    "configuration",
     "scoring-strategies",
-    "comparing-runs"
+    "comparing-runs",
+    "datasets",
+    "manual-evaluation",
+    "human-evaluators",
+    "online-evaluators",
+    "cookbook"
   ]
 }

@@ -1,0 +1,157 @@
+---
+title: Online Evaluators
+description: Run evaluations continuously against production traffic.
+---
+
+Standard eval runs are batch operations — you run them manually against a static dataset. Online evaluators flip this around: they evaluate production traffic continuously, scoring spans as they arrive. This gives you a live quality signal instead of periodic snapshots.
+
+## How online evaluation works
+
+Online evaluation combines two existing Traceway features:
+
+1. **Capture rules** automatically save production spans to a dataset based on filters and sample rates.
+2. **Eval runs** process each datapoint in a dataset through a scoring pipeline.
+
+The online evaluation workflow connects these into a continuous loop:
+
+```
+Production span completes
+  → Capture rule matches → Datapoint created in dataset
+    → Eval run scores the new datapoint
+      → Score recorded and available in dashboard
+```
+
+## Setting up an online eval pipeline
+
+### Step 1: Create a monitoring dataset
+
+Create a dedicated dataset for online evaluation. Don't mix this with your golden dataset — online datasets grow continuously and contain unreviewed data.
+
+```bash
+curl -X POST https://api.traceway.ai/api/datasets \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"name": "online-monitoring-prod", "description": "Continuous quality monitoring"}'
+```
+
+### Step 2: Set up capture rules
+
+Define which production spans should be evaluated. Common patterns:
+
+**Sample all LLM calls:**
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/capture-rules" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "sample-all-llm",
+    "filters": { "kind": "llm_call" },
+    "sample_rate": 0.05
+  }'
+```
+
+**Capture all expensive calls:**
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/capture-rules" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "expensive-calls",
+    "filters": { "min_cost": 0.05 },
+    "sample_rate": 1.0
+  }'
+```
+
+**Capture all failures:**
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/capture-rules" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "all-failures",
+    "filters": { "status": "failed" },
+    "sample_rate": 1.0
+  }'
+```
+
+### Step 3: Run periodic evals
+
+Schedule eval runs against the monitoring dataset. Each run scores all datapoints that have accumulated since the last run.
+
+```bash
+# Run this on a cron schedule (e.g., every hour, every day)
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/eval" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "online-eval-'$(date +%Y%m%d-%H%M)'",
+    "config": {
+      "connection_id": "01J...",
+      "model": "gpt-4o-mini",
+      "temperature": 0.0
+    },
+    "scoring": "LlmJudge"
+  }'
+```
+
+Using `LlmJudge` for online evaluation is common because production outputs don't always have clear expected values. The judge evaluates whether the output is reasonable given the input.
+
+## Alerting on score degradation
+
+Track average scores across successive eval runs. A drop in average score signals a quality regression.
+
+Build alerting by polling the eval API and comparing against a threshold:
+
+```bash
+# Fetch the latest completed run
+RUN_ID=$(curl -s "https://api.traceway.ai/api/datasets/${DATASET_ID}/eval" \
+  -H "Authorization: Bearer tw_sk_..." \
+  | jq -r '.[0].id')
+
+# Get the average score
+AVG_SCORE=$(curl -s "https://api.traceway.ai/api/eval/${RUN_ID}" \
+  -H "Authorization: Bearer tw_sk_..." \
+  | jq '.result_items | map(select(.score != null) | .score) | add / length')
+
+# Alert if score drops below threshold
+if (( $(echo "$AVG_SCORE < 0.7" | bc -l) )); then
+  echo "ALERT: Average eval score dropped to ${AVG_SCORE}"
+  # Send to Slack, PagerDuty, email, etc.
+fi
+```
+
+Integrate this into your existing monitoring stack. The specific alerting mechanism depends on your infrastructure.
+
+## Sample rate configuration
+
+The sample rate on your capture rule controls the tradeoff between coverage and cost.
+
+| Sample rate | Traffic volume (calls/hour) | Captured/hour | Monthly eval cost (LlmJudge, gpt-4o-mini) |
+|-------------|---------------------------|---------------|---------------------------------------------|
+| 1.0 | 100 | 100 | ~$6 |
+| 0.1 | 1,000 | 100 | ~$6 |
+| 0.05 | 5,000 | 250 | ~$15 |
+| 0.01 | 10,000 | 100 | ~$6 |
+
+For most applications, a 1-5% sample rate provides enough data to detect quality trends without excessive cost. Increase the rate temporarily when investigating a specific issue.
+
+## Performance impact
+
+Capture rules and online evaluation are designed to have minimal impact on your production traffic:
+
+- **Capture rules run asynchronously.** They evaluate after the span is complete and the response has already been returned to the user. They do not add latency to API responses.
+- **Eval runs are background jobs.** Scoring happens in a separate process. Model calls for scoring do not compete with your production model calls.
+- **Storage scales linearly.** Each captured datapoint adds a few KB. At 100 datapoints/day, that's under 1 MB/month.
+
+The main cost consideration is the eval runs themselves — specifically the model API calls for scoring. With `LlmJudge`, each datapoint requires one additional model call. With `ExactMatch` or `Contains`, scoring is free (string comparison only).
+
+## Practical tips
+
+- **Use a separate provider connection for scoring.** Don't share rate limits between your production model calls and eval scoring calls. Create a dedicated connection, optionally with a lower-tier model for judging.
+- **Run evals during off-peak hours.** If your model provider has rate limits, schedule eval runs when production traffic is low.
+- **Archive old data.** Online monitoring datasets grow indefinitely. Periodically export old results, delete processed datapoints, and keep the dataset manageable.
+- **Start with failures.** The highest-value online evaluation is scoring failed spans. Capture all failures (`sample_rate: 1.0`) and evaluate them to understand failure patterns.
+- **Combine with the review queue.** Route low-scoring results from online evals to the [review queue](/docs/evaluations/human-evaluators) for human investigation. This closes the loop between automated monitoring and human judgment.

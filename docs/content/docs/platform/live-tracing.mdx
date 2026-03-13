@@ -1,0 +1,101 @@
+---
+title: Live Tracing
+description: Watch traces arrive in real time with Server-Sent Events.
+---
+
+Live tracing shows traces and spans as they arrive, without refreshing the page. The dashboard maintains a persistent SSE connection to the Traceway API and updates the UI whenever new data comes in.
+
+## How it works
+
+When you open the Traces or Spans page, the dashboard opens a Server-Sent Events (SSE) connection to `/api/events`. The server pushes events as spans are created, updated, and completed. The dashboard processes these events and inserts or updates rows in the table in real time.
+
+The connection is transparent — you don't need to enable or configure anything. If the connection drops, the dashboard reconnects automatically.
+
+## The live indicator
+
+A small indicator in the top-right corner of the Traces and Spans pages shows the connection status:
+
+| Indicator | Meaning |
+|-----------|---------|
+| Green dot, **Live** | Connected and receiving events |
+| Yellow dot, **Connecting** | Attempting to establish or re-establish the connection |
+| Red dot, **Disconnected** | Connection lost — data may be stale |
+
+Click the indicator to force a reconnection. When the connection is re-established, missed events are replayed (see [reconnection](#reconnection-handling) below).
+
+## Auto-refresh behavior
+
+When live tracing is active:
+
+- **New traces** appear at the top of the list with a brief highlight animation.
+- **Running spans** update their duration in real time as the server reports progress.
+- **Completed spans** update from "running" to "completed" or "failed" status, and their final cost, tokens, and duration fill in.
+- **Aggregate stats** (trace count, total cost, etc.) in the page header update as new data arrives.
+
+If you've scrolled down or applied filters, new traces still arrive but the scroll position is preserved. A "New traces available" banner appears at the top — click it to jump to the latest.
+
+## Event types
+
+The SSE stream carries the following events relevant to live tracing:
+
+| Event | Description |
+|-------|-------------|
+| `span_created` | A new span started. Contains the full span object with `running` status. |
+| `span_completed` | A span finished successfully. Contains the updated span with output, cost, tokens, and duration. |
+| `span_failed` | A span failed. Contains the updated span with error details. |
+| `trace_created` | A new trace was created. Contains the trace object with initial metadata. |
+| `trace_deleted` | A trace was deleted. The dashboard removes it from the list. |
+| `span_deleted` | A span was deleted. The dashboard removes it from any open trace detail view. |
+
+See [Real-time Events](/docs/platform/real-time-events) for the full event reference and how to subscribe programmatically.
+
+## Using SSE programmatically
+
+You can build your own live dashboards or monitoring tools using the same SSE stream:
+
+```ts
+const eventSource = new EventSource(
+  'https://api.traceway.ai/api/events?token=tw_sk_...'
+);
+
+eventSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+
+  if (data.type === 'span_created') {
+    console.log(`[STARTED] ${data.span.name}`);
+  }
+  if (data.type === 'span_completed') {
+    const { duration_ms, total_cost } = data.span.metadata;
+    console.log(`[DONE] ${data.span.name} — ${duration_ms}ms, $${total_cost}`);
+  }
+  if (data.type === 'span_failed') {
+    console.error(`[FAILED] ${data.span.name}: ${data.span.status.failed.error}`);
+  }
+};
+```
+
+### Filtering events
+
+The SSE endpoint accepts filter parameters to limit which events you receive:
+
+```
+GET /api/events?token=tw_sk_...&kind=llm_call&model=gpt-4o
+```
+
+This reduces bandwidth and processing when you only care about specific span types.
+
+## Reconnection handling
+
+SSE has built-in reconnection support. When the connection drops:
+
+1. The browser's `EventSource` waits briefly (typically 3 seconds), then reconnects.
+2. On reconnection, the browser sends the `Last-Event-ID` header with the sequence number of the last received event.
+3. Traceway replays all events since that sequence number before switching to live mode.
+
+This means you don't lose data during brief disconnections — network blips, server restarts, and deploys are handled transparently.
+
+If the disconnection was long enough that the event log has been pruned (older than 24 hours in local mode), the dashboard falls back to a full page refresh to resync.
+
+### Manual reconnection
+
+Click the connection indicator or call `eventSource.close()` and create a new `EventSource` to force a reconnection. Useful in development when restarting the Traceway server.
