@@ -1,0 +1,123 @@
+---
+title: Analytics
+description: Dashboards for cost, latency, token usage, and custom metrics.
+---
+
+The Analytics page (`/analytics`) provides aggregate views of your trace and span data. Use it to track costs, identify latency regressions, compare model usage, and monitor request volume over time.
+
+## Built-in charts
+
+The dashboard ships with five default charts. Each chart respects the active time range and any filters you've applied.
+
+### Cost over time
+
+A line chart showing total estimated cost per time bucket (hour or day, depending on the selected range). Hover over a point to see the exact cost for that period. The chart includes a cumulative total line so you can track spend against a budget.
+
+### Latency percentiles
+
+A multi-line chart showing P50, P95, and P99 latency for LLM call spans. This is the most useful chart for spotting performance regressions — if P99 spikes while P50 stays flat, you have a tail-latency problem.
+
+| Percentile | What it tells you |
+|------------|-------------------|
+| **P50** | Median latency — what most requests experience |
+| **P95** | 95th percentile — worst case for most users |
+| **P99** | 99th percentile — tail latency, often caused by cold starts or rate limits |
+
+### Token usage by model
+
+A stacked bar chart showing input and output tokens broken down by model. Each bar represents a time bucket, and the segments show which models consumed the most tokens. Useful for spotting unexpected model usage — for example, if a fallback model is getting more traffic than expected.
+
+### Request volume
+
+A bar chart showing the number of traces created per time bucket. Overlays show the breakdown by status (completed, failed, running). A sudden drop in volume can indicate an upstream issue; a spike in failures warrants investigation.
+
+### Error rate
+
+A line chart showing the percentage of spans with `failed` status over time. The chart plots both the raw error count and the error rate (failed / total). A rising error rate is the most actionable signal on the dashboard.
+
+## Time range selection
+
+The time range picker in the top-right corner controls all charts. Available options:
+
+| Option | Range |
+|--------|-------|
+| Last 1 hour | Rolling 1h window |
+| Last 24 hours | Rolling 24h window |
+| Last 7 days | Rolling 7d window |
+| Last 30 days | Rolling 30d window |
+| Custom | Date picker for arbitrary start and end |
+
+Charts automatically adjust their bucket size based on the range — hourly buckets for ranges under 7 days, daily buckets for longer ranges.
+
+## Per-model breakdowns
+
+Click any model name in the Token Usage chart to drill into a model-specific view. This shows:
+
+- **Latency distribution** — Histogram of response times for that model only
+- **Cost trend** — Cost over time for that model
+- **Token efficiency** — Average output tokens per request, useful for detecting prompt bloat
+- **Error rate** — Failure percentage for that model
+
+Use this to compare models side by side. If you're evaluating a switch from `gpt-4o` to `claude-3-5-sonnet`, the per-model view shows exactly how each performs in your production traffic.
+
+## Filters
+
+Analytics support the same filter syntax as the Traces and Spans pages. Type filters into the search bar to narrow the data:
+
+```
+model:gpt-4o provider:openai
+```
+
+```
+kind:llm_call status:completed cost:>0.01
+```
+
+Filters apply to all charts simultaneously. This is useful for isolating specific workloads — for example, filtering to `name:summarize` to see cost and latency for your summarization pipeline only.
+
+## Custom charts
+
+Create custom charts by clicking **New chart** in the top-right. Each custom chart requires:
+
+- **Metric** — What to measure: `cost`, `latency`, `tokens`, `count`, or `error_rate`
+- **Group by** — How to break down the data: `model`, `provider`, `kind`, `name`, or `none`
+- **Aggregation** — How to combine values in each bucket: `sum`, `avg`, `p50`, `p95`, `p99`, `min`, `max`
+- **Chart type** — `line`, `bar`, or `stacked_bar`
+
+Custom charts are saved per-project. Any team member can see and edit them.
+
+### Example: cost per user
+
+To track cost per user, tag your traces with a user ID in metadata, then create a custom chart:
+
+- Metric: `cost`
+- Group by: `metadata.user_id`
+- Aggregation: `sum`
+- Chart type: `stacked_bar`
+
+## Exporting data
+
+Export analytics data for use in external tools:
+
+- **CSV export** — Click the download icon on any chart to export the underlying data as CSV. Each row contains the time bucket, metric value, and group-by dimension.
+- **API access** — Query analytics programmatically:
+
+```bash
+# Summary stats for the current project
+curl "https://api.traceway.ai/api/analytics/summary" \
+  -H "Authorization: Bearer tw_sk_..."
+
+# Detailed time-series data
+curl -X POST "https://api.traceway.ai/api/analytics" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "metric": "cost",
+    "group_by": "model",
+    "aggregation": "sum",
+    "since": "2024-06-01T00:00:00Z",
+    "until": "2024-06-30T23:59:59Z",
+    "bucket": "day"
+  }'
+```
+
+The response contains an array of time-series points, each with a timestamp, value, and optional group label.

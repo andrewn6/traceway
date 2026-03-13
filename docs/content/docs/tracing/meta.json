@@ -4,6 +4,8 @@
     "index",
     "integrations",
     "structure",
-    "proxy"
+    "proxy",
+    "sessions",
+    "troubleshooting"
   ]
 }

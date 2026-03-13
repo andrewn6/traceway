@@ -1,0 +1,138 @@
+---
+title: Using Datasets
+description: How to prepare and manage datasets for evaluations.
+---
+
+Evaluations are only as good as the data you test against. This page covers how to structure datasets for evals, the differences between datapoint kinds, and best practices for building reliable test sets.
+
+## Dataset requirements for evals
+
+An eval run iterates through every datapoint in a dataset. For meaningful results you need:
+
+1. **At least one datapoint** — though you should aim for 20-50 minimum for statistically useful results.
+2. **Expected outputs** — Without an expected output, scoring strategies like `ExactMatch`, `Contains`, and `LlmJudge` have nothing to compare against. The `None` strategy works without expected outputs.
+3. **A provider connection** — Credentials for the model you're evaluating. See [Running Evaluations](/docs/evaluations/running-evaluations).
+
+## Datapoint kinds
+
+Traceway supports two datapoint kinds. Both work with evaluations, but they're processed differently.
+
+### Generic
+
+Generic datapoints have freeform `input` and `expected_output` fields (any JSON). During an eval, Traceway converts the `input` to a user message and sends it to the model.
+
+```json
+{
+  "kind": {
+    "Generic": {
+      "input": { "question": "Summarize photosynthesis in one sentence." },
+      "expected_output": { "answer": "Photosynthesis converts light energy into chemical energy stored in glucose." }
+    }
+  }
+}
+```
+
+Use Generic when your inputs are structured data, function arguments, or anything that doesn't follow a chat message format.
+
+### LlmConversation
+
+LlmConversation datapoints have a `messages` array that maps directly to the chat completions API format. Traceway sends these messages to the model as-is (prepending the system prompt from the eval config if one is set).
+
+```json
+{
+  "kind": {
+    "LlmConversation": {
+      "messages": [
+        { "role": "system", "content": "You are a geography expert." },
+        { "role": "user", "content": "What is the capital of Japan?" }
+      ],
+      "expected": "Tokyo"
+    }
+  }
+}
+```
+
+Use LlmConversation when you want precise control over multi-turn conversations, or when your test cases include system prompts that vary per datapoint.
+
+## Preparing a golden dataset
+
+A golden dataset is a curated, human-verified set of test cases that serves as your ground truth. Here's how to build one:
+
+1. **Start from production.** Set up [capture rules](/docs/datasets/capture-rules) to automatically save interesting spans (failures, expensive calls, specific models) into a staging dataset.
+2. **Send to review.** Enqueue captured datapoints into the [review queue](/docs/queue). Reviewers verify inputs, correct expected outputs, and remove noise.
+3. **Move to golden set.** Export reviewed datapoints to a dedicated golden dataset. Keep this dataset separate from your staging/capture datasets.
+4. **Aim for coverage.** Include easy cases (to establish a baseline), hard cases (to detect regressions), and edge cases (to stress-test the model). 50-200 datapoints is a practical range for most use cases.
+
+## Importing data from files
+
+If you already have test cases outside Traceway, import them from JSON or JSONL files.
+
+### JSONL
+
+One JSON object per line. Include `input` and `expected_output` for Generic datapoints:
+
+```jsonl
+{"input": {"question": "What is 2+2?"}, "expected_output": {"answer": "4"}}
+{"input": {"question": "Capital of Germany?"}, "expected_output": {"answer": "Berlin"}}
+{"input": {"question": "Largest planet?"}, "expected_output": {"answer": "Jupiter"}}
+```
+
+For LlmConversation datapoints, use the `messages` format:
+
+```jsonl
+{"messages": [{"role": "user", "content": "What is 2+2?"}], "expected": "4"}
+{"messages": [{"role": "user", "content": "Capital of Germany?"}], "expected": "Berlin"}
+```
+
+### JSON
+
+An array of objects in the same format:
+
+```json
+[
+  {"input": {"question": "What is 2+2?"}, "expected_output": {"answer": "4"}},
+  {"input": {"question": "Capital of Germany?"}, "expected_output": {"answer": "Berlin"}}
+]
+```
+
+### Upload
+
+```bash
+curl -X POST "https://api.traceway.ai/api/datasets/${DATASET_ID}/import" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -F "file=@testcases.jsonl"
+```
+
+All imported datapoints are tagged with `source: "file_upload"`.
+
+## Exporting results
+
+After running an eval, you can export the results via the API:
+
+```bash
+curl "https://api.traceway.ai/api/eval/${RUN_ID}" \
+  -H "Authorization: Bearer tw_sk_..." \
+  -o results.json
+```
+
+The `result_items` array contains every datapoint's input, expected output, actual output, score, latency, and cost. Use this to feed results into your own analysis pipelines, spreadsheets, or CI systems.
+
+## Dataset versioning best practices
+
+Traceway doesn't have built-in dataset versioning, but you can manage it effectively:
+
+- **Naming convention.** Include a version or date in the dataset name: `qa-golden-v3`, `qa-golden-2025-01`. This makes it clear which dataset was used for which eval run.
+- **Don't mutate golden datasets.** Once a dataset is being used for eval runs, avoid adding or removing datapoints. Create a new version instead. This ensures historical eval runs remain comparable.
+- **Document changes.** Use the dataset description field to note what changed between versions: "v3: added 15 edge cases for multi-language queries".
+- **Keep old versions.** Don't delete previous versions until you're sure you won't need to re-run old comparisons. Eval runs reference their dataset by ID, so deleting a dataset orphans those runs.
+
+## How many datapoints do you need?
+
+| Use case | Suggested count |
+|----------|----------------|
+| Quick sanity check | 10-20 |
+| Regression testing | 50-100 |
+| Model comparison | 100-200 |
+| Comprehensive benchmark | 200+ |
+
+More datapoints give more statistical confidence but cost more to run. For gpt-4o-mini, 100 datapoints costs roughly $0.05-0.10 depending on input length.

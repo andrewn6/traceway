@@ -1,0 +1,141 @@
+---
+title: Session Replay
+description: Group traces by session ID to replay multi-turn conversations and track user journeys.
+---
+
+## What are sessions?
+
+A session groups multiple traces that belong to the same user interaction. When a user has a multi-turn conversation with your LLM application, each turn typically creates a separate trace. By tagging those traces with the same `sessionId`, Traceway links them together so you can replay the entire conversation in order.
+
+Sessions are not a separate data model — they're a view over traces that share a `sessionId`. Any trace can optionally belong to a session, and a session is created implicitly the first time a trace with that `sessionId` is recorded.
+
+## Setting session IDs in the SDK
+
+Pass a `sessionId` when creating a trace:
+
+```ts
+import { Traceway } from 'traceway';
+
+const tw = new Traceway();
+
+// Each turn in the conversation uses the same sessionId
+const sessionId = 'session_abc123';
+
+const reply1 = await tw.trace('chat-turn', async (ctx) => {
+  const response = await ctx.llmCall('gpt-4o', {
+    model: 'gpt-4o',
+    provider: 'openai',
+    input: [{ role: 'user', content: 'What is Kubernetes?' }],
+  }, async (span) => {
+    const result = await callLLM(messages);
+    span.setOutput(result);
+    return result;
+  });
+  return response;
+}, { sessionId });
+
+// Later, the user asks a follow-up
+const reply2 = await tw.trace('chat-turn', async (ctx) => {
+  const response = await ctx.llmCall('gpt-4o', {
+    model: 'gpt-4o',
+    provider: 'openai',
+    input: [
+      { role: 'user', content: 'What is Kubernetes?' },
+      { role: 'assistant', content: reply1 },
+      { role: 'user', content: 'How does it compare to Docker Swarm?' },
+    ],
+  }, async (span) => {
+    const result = await callLLM(messages);
+    span.setOutput(result);
+    return result;
+  });
+  return response;
+}, { sessionId });
+```
+
+With the low-level API:
+
+```ts
+const trace = await tw.createTrace('chat-turn', {
+  sessionId: 'session_abc123',
+});
+```
+
+<Callout type="info">
+Use a stable, unique identifier for session IDs. UUIDs, database session tokens, or `user_id:timestamp` composites all work well. The only requirement is consistency — every trace in the same conversation must use the exact same string.
+</Callout>
+
+## Viewing sessions in the dashboard
+
+The **Sessions** page in the Traceway dashboard groups traces by their `sessionId`. Each row shows a session with its aggregate metrics and the number of traces (turns) it contains.
+
+Click a session to see all of its traces in chronological order. The session detail view shows:
+
+- The full sequence of traces, ordered by `started_at`
+- Each trace's spans, expandable inline
+- The input and output of every span, so you can read the conversation turn by turn
+
+This makes it straightforward to replay the exact back-and-forth a user had with your application.
+
+## Aggregate metrics
+
+Traceway computes the following metrics at the session level by rolling up data from all traces in the session:
+
+| Metric | Description |
+|--------|-------------|
+| **Total tokens** | Sum of `input_tokens + output_tokens` across all spans in all traces |
+| **Total cost** | Sum of estimated cost across all spans |
+| **Span count** | Total number of spans across all traces |
+| **Trace count** | Number of turns (traces) in the session |
+| **Duration** | Time from the first trace's `started_at` to the last trace's `ended_at` |
+| **Status** | Failed if any trace in the session contains a failed span |
+
+These metrics help you understand the total resource consumption of a user journey, not just individual requests.
+
+## Multi-turn conversation replay
+
+The session replay view arranges traces chronologically, letting you read through a conversation the same way a user experienced it. For each turn you see:
+
+1. **The user's input** — the messages sent to the LLM
+2. **The model's response** — the completion output
+3. **Intermediate steps** — tool calls, retrieval spans, or any custom spans within that turn
+4. **Timing and cost** — how long each turn took and what it cost
+
+This is particularly useful for agent-style applications where each turn may involve multiple LLM calls, tool invocations, and branching logic. The session view flattens this into a readable timeline.
+
+## Use cases
+
+### Debugging conversation flows
+
+When a user reports that the assistant gave a wrong answer, you can look up their session and trace through the entire conversation to find where things went wrong. Was the context window missing relevant history? Did a tool call return bad data? Did the system prompt change between turns?
+
+### Tracking user journeys
+
+Session metrics show you how users actually interact with your application. You can identify patterns like:
+
+- Average number of turns per session
+- Sessions where cost spikes unexpectedly
+- Drop-off points where users stop engaging
+
+### Identifying failure patterns
+
+Filter sessions by status to find conversations that contain failed spans. Common patterns include:
+
+- Rate limit errors mid-conversation
+- Context window overflow on later turns
+- Tool calls that fail after the model generates malformed arguments
+
+<Callout type="warn">
+Sessions with many turns can accumulate large context windows. Monitor `input_tokens` across turns to catch conversations approaching model context limits before they cause failures.
+</Callout>
+
+## Filtering sessions
+
+You can filter the sessions list by:
+
+- **Date range** — find sessions from a specific time period
+- **Status** — show only sessions with failures
+- **Cost threshold** — find expensive sessions
+- **Tags** — filter by any tags applied to the traces in the session
+
+Combine these filters to answer questions like "which sessions in the last week cost more than $1?" or "which failed sessions involved the gpt-4o model?"

@@ -1,0 +1,151 @@
+---
+title: Search & Query
+description: The Traceway query language for finding traces and spans.
+---
+
+Traceway includes a query DSL for filtering traces and spans. The same syntax works in the dashboard search bar and in API query parameters. Filters combine with AND logic — results must match every filter.
+
+## Query syntax
+
+A query is a sequence of filters separated by spaces. Each filter uses `key:value` syntax, with optional comparison operators for numeric fields.
+
+```
+model:gpt-4o status:completed cost:>0.05
+```
+
+### Operators
+
+| Operator | Syntax | Example | Description |
+|----------|--------|---------|-------------|
+| Equals | `key:value` | `model:gpt-4o` | Exact string match |
+| Quoted equals | `key:"value"` | `name:"my agent"` | Exact match with spaces |
+| Greater than | `key:>value` | `cost:>0.10` | Numeric comparison |
+| Less than | `key:<value` | `duration:<500` | Numeric comparison |
+| Greater or equal | `key:>=value` | `tokens:>=1000` | Numeric comparison |
+| Less or equal | `key:<=value` | `cost:<=0.01` | Numeric comparison |
+| Negation | `-key:value` | `-model:gpt-4o` | Exclude matching results |
+
+Bare text (without a `key:` prefix) performs full-text search across span names, inputs, and outputs:
+
+```
+summarize document
+```
+
+This finds spans where the name, input, or output contains both "summarize" and "document".
+
+## Filter parameters
+
+### String filters
+
+| Key | Matches on | Example |
+|-----|-----------|---------|
+| `model` | Model name | `model:claude-3-5-sonnet` |
+| `provider` | Provider name | `provider:anthropic` |
+| `kind` | Span kind | `kind:llm_call` |
+| `status` | Span status | `status:failed` |
+| `name` | Span name (substring) | `name:generate` |
+| `trace` | Trace ID (exact) | `trace:01234567-89ab-cdef-0123-456789abcdef` |
+| `session` | Session ID (exact) | `session:sess_abc123` |
+
+The `kind` field accepts: `llm_call`, `custom`, `fs_read`, `fs_write`, `tool_call`, `retrieval`, `embedding`.
+
+The `status` field accepts: `running`, `completed`, `failed`.
+
+### Numeric filters
+
+| Key | Unit | Example |
+|-----|------|---------|
+| `cost` | USD | `cost:>0.01` |
+| `tokens` | Count (input + output) | `tokens:>5000` |
+| `input_tokens` | Count | `input_tokens:>2000` |
+| `output_tokens` | Count | `output_tokens:>1000` |
+| `duration` | Milliseconds | `duration:>3000` |
+
+### Date filters
+
+| Key | Format | Example |
+|-----|--------|---------|
+| `since` | ISO 8601 or relative | `since:2024-06-15T00:00:00Z` |
+| `until` | ISO 8601 or relative | `until:24h` |
+
+Relative time values: `5m` (5 minutes), `1h` (1 hour), `24h` (24 hours), `7d` (7 days), `30d` (30 days).
+
+### Content filters
+
+| Key | Searches in | Example |
+|-----|-------------|---------|
+| `input` | Span input data | `input:"system prompt"` |
+| `output` | Span output data | `output:"I don't know"` |
+
+Content filters use substring matching. Wrap multi-word values in double quotes.
+
+## Autocomplete
+
+The dashboard search bar provides autocomplete suggestions as you type. Start typing a key name and the search bar shows available keys:
+
+```
+mo  →  model:
+pr  →  provider:
+st  →  status:
+ki  →  kind:
+co  →  cost:
+```
+
+After typing a key and colon, autocomplete shows known values from your data:
+
+```
+model:  →  gpt-4o, claude-3-5-sonnet, gpt-4o-mini, ...
+status: →  completed, failed, running
+kind:   →  llm_call, custom, tool_call, ...
+```
+
+Press `Tab` to accept a suggestion, or keep typing to narrow the list.
+
+## Example queries
+
+Find all Claude calls that cost more than 10 cents:
+
+```
+model:claude-3-5-sonnet cost:>0.10
+```
+
+Find failed spans in the last hour:
+
+```
+status:failed since:1h
+```
+
+Find slow tool calls (over 10 seconds):
+
+```
+kind:tool_call duration:>10000
+```
+
+Find spans where the output mentions a specific error:
+
+```
+output:"rate limit exceeded" provider:openai
+```
+
+Exclude a specific model from results:
+
+```
+kind:llm_call -model:gpt-4o-mini
+```
+
+Find high-token conversations in a session:
+
+```
+session:sess_abc123 tokens:>5000
+```
+
+## Saving searches
+
+Click the bookmark icon next to the search bar to save the current query. Saved searches appear in the dropdown when you focus the search bar.
+
+Each saved search stores:
+- The full query string
+- A display name (editable)
+- The page it was saved from (Traces or Spans)
+
+Saved searches are shared across the project — any team member can see and use them. To delete a saved search, hover over it in the dropdown and click the remove icon.

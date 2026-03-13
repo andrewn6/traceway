@@ -1,0 +1,194 @@
+---
+title: CLI
+description: Manage datasets from the command line using the REST API and curl.
+---
+
+You can manage datasets and datapoints entirely from the command line using `curl` and the REST API. This is useful for scripting, CI pipelines, and environments where the dashboard isn't available.
+
+## Setup
+
+Export your API base URL and key so the examples below work as-is:
+
+```bash
+export TRACEWAY_URL="https://api.traceway.ai"
+export TRACEWAY_API_KEY="tw_sk_..."
+```
+
+Every request needs an `Authorization` header with a Bearer token. The examples below reference `$TRACEWAY_API_KEY` for this.
+
+## Creating a dataset
+
+```bash
+curl -X POST "$TRACEWAY_URL/api/datasets" \
+  -H "Authorization: Bearer $TRACEWAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "cli-test-set", "description": "Created from the command line"}'
+```
+
+The response includes the new dataset's `id`:
+
+```json
+{
+  "id": "01J...",
+  "name": "cli-test-set",
+  "description": "Created from the command line",
+  "datapoint_count": 0,
+  "created_at": "2024-08-01T10:00:00Z",
+  "updated_at": "2024-08-01T10:00:00Z"
+}
+```
+
+Save the ID for subsequent commands:
+
+```bash
+DATASET_ID=$(curl -s -X POST "$TRACEWAY_URL/api/datasets" \
+  -H "Authorization: Bearer $TRACEWAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "cli-test-set"}' | jq -r '.id')
+```
+
+## Listing datasets
+
+```bash
+curl "$TRACEWAY_URL/api/datasets" \
+  -H "Authorization: Bearer $TRACEWAY_API_KEY"
+```
+
+Returns all datasets with their datapoint counts. Pipe through `jq` to extract names and IDs:
+
+```bash
+curl -s "$TRACEWAY_URL/api/datasets" \
+  -H "Authorization: Bearer $TRACEWAY_API_KEY" \
+  | jq '.datasets[] | {id, name, datapoint_count}'
+```
+
+## Adding datapoints
+
+### Generic datapoint
+
+```bash
+curl -X POST "$TRACEWAY_URL/api/datasets/$DATASET_ID/datapoints" \
+  -H "Authorization: Bearer $TRACEWAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "kind": {
+      "Generic": {
+        "input": { "question": "What is the capital of France?" },
+        "expected_output": { "answer": "Paris" },
+        "metadata": { "source": "geography", "difficulty": "easy" }
+      }
+    }
+  }'
+```
+
+### LlmConversation datapoint
+
+```bash
+curl -X POST "$TRACEWAY_URL/api/datasets/$DATASET_ID/datapoints" \
+  -H "Authorization: Bearer $TRACEWAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "kind": {
+      "LlmConversation": {
+        "messages": [
+          { "role": "system", "content": "You are a geography expert." },
+          { "role": "user", "content": "What is the capital of France?" }
+        ],
+        "expected": "Paris"
+      }
+    }
+  }'
+```
+
+## Bulk import
+
+Upload a JSON or JSONL file to add many datapoints at once:
+
+```bash
+curl -X POST "$TRACEWAY_URL/api/datasets/$DATASET_ID/import" \
+  -H "Authorization: Bearer $TRACEWAY_API_KEY" \
+  -F "file=@testcases.jsonl"
+```
+
+The file should contain one JSON object per line (JSONL) or an array of objects (JSON):
+
+```jsonl
+{"input": {"query": "Explain recursion"}, "expected_output": {"answer": "A function that calls itself"}}
+{"input": {"query": "What is a mutex?"}, "expected_output": {"answer": "A mutual exclusion lock"}}
+```
+
+The response tells you how many datapoints were created:
+
+```json
+{
+  "imported": 2,
+  "dataset_id": "01J..."
+}
+```
+
+## Exporting data
+
+Download all datapoints from a dataset:
+
+```bash
+curl "$TRACEWAY_URL/api/datasets/$DATASET_ID/datapoints" \
+  -H "Authorization: Bearer $TRACEWAY_API_KEY" \
+  | jq '.datapoints' > export.json
+```
+
+To get JSONL output (one object per line), use `jq` to unwrap the array:
+
+```bash
+curl -s "$TRACEWAY_URL/api/datasets/$DATASET_ID/datapoints" \
+  -H "Authorization: Bearer $TRACEWAY_API_KEY" \
+  | jq -c '.datapoints[]' > export.jsonl
+```
+
+## Deleting datapoints
+
+Delete a single datapoint by ID:
+
+```bash
+curl -X DELETE "$TRACEWAY_URL/api/datasets/$DATASET_ID/datapoints/$DATAPOINT_ID" \
+  -H "Authorization: Bearer $TRACEWAY_API_KEY"
+```
+
+## Scripting examples
+
+### Export all datasets to separate files
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+datasets=$(curl -s "$TRACEWAY_URL/api/datasets" \
+  -H "Authorization: Bearer $TRACEWAY_API_KEY" \
+  | jq -c '.datasets[]')
+
+while IFS= read -r ds; do
+  id=$(echo "$ds" | jq -r '.id')
+  name=$(echo "$ds" | jq -r '.name')
+  echo "Exporting $name ($id)..."
+  curl -s "$TRACEWAY_URL/api/datasets/$id/datapoints" \
+    -H "Authorization: Bearer $TRACEWAY_API_KEY" \
+    | jq -c '.datapoints[]' > "${name}.jsonl"
+done <<< "$datasets"
+```
+
+### Pipe data between tools
+
+Import a transformed CSV into a dataset by converting it to JSONL first:
+
+```bash
+cat raw-data.csv \
+  | python3 -c "
+import csv, json, sys
+reader = csv.DictReader(sys.stdin)
+for row in reader:
+    print(json.dumps({'input': {'text': row['prompt']}, 'expected_output': {'text': row['response']}}))" \
+  > transformed.jsonl
+
+curl -X POST "$TRACEWAY_URL/api/datasets/$DATASET_ID/import" \
+  -H "Authorization: Bearer $TRACEWAY_API_KEY" \
+  -F "file=@transformed.jsonl"
+```

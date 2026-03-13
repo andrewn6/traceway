@@ -3,6 +3,7 @@
   "pages": [
     "index",
     "adding-data",
-    "capture-rules"
+    "capture-rules",
+    "cli"
   ]
 }

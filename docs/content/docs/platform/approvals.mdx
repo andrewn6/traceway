@@ -1,0 +1,86 @@
+---
+title: Approvals
+description: Review and approve LLM outputs with a keyboard-driven workflow.
+---
+
+The Approvals page provides a focused interface for reviewing LLM outputs. When spans are captured into a dataset's review queue (via capture rules or manual export), they appear as queue items that need human review. The approvals workflow lets you claim items, review them, and approve or reject them — fast.
+
+## The review queue
+
+Navigate to a dataset's review queue from **Datasets > [dataset] > Review**, or access pending approvals across all datasets from the **Review** page in the sidebar.
+
+Each queue item shows:
+
+- **Input** — The original prompt or input data
+- **Output** — The LLM's response
+- **Model** — Which model produced the output
+- **Cost / Tokens** — Cost and token usage for the span
+- **Status** — Pending, claimed, approved, or rejected
+- **Claimed by** — The team member currently reviewing (if claimed)
+
+## Claim, review, approve
+
+The workflow has three steps:
+
+1. **Claim** — Take ownership of a queue item so other reviewers know you're working on it. Click the **Claim** button or press `c`. A claimed item is locked to you until you release it or submit a decision.
+
+2. **Review** — Read the input and output. The detail view shows the full span data, including metadata, timing, and the parent trace for context. Click **View trace** to open the trace detail in a new tab.
+
+3. **Decide** — Approve or reject the item:
+   - **Approve** (`a`) — The output is correct. The datapoint is marked as approved and can be used for fine-tuning or as a golden example.
+   - **Reject** (`r`) — The output is wrong or low-quality. You can optionally add a rejection reason.
+
+After deciding, the next pending item loads automatically.
+
+## Keyboard shortcuts
+
+The approvals interface is built for speed. All actions are accessible from the keyboard:
+
+| Key | Action |
+|-----|--------|
+| `j` | Move to the next item in the list |
+| `k` | Move to the previous item in the list |
+| `c` | Claim the current item |
+| `a` | Approve the current item |
+| `r` | Reject the current item |
+| `u` | Unclaim — release the item back to pending |
+| `Enter` | Open the detail view for the selected item |
+| `Escape` | Close the detail view and return to the list |
+
+You can review a queue of 50 items in under a minute once you're comfortable with the shortcuts.
+
+## Filtering
+
+Filter the queue by status to focus on what needs attention:
+
+| Filter | Shows |
+|--------|-------|
+| **Pending** | Items waiting for review (default view) |
+| **Claimed** | Items currently claimed by any team member |
+| **Approved** | Items that were approved |
+| **Rejected** | Items that were rejected |
+| **All** | Everything |
+
+The count badge next to each filter shows how many items are in that state.
+
+## Bulk operations
+
+Select multiple items using `Shift+click` or the checkbox column, then apply a bulk action:
+
+- **Bulk approve** — Approve all selected items at once
+- **Bulk reject** — Reject all selected items
+- **Bulk claim** — Claim all selected items
+
+Bulk operations are useful when you've filtered to a specific model or prompt pattern and want to approve an entire batch.
+
+## Integration with datasets
+
+Approved items become confirmed datapoints in the dataset. Rejected items are marked but not deleted — you can change the decision later.
+
+Use the approved datapoints for:
+
+- **Eval runs** — Test new models or prompts against human-verified golden outputs
+- **Fine-tuning** — Export approved input/output pairs for model training
+- **Regression testing** — Compare new model versions against the approved baseline
+
+Queue items are created by [capture rules](/docs/datasets/capture-rules) that automatically match spans based on filters, or by manually exporting spans from the trace detail view.

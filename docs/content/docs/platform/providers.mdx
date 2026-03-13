@@ -1,0 +1,105 @@
+---
+title: Provider Connections
+description: Connect LLM providers for proxy mode and evaluations.
+---
+
+Provider connections store the API keys Traceway uses to make LLM calls on your behalf. These keys are used for two features: the [proxy](/docs/tracing/proxy) (which routes requests through Traceway for automatic tracing) and eval runs (which call models to score datapoints).
+
+## Supported providers
+
+| Provider | Config key | Base URL |
+|----------|-----------|----------|
+| OpenAI | `openai` | `https://api.openai.com/v1` |
+| Anthropic | `anthropic` | `https://api.anthropic.com/v1` |
+| Azure OpenAI | `azure_openai` | Your Azure endpoint |
+| Ollama | `ollama` | `http://localhost:11434` (default) |
+| OpenAI-compatible | `custom` | Any URL that implements the OpenAI API |
+
+The "OpenAI-compatible" option works with any provider that exposes an OpenAI-format API — Together AI, Fireworks, Groq, vLLM, LiteLLM, and similar services.
+
+## Adding a provider
+
+Navigate to **Settings > Providers** and click **Add provider**.
+
+1. **Select the provider type** from the dropdown.
+2. **Enter the API key.** For Azure OpenAI, also provide the resource name and deployment name. For custom providers, provide the base URL.
+3. **Name the connection** (optional). Useful when you have multiple keys for the same provider — for example, separate OpenAI keys for production and development.
+4. Click **Save**.
+
+The key is encrypted before it is stored. Traceway never displays the full key after saving — only the last four characters are shown for identification.
+
+### Azure OpenAI
+
+Azure OpenAI requires additional configuration:
+
+| Field | Example | Description |
+|-------|---------|-------------|
+| Resource name | `my-openai-resource` | Your Azure OpenAI resource name |
+| Deployment name | `gpt-4o-deploy` | The model deployment to use |
+| API version | `2024-06-01` | Azure OpenAI API version |
+| API key | `abc123...` | Your Azure OpenAI key |
+
+The base URL is constructed as `https://{resource}.openai.azure.com/openai/deployments/{deployment}`.
+
+### Ollama (local models)
+
+For Ollama, no API key is required. Just provide the base URL (defaults to `http://localhost:11434`). Make sure Ollama is running and accessible from the Traceway server.
+
+```bash
+# Verify Ollama is reachable
+curl http://localhost:11434/api/tags
+```
+
+## How keys are used
+
+### Proxy routing
+
+When a request comes in through the proxy endpoint, Traceway looks up the provider connection for the target provider and forwards the request using the stored key:
+
+```
+Your app → POST /api/proxy/openai/v1/chat/completions
+         → Traceway adds your OpenAI key
+         → Forwards to api.openai.com
+         → Traces the request automatically
+         → Returns the response
+```
+
+If no provider connection exists for the target, the proxy returns a `422` error.
+
+### Eval runs
+
+When you run an evaluation, Traceway calls the configured model to generate scores or completions for each datapoint. The eval run configuration specifies which model to use, and Traceway uses the corresponding provider connection.
+
+If the provider connection is missing or the key is invalid, the eval run fails with a clear error message.
+
+## Key security
+
+- Keys are encrypted at rest using AES-256-GCM.
+- Keys are never logged or included in API responses.
+- Only the last four characters are displayed in the UI.
+- Keys are scoped to the project — they are not shared across projects within an organization.
+- Deleting a provider connection immediately revokes access. In-flight proxy requests using the old key will fail.
+
+## Testing connections
+
+After adding a provider, click **Test connection** to verify the key works. Traceway sends a minimal request (a single-token completion) to the provider and reports success or failure.
+
+Common failure reasons:
+
+| Error | Cause |
+|-------|-------|
+| `401 Unauthorized` | Invalid API key |
+| `403 Forbidden` | Key doesn't have access to the requested model |
+| `404 Not Found` | Wrong base URL or deployment name (Azure) |
+| `Connection refused` | Provider URL is unreachable (common with Ollama if it's not running) |
+| `429 Rate Limited` | Key is rate-limited — the key works, but you've exceeded your quota |
+
+## Managing connections
+
+From **Settings > Providers**, you can:
+
+- **Edit** a connection to update the key or configuration
+- **Delete** a connection to remove it permanently
+- **Test** a connection to verify it still works
+
+Rotating a key is a delete-and-recreate operation. Update the key on the provider side first, then update it in Traceway.
