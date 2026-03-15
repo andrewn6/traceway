@@ -331,12 +331,17 @@ async function postMultipart<T>(path: string, form: FormData): Promise<T> {
  * Used for auth endpoints where we need to handle errors without throwing.
  */
 async function postRaw(path: string, body?: unknown): Promise<Response> {
-	return fetch(`${API_BASE}${path}`, {
-		method: 'POST',
-		credentials: 'include',
-		headers: body ? { 'Content-Type': 'application/json' } : {},
-		body: body ? JSON.stringify(body) : undefined
-	});
+	try {
+		return await fetch(`${API_BASE}${path}`, {
+			method: 'POST',
+			credentials: 'include',
+			headers: body ? { 'Content-Type': 'application/json' } : {},
+			body: body ? JSON.stringify(body) : undefined
+		});
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		throw new Error(`Network error calling ${API_BASE}${path}: ${msg}`);
+	}
 }
 
 // ─── Trace / Span Endpoints ─────────────────────────────────────────

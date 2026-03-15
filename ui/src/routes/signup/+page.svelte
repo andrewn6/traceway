@@ -29,8 +29,11 @@
 			} else {
 				error = result.error ?? 'Signup failed';
 			}
-		} catch {
-			error = 'Unable to reach the API. Please try again.';
+		} catch (err) {
+			console.error('Signup request failed', err);
+			error = err instanceof Error
+				? err.message
+				: 'Unable to reach the API. Please try again.';
 		} finally {
 			loading = false;
 		}

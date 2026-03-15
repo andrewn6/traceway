@@ -21,8 +21,11 @@
 			} else {
 				error = result.error ?? 'Invalid email or password';
 			}
-		} catch {
-			error = 'Unable to reach the API. Please try again.';
+		} catch (err) {
+			console.error('Login request failed', err);
+			error = err instanceof Error
+				? err.message
+				: 'Unable to reach the API. Please try again.';
 		} finally {
 			loading = false;
 		}

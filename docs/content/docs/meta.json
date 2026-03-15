@@ -1,23 +1,18 @@
 {
   "title": "Docs",
   "pages": [
-    "---Overview---",
+    "---Get started---",
     "index",
     "quickstart",
     "hosting",
-    "---Tracing---",
-    "tracing/...",
-    "---Evaluations---",
-    "evaluations/...",
-    "---Datasets---",
-    "datasets/...",
-    "---Review Queue---",
-    "queue/...",
-    "---Platform---",
-    "platform/...",
-    "---SDK---",
-    "sdk/...",
-    "---API Reference---",
-    "api/..."
+    "---Features---",
+    "tracing",
+    "platform",
+    "evaluations",
+    "datasets",
+    "queue",
+    "---Resources---",
+    "sdk",
+    "api"
   ]
 }
