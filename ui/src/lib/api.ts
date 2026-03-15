@@ -1,7 +1,9 @@
-// Browser clients talk directly to Encore public APIs.
-// In production, set VITE_API_URL to your Encore API origin (e.g., https://api.traceway.ai).
-// Falls back to relative /api for local proxy-based development.
-export const API_BASE = (import.meta.env.VITE_API_URL as string) || '/api';
+// Browser clients prefer same-origin `/api` on platform.traceway.ai (Vercel rewrite)
+// to avoid cross-origin CORS/network issues from browser extensions.
+// Other environments can still override with VITE_API_URL.
+const envApiBase = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+const isPlatformHost = typeof window !== 'undefined' && window.location.hostname === 'platform.traceway.ai';
+export const API_BASE = isPlatformHost ? '/api' : (envApiBase || '/api');
 
 // ─── Generated Types ─────────────────────────────────────────────────
 // Re-export types from the auto-generated OpenAPI types
