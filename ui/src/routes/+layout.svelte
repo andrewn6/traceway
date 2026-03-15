@@ -181,35 +181,40 @@
 				authChecked = true;
 			});
 
-		getStats().then((s) => (stats = s)).catch(() => {});
-		getAllQueueItems('pending').then((r) => (pendingReviewCount = r.items.length)).catch(() => {});
+		let unsub: (() => void) | null = null;
+		let interval: ReturnType<typeof setInterval> | null = null;
 
-		const unsub = subscribeEvents((event) => {
-			connected = true;
-			if (event.type === 'span_created') {
-				stats.span_count++;
-			} else if (event.type === 'span_deleted') {
-				stats.span_count = Math.max(0, stats.span_count - 1);
-			} else if (event.type === 'trace_created') {
-				stats.trace_count++;
-			} else if (event.type === 'trace_deleted') {
-				stats.trace_count = Math.max(0, stats.trace_count - 1);
-			} else if (event.type === 'queue_item_updated') {
-				// Refresh pending count when queue changes
-				getAllQueueItems('pending').then((r) => (pendingReviewCount = r.items.length)).catch(() => {});
-			} else if (event.type === 'cleared') {
-				stats = { trace_count: 0, span_count: 0 };
-				pendingReviewCount = 0;
-			}
-		});
-
-		const interval = setInterval(() => {
+		if (!isAuthPage) {
 			getStats().then((s) => (stats = s)).catch(() => {});
-		}, 5000);
+			getAllQueueItems('pending').then((r) => (pendingReviewCount = r.items.length)).catch(() => {});
+
+			unsub = subscribeEvents((event) => {
+				connected = true;
+				if (event.type === 'span_created') {
+					stats.span_count++;
+				} else if (event.type === 'span_deleted') {
+					stats.span_count = Math.max(0, stats.span_count - 1);
+				} else if (event.type === 'trace_created') {
+					stats.trace_count++;
+				} else if (event.type === 'trace_deleted') {
+					stats.trace_count = Math.max(0, stats.trace_count - 1);
+				} else if (event.type === 'queue_item_updated') {
+					// Refresh pending count when queue changes
+					getAllQueueItems('pending').then((r) => (pendingReviewCount = r.items.length)).catch(() => {});
+				} else if (event.type === 'cleared') {
+					stats = { trace_count: 0, span_count: 0 };
+					pendingReviewCount = 0;
+				}
+			});
+
+			interval = setInterval(() => {
+				getStats().then((s) => (stats = s)).catch(() => {});
+			}, 5000);
+		}
 
 		return () => {
-			unsub();
-			clearInterval(interval);
+			if (unsub) unsub();
+			if (interval) clearInterval(interval);
 			document.removeEventListener('keydown', handleGlobalKeydown);
 			media.removeEventListener('change', onSystemThemeChange);
 		};

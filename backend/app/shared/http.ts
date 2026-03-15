@@ -38,6 +38,25 @@ export function setCors(_req: IncomingMessage, _res: ServerResponse): void {
   // reject ("multiple Access-Control-Allow-Origin values").
 }
 
+function setErrorCors(req: IncomingMessage, res: ServerResponse): void {
+  const originHeader = req.headers.origin;
+  const reqOrigin = typeof originHeader === "string" ? originHeader : Array.isArray(originHeader) ? originHeader[0] : undefined;
+  const origin = allowOrigin(reqOrigin);
+
+  if (origin && !res.hasHeader("access-control-allow-origin")) {
+    res.setHeader("access-control-allow-origin", origin);
+  }
+  if (!res.hasHeader("access-control-allow-credentials")) {
+    res.setHeader("access-control-allow-credentials", "true");
+  }
+  if (!res.hasHeader("access-control-expose-headers")) {
+    res.setHeader("access-control-expose-headers", "x-request-id,x-correlation-id,x-encore-trace-id");
+  }
+  if (!res.hasHeader("vary")) {
+    res.setHeader("vary", "origin, access-control-request-method, access-control-request-headers");
+  }
+}
+
 export function handlePreflight(req: IncomingMessage, res: ServerResponse): boolean {
   setCors(req, res);
   if (req.method === "OPTIONS") {
@@ -74,6 +93,7 @@ export async function requireSession(req: IncomingMessage, res: ServerResponse):
   const token = parseCookie(req.headers.cookie, "session");
   const session = await meFromSessionToken(token);
   if (!session) {
+    setErrorCors(req, res);
     json(res, 401, { error: "Unauthorized" });
     return null;
   }
@@ -95,6 +115,7 @@ export async function requireScope(req: IncomingMessage, res: ServerResponse): P
   if (bootstrapApiKey && bearer && bearer === bootstrapApiKey) {
     const scope = await defaultScopeForLocal();
     if (!scope) {
+      setErrorCors(req, res);
       json(res, 401, { error: "No project scope available for TRACEWAY_API_KEY" });
       return null;
     }
@@ -116,6 +137,7 @@ export async function requireScope(req: IncomingMessage, res: ServerResponse): P
     const projectId = typeof projectHeader === "string" ? projectHeader : Array.isArray(projectHeader) ? projectHeader[0] : undefined;
 
     if (!orgId || !projectId) {
+      setErrorCors(req, res);
       json(res, 401, { error: "Daemon auth missing x-traceway-org-id/x-traceway-project-id headers" });
       return null;
     }
