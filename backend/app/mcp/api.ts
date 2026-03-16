@@ -113,6 +113,18 @@ function isLocalHost(hostHeader: string | undefined): boolean {
   return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
 }
 
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  return typeof value === "string" ? value : Array.isArray(value) ? value[0] : undefined;
+}
+
+function requestHost(req: IncomingMessage): string | undefined {
+  const forwardedHost = firstHeaderValue(req.headers["x-forwarded-host"]);
+  if (forwardedHost) {
+    return forwardedHost.split(",")[0]?.trim();
+  }
+  return firstHeaderValue(req.headers.host);
+}
+
 async function resolveMcpScope(req: IncomingMessage, res: ServerResponse): Promise<Scope | null> {
   const hasAuth = Boolean(req.headers.authorization || req.headers.cookie || req.headers["x-traceway-control-token"]);
   if (hasAuth) {
@@ -121,7 +133,7 @@ async function resolveMcpScope(req: IncomingMessage, res: ServerResponse): Promi
     return { org_id: scoped.org_id, project_id: scoped.project_id };
   }
 
-  const hostHeader = typeof req.headers.host === "string" ? req.headers.host : Array.isArray(req.headers.host) ? req.headers.host[0] : undefined;
+  const hostHeader = requestHost(req);
   if (!isLocalHost(hostHeader)) {
     json(res, 401, { error: "Unauthorized" });
     return null;
