@@ -49,3 +49,15 @@ From repo root:
 encore gen client --lang openapi --output "../../openapi.json"
 npx openapi-typescript "openapi.json" -o "ui/src/lib/api-types.ts"
 ```
+
+## MCP endpoint
+
+Traceway exposes a JSON-RPC MCP endpoint at `/v1/mcp`.
+
+- Local (no auth, localhost only): `http://localhost:4000/v1/mcp`
+- Cloud (API key): `https://api.traceway.ai/v1/mcp` with `Authorization: Bearer <API_KEY>`
+
+Supported MCP methods:
+
+- `tools/list`
+- `tools/call` for: `search_traces`, `list_recent_traces`, `get_trace`, `get_span`
