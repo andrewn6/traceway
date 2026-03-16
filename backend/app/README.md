@@ -57,7 +57,20 @@ Traceway exposes a JSON-RPC MCP endpoint at `/v1/mcp`.
 - Local (no auth, localhost only): `http://localhost:4000/v1/mcp`
 - Cloud (API key): `https://api.traceway.ai/v1/mcp` with `Authorization: Bearer <API_KEY>`
 
+Example Claude Code setup:
+
+```bash
+# Local Encore backend
+claude mcp add --transport http traceway http://localhost:4000/v1/mcp
+
+# Cloud
+claude mcp add --transport http traceway https://api.traceway.ai/v1/mcp \
+  --header "Authorization: Bearer <API_KEY>"
+```
+
 Supported MCP methods:
 
+- `initialize`
+- `ping`
 - `tools/list`
-- `tools/call` for: `search_traces`, `list_recent_traces`, `get_trace`, `get_span`
+- `tools/call` for: `search_traces`, `list_recent_traces`, `get_trace`, `get_span`, `tag_trace`, `add_to_dataset`
