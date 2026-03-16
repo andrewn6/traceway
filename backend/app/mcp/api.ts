@@ -3,8 +3,10 @@ import { IncomingMessage, ServerResponse } from "node:http";
 import { api } from "encore.dev/api";
 
 import { defaultScopeForLocal } from "../auth/service";
+import { JsonValue } from "../core/json";
+import { DatasetsService } from "../datasets/service";
 import { handlePreflight, json, readJsonBody, requireScope, setCors } from "../shared/http";
-import { getSpan, getTraceSpans, listSpans, listTraces, type SpanItem, type TraceItem } from "../tracing/service";
+import { addTraceTags, getSpan, getTraceSpans, listSpans, listTraces, type SpanItem, type TraceItem } from "../tracing/service";
 
 type Scope = { org_id: string; project_id: string };
 
@@ -14,6 +16,8 @@ type JsonRpcRequest = {
   method?: string;
   params?: unknown;
 };
+
+const MCP_PROTOCOL_VERSION = "2024-11-05";
 
 type ToolDef = {
   name: string;
@@ -72,6 +76,32 @@ const TOOL_DEFS: ToolDef[] = [
         span_id: { type: "string", description: "Span ID" },
       },
       required: ["span_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "tag_trace",
+    description: "Add one or more tags to a trace",
+    inputSchema: {
+      type: "object",
+      properties: {
+        trace_id: { type: "string", description: "Trace ID" },
+        tags: { type: "array", items: { type: "string" }, description: "Tags to add to the trace" },
+      },
+      required: ["trace_id", "tags"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "add_to_dataset",
+    description: "Add a span's input/output to a dataset as a datapoint",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dataset_id: { type: "string", description: "Dataset ID" },
+        span_id: { type: "string", description: "Span ID" },
+      },
+      required: ["dataset_id", "span_id"],
       additionalProperties: false,
     },
   },
@@ -152,6 +182,25 @@ function parseSinceMs(value: string): number | null {
   if (!Number.isFinite(amount) || amount <= 0) return null;
   const map: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
   return amount * map[unit];
+}
+
+function parseDurationPredicate(value: string): ((n: number | null) => boolean) | null {
+  const m = value.trim().toLowerCase().match(/^(>=|<=|>|<|=)?\s*(\d+)(ms|s|m)$/);
+  if (!m) return null;
+  const op = m[1] ?? "=";
+  const amount = Number(m[2]);
+  const unit = m[3];
+  if (!Number.isFinite(amount) || amount < 0) return null;
+  const multiplier = unit === "ms" ? 1 : unit === "s" ? 1000 : 60_000;
+  const target = amount * multiplier;
+  return (n: number | null) => {
+    if (n === null) return false;
+    if (op === ">") return n > target;
+    if (op === "<") return n < target;
+    if (op === ">=") return n >= target;
+    if (op === "<=") return n <= target;
+    return n === target;
+  };
 }
 
 function parseQueryDsl(query: string): { terms: string[]; filters: Record<string, string> } {
@@ -293,6 +342,7 @@ async function toolSearchTraces(scope: Scope, args: Record<string, unknown>) {
 
   const { filters, terms } = parseQueryDsl(query);
   const sinceMs = filters.since ? parseSinceMs(filters.since) : null;
+  const durationFilter = filters.duration ? parseDurationPredicate(filters.duration) : null;
   const now = Date.now();
   const limitRaw = typeof args.limit === "number" ? args.limit : 20;
   const limit = Math.max(1, Math.min(100, Math.floor(limitRaw)));
@@ -302,6 +352,8 @@ async function toolSearchTraces(scope: Scope, args: Record<string, unknown>) {
     if (sinceMs !== null && now - new Date(t.started_at).getTime() > sinceMs) continue;
     const spansForTrace = byTrace.get(t.id) ?? [];
     const summary = summarizeTrace(t, spansForTrace);
+
+    if (durationFilter && !durationFilter(summary.duration_ms)) continue;
 
     if (filters.status && summary.status !== filters.status) continue;
     if (filters.tag && !(summary.tags ?? []).some((tag) => tag.toLowerCase().includes(filters.tag.toLowerCase()))) continue;
@@ -379,11 +431,62 @@ async function toolGetSpan(scope: Scope, args: Record<string, unknown>) {
   };
 }
 
+async function toolTagTrace(scope: Scope, args: Record<string, unknown>) {
+  const traceId = typeof args.trace_id === "string" ? args.trace_id : "";
+  const tags = Array.isArray(args.tags) ? args.tags.filter((t): t is string => typeof t === "string") : [];
+  if (!traceId) throw new Error("trace_id is required");
+  if (tags.length === 0) throw new Error("tags must contain at least one string");
+
+  const updated = await addTraceTags(scope, traceId, tags);
+  if (!updated) throw new Error("trace not found or no tags provided");
+
+  return {
+    content: textContent(`Tagged trace ${updated.id} with: ${(updated.tags ?? []).join(", ")}`),
+    structuredContent: { trace: updated },
+  };
+}
+
+async function toolAddToDataset(scope: Scope, args: Record<string, unknown>) {
+  const datasetId = typeof args.dataset_id === "string" ? args.dataset_id : "";
+  const spanId = typeof args.span_id === "string" ? args.span_id : "";
+  if (!datasetId) throw new Error("dataset_id is required");
+  if (!spanId) throw new Error("span_id is required");
+
+  const dataset = await DatasetsService.get(scope.org_id, scope.project_id, datasetId);
+  if (!dataset) throw new Error("dataset not found");
+
+  const span = await getSpan(scope, spanId);
+  if (!span) throw new Error("span not found");
+
+  const kind = {
+    type: "generic",
+    input: (span.input ?? null) as JsonValue,
+    expected_output: null,
+    actual_output: (span.output ?? null) as JsonValue,
+  } as JsonValue;
+
+  const datapoint = await DatasetsService.createDatapoint({
+    org_id: scope.org_id,
+    project_id: scope.project_id,
+    dataset_id: datasetId,
+    source: "span_export",
+    source_span_id: spanId,
+    kind,
+  });
+
+  return {
+    content: textContent(`Added span ${spanId} to dataset ${datasetId} as datapoint ${datapoint.id}`),
+    structuredContent: { datapoint },
+  };
+}
+
 async function callTool(scope: Scope, name: string, args: Record<string, unknown>) {
   if (name === "list_recent_traces") return toolListRecent(scope, args);
   if (name === "search_traces") return toolSearchTraces(scope, args);
   if (name === "get_trace") return toolGetTrace(scope, args);
   if (name === "get_span") return toolGetSpan(scope, args);
+  if (name === "tag_trace") return toolTagTrace(scope, args);
+  if (name === "add_to_dataset") return toolAddToDataset(scope, args);
   throw new Error(`unknown tool: ${name}`);
 }
 
@@ -396,6 +499,25 @@ export const mcpEndpoint = api.raw(
     const body = await readJsonBody<JsonRpcRequest>(req);
     if (body.jsonrpc !== "2.0" || !body.method) {
       json(res, 400, rpcError(body.id, -32600, "Invalid Request"));
+      return;
+    }
+
+    if (body.method === "initialize") {
+      json(res, 200, rpcResult(body.id, {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        serverInfo: { name: "traceway-mcp", version: "0.1.0" },
+        capabilities: { tools: {} },
+      }));
+      return;
+    }
+
+    if (body.method === "notifications/initialized") {
+      json(res, 200, rpcResult(body.id, {}));
+      return;
+    }
+
+    if (body.method === "ping") {
+      json(res, 200, rpcResult(body.id, {}));
       return;
     }
 
