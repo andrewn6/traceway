@@ -30,8 +30,8 @@ node -v
 ### 2) Clone and configure
 
 ```sh
-git clone https://github.com/andrewn6/llm-fs.git
-cd llm-fs
+git clone https://github.com/andrewn6/traceway.git
+cd traceway
 cp backend/app/.env.example backend/app/.env
 cp ui/.env.example ui/.env
 ```
