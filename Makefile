@@ -77,13 +77,16 @@ run-cloud: ## Run daemon in cloud mode (reads .env)
 	cargo run -p $(DAEMON_PKG) --features cloud -- --foreground --cloud
 
 # ── Check / Lint ─────────────────────────────────────────────────────────────
-check: check-daemon check-ui ## Run all checks
+check: check-daemon check-backend check-ui ## Run all checks
 
 check-daemon: ## Cargo check the daemon
 	cargo check -p $(DAEMON_PKG)
 
-check-all-crates: ## Cargo check entire workspace
-	cargo check --workspace
+check-all-crates: ## Cargo check entire workspace (note: skips memfs — needs macFUSE)
+	cargo check -p trace -p storage -p storage-sqlite -p storage-postgres -p storage-turbopuffer -p auth -p daemon
+
+check-backend: ## Encore typecheck the backend API
+	cd backend/app && npm run typecheck
 
 check-ui: ## Svelte check the UI
 	cd ui && npm run check
