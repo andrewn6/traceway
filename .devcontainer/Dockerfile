@@ -28,7 +28,9 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --de
 ENV PATH="/home/vscode/.cargo/bin:${PATH}"
 
 # Install Encore CLI for the vscode user
-RUN curl -L https://encore.dev/install.sh | bash
+RUN curl -fsSL https://encore.dev/install.sh -o /tmp/encore-install.sh \
+    && bash /tmp/encore-install.sh \
+    && rm /tmp/encore-install.sh
 ENV PATH="/home/vscode/.encore/bin:${PATH}"
 
 USER root

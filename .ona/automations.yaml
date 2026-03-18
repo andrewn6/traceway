@@ -3,8 +3,7 @@ tasks:
     name: Install UI dependencies
     description: Install npm dependencies for the UI and www packages.
     command: |
-      cd ui && npm install
-      cd ../www && npm install
+      cd ui && npm install && cd ../www && npm install
     triggeredBy:
       - postDevcontainerStart
 
