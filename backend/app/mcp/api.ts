@@ -118,11 +118,28 @@ function firstHeaderValue(value: string | string[] | undefined): string | undefi
 }
 
 function requestHost(req: IncomingMessage): string | undefined {
-  const forwardedHost = firstHeaderValue(req.headers["x-forwarded-host"]);
-  if (forwardedHost) {
-    return forwardedHost.split(",")[0]?.trim();
-  }
-  return firstHeaderValue(req.headers.host);
+  // Never trust client-supplied forwarding headers for auth decisions.
+  // The local unauthenticated fallback must be based on the direct Host header only.
+  return firstHeaderValue(req.headers.host)?.split(",")[0]?.trim();
+}
+
+function normalizeAddress(address: string): string {
+  const withoutZone = address.trim().toLowerCase().split("%")[0] ?? "";
+  return withoutZone.startsWith("::ffff:") ? withoutZone.slice("::ffff:".length) : withoutZone;
+}
+
+function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  const normalized = normalizeAddress(address);
+  return normalized === "127.0.0.1" || normalized === "::1";
+}
+
+function hasForwardingHeaders(req: IncomingMessage): boolean {
+  return Boolean(
+    firstHeaderValue(req.headers["x-forwarded-for"])?.trim()
+    || firstHeaderValue(req.headers["x-forwarded-host"])?.trim()
+    || firstHeaderValue(req.headers["x-real-ip"])?.trim()
+  );
 }
 
 async function resolveMcpScope(req: IncomingMessage, res: ServerResponse): Promise<Scope | null> {
@@ -134,7 +151,8 @@ async function resolveMcpScope(req: IncomingMessage, res: ServerResponse): Promi
   }
 
   const hostHeader = requestHost(req);
-  if (!isLocalHost(hostHeader)) {
+  const remoteAddress = req.socket.remoteAddress;
+  if (hasForwardingHeaders(req) || !isLoopbackAddress(remoteAddress) || !isLocalHost(hostHeader)) {
     json(res, 401, { error: "Unauthorized" });
     return null;
   }
