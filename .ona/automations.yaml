@@ -1,0 +1,103 @@
+tasks:
+  install-ui-deps:
+    name: Install UI dependencies
+    description: Install npm dependencies for the UI and www packages.
+    command: |
+      cd ui && npm install
+      cd ../www && npm install
+    triggeredBy:
+      - postDevcontainerStart
+
+  install-backend-deps:
+    name: Install backend dependencies
+    description: Install npm dependencies for the Encore backend.
+    command: |
+      cd backend/app && npm install
+    triggeredBy:
+      - postDevcontainerStart
+
+  build-ui:
+    name: Build UI
+    description: Build the SvelteKit UI for production (required by the Rust daemon embed).
+    command: |
+      cd ui && npm run build
+    triggeredBy:
+      - postDevcontainerStart
+    dependsOn:
+      - install-ui-deps
+
+  build-rust:
+    name: Build Rust crates
+    description: Compile the daemon and all non-memfs crates to warm the build cache.
+    command: |
+      cargo build -p traceway -p trace -p storage -p storage-sqlite -p auth
+    triggeredBy:
+      - postDevcontainerStart
+    dependsOn:
+      - build-ui
+
+  check:
+    name: Run all checks
+    description: Run cargo check, Svelte typecheck, and Encore typecheck.
+    command: |
+      cargo check -p traceway -p trace -p storage -p storage-sqlite -p auth
+      cd ui && npm run check
+      cd ../backend/app && npm run typecheck
+    triggeredBy:
+      - manual
+    dependsOn:
+      - install-ui-deps
+      - install-backend-deps
+      - build-ui
+
+  generate-types:
+    name: Generate TypeScript types
+    description: Regenerate api-types.ts from the local openapi.json spec.
+    command: |
+      cd ui && npm run generate-types:file
+    triggeredBy:
+      - manual
+    dependsOn:
+      - install-ui-deps
+
+services:
+  daemon:
+    name: Traceway Daemon
+    description: Local ingest daemon (SQLite mode) on port 3000.
+    commands:
+      start: |
+        ona env port open 3000 --name "Daemon API"
+        cargo run -p traceway -- --foreground
+      ready: |
+        curl -sf http://localhost:3000/api/health
+
+  encore-api:
+    name: Encore API
+    description: Encore.ts backend API on port 4000, dashboard on port 9400.
+    commands:
+      start: |
+        ona env port open 4000 --name "Encore API"
+        ona env port open 9400 --name "Encore Dashboard"
+        cd backend/app && encore run
+      ready: |
+        curl -sf http://localhost:4000
+
+  ui:
+    name: UI Dev Server
+    description: SvelteKit UI dev server on port 5173.
+    commands:
+      start: |
+        ona env port open 5173 --name "UI Dev Server"
+        cd ui && npm run dev
+      ready: |
+        curl -sf http://localhost:5173
+
+  www:
+    name: WWW Dev Server
+    description: Marketing landing page dev server on port 5174.
+    commands:
+      start: |
+        ona env port open 5174 --name "WWW Dev Server"
+        cd www && npm run dev
+      ready: |
+        curl -sf http://localhost:5174

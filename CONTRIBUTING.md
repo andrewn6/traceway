@@ -6,39 +6,45 @@ Thanks for your interest in contributing to Traceway. This document covers how t
 
 ### Prerequisites
 
-- Rust (stable, latest)
 - Node.js 20+
-- SQLite3 (comes with macOS / most Linux distros)
+- npm
+- Encore CLI: <https://encore.dev/docs/ts/install>
+- Rust (stable, latest) — only needed for daemon/ingest work
 
 ### Setup
 
 ```sh
-git clone https://github.com/andrewn6/llm-fs.git
-cd llm-fs
-
-# Build backend
-cargo build
-
-# Build frontend
-cd ui && npm install && npm run build && cd ..
-
-# Run locally
-cargo run -p daemon -- --foreground
+git clone https://github.com/andrewn6/traceway.git
+cd traceway
+cp backend/app/.env.example backend/app/.env
+cp ui/.env.example ui/.env
 ```
 
-API at `localhost:3000`, proxy at `localhost:3001`.
+### Run the product stack
+
+```sh
+# Terminal 1 — API
+cd backend/app && encore run
+
+# Terminal 2 — UI
+cd ui && npm install && npm run dev
+```
+
+- API: `http://localhost:4000`
+- Encore dashboard: `http://localhost:9400`
+- UI: `http://localhost:5173`
 
 ### Verify your setup
 
 ```sh
-# Backend compiles
-cargo check
+# Backend typechecks
+cd backend/app && npm run typecheck
 
-# Frontend compiles
-cd ui && npm run build
+# UI typechecks
+cd ui && npm run check
 
-# Health check
-curl http://localhost:3000/api/health
+# Smoke test
+curl http://localhost:4000/health
 ```
 
 ## Finding Work
@@ -86,33 +92,32 @@ Each issue links to the relevant PRD in [`prds/`](./prds/) for full context.
 
 ## Architecture Overview
 
-Read [`agent.md`](./agent.md) for the full workspace layout. Key directories:
+Read [`CLAUDE.md`](./CLAUDE.md) for the full workspace layout. Key directories:
 
 ```
+backend/app/      — Encore.ts product API (auth, traces, datasets, evals, billing, etc.)
+ui/               — SvelteKit 2 + Svelte 5 frontend
 crates/
   trace/          — Core types (Span, Trace, EvalRun, etc.)
   storage/        — StorageBackend trait + PersistentStore wrapper
-  storage-sqlite/ — SQLite implementation
-  storage-turbopuffer/ — Turbopuffer cloud implementation
-  api/            — Axum HTTP handlers, SSE, eval runner, job queue
-  auth/           — Auth middleware (JWT, API keys)
-  proxy/          — LLM proxy (Ollama/OpenAI passthrough)
-  daemon/         — Binary entry point
-
-ui/
-  src/lib/api.ts  — TypeScript API client + types
-  src/lib/components/ — Shared Svelte components
-  src/routes/     — SvelteKit pages
+  storage-sqlite/ — SQLite backend (local/dev default)
+  storage-postgres/ — Postgres backend (cloud mode)
+  storage-turbopuffer/ — Turbopuffer vector search (secondary index)
+  auth/           — JWT + API key middleware for Axum
+  daemon/         — Ingestor binary (OTLP ingest, local daemon lifecycle)
+sdk/
+  python/         — Python SDK
+  typescript/     — TypeScript SDK
 ```
 
 ### Key patterns
 
-- **StorageBackend trait** → implemented by SQLite and Turbopuffer
+- **Encore API** → browser-facing product API; all endpoints in `backend/app/`
+- **StorageBackend trait** → implemented by SQLite, Postgres, and Turbopuffer
 - **PersistentStore** → wraps backend with optional in-memory cache
-- **AnyBackend** → runtime dispatch between SQLite/Turbopuffer via `delegate!` macro
-- **API handlers** → `auth::Auth(ctx)` → `require_scope()` → `store_for_org()` → read/write
-- **SSE events** → `SystemEvent` enum → `tokio::broadcast` → SSE stream
+- **API handlers** → `auth: true` + `validateScope(scope)` → scoped DB queries
 - **UI** → SvelteKit 2, Svelte 5 (runes), Tailwind CSS v4, dark theme
+- **Rust daemon** → optional; handles OTLP ingest and infra paths only
 
 ## Pull Request Requirements
 
@@ -124,12 +129,12 @@ ui/
 
 ### PR checklist
 
-- [ ] `cargo check` passes (all crates)
-- [ ] `cargo check -p api` passes specifically (catches most issues)
-- [ ] `npm run build` passes (if UI was changed)
+- [ ] `cd backend/app && npm run typecheck` passes (if backend was changed)
+- [ ] `cd ui && npm run check` passes (if UI was changed)
+- [ ] `cargo check -p trace -p storage -p daemon` passes (if Rust was changed)
 - [ ] No new `unwrap()` in production code paths (use `?` or proper error handling)
-- [ ] New public types have `Serialize`/`Deserialize` derives where appropriate
-- [ ] SQLite migrations are sequential (check the current version in `MIGRATIONS` array)
+- [ ] New public Rust types have `Serialize`/`Deserialize` derives where appropriate
+- [ ] DB migrations generated with `npx drizzle-kit generate` (if schema changed)
 - [ ] No secrets, API keys, or `.env` files committed
 
 ### PR format
