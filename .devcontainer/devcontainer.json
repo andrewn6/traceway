@@ -1,0 +1,47 @@
+{
+	"name": "Traceway",
+	"build": {
+		"context": ".",
+		"dockerfile": "Dockerfile"
+	},
+	"features": {
+		"ghcr.io/devcontainers/features/docker-in-docker": {}
+	},
+	"forwardPorts": [3000, 4000, 5173, 5174, 9400],
+	"portsAttributes": {
+		"3000": {
+			"label": "Daemon API",
+			"onAutoForward": "notify"
+		},
+		"4000": {
+			"label": "Encore API",
+			"onAutoForward": "notify"
+		},
+		"5173": {
+			"label": "UI Dev Server",
+			"onAutoForward": "openBrowserOnce"
+		},
+		"5174": {
+			"label": "WWW Dev Server",
+			"onAutoForward": "notify"
+		},
+		"9400": {
+			"label": "Encore Dashboard",
+			"onAutoForward": "notify"
+		}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"rust-lang.rust-analyzer",
+				"svelte.svelte-vscode",
+				"bradlc.vscode-tailwindcss",
+				"dbaeumer.vscode-eslint",
+				"esbenp.prettier-vscode",
+				"ms-python.python",
+				"tamasfe.even-better-toml",
+				"serayuzgur.crates"
+			]
+		}
+	}
+}

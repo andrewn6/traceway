@@ -445,13 +445,13 @@
 			<button class={statusFilterClass('completed')} onclick={() => (statusFilter = 'completed')}>Completed ({counts.completed})</button>
 			<button class={statusFilterClass('all')} onclick={() => (statusFilter = 'all')}>All ({counts.total})</button>
 			<div class="w-px h-5 bg-border/40 mx-1"></div>
-			<select bind:value={datasetFilter} class="control-select !w-auto shrink-0 h-7 text-[12px] w-[170px]">
+			<select bind:value={datasetFilter} class="control-select shrink-0 h-7 text-[12px] w-[170px]">
 				<option value="all">All datasets</option>
 				{#each datasets as ds (ds.id)}
 					<option value={ds.id}>{ds.name}</option>
 				{/each}
 			</select>
-			<select bind:value={sortBy} class="control-select !w-auto shrink-0 h-7 text-[12px] w-[140px]">
+			<select bind:value={sortBy} class="control-select shrink-0 h-7 text-[12px] w-[140px]">
 				<option value="created_desc">Newest first</option>
 				<option value="created_asc">Oldest first</option>
 				<option value="status">Status priority</option>
