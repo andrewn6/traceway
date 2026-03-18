@@ -216,6 +216,28 @@ export async function deleteTrace(scope: Scope, traceId: string): Promise<{ trac
   return { trace_id: traceId, spans_deleted: deletedSpans.length };
 }
 
+export async function addTraceTags(scope: Scope, traceId: string, tagsToAdd: string[]): Promise<TraceItem | null> {
+  const clean = tagsToAdd.map((t) => t.trim()).filter(Boolean);
+  if (clean.length === 0) return null;
+
+  const [existing] = await db
+    .select()
+    .from(traces)
+    .where(and(eq(traces.id, traceId), eq(traces.orgId, scope.org_id), eq(traces.projectId, scope.project_id)))
+    .limit(1);
+  if (!existing) return null;
+
+  const existingTags = Array.isArray(existing.tags) ? (existing.tags as string[]) : [];
+  const merged = [...new Set([...existingTags, ...clean])];
+  const [updated] = await db
+    .update(traces)
+    .set({ tags: merged })
+    .where(and(eq(traces.id, traceId), eq(traces.orgId, scope.org_id), eq(traces.projectId, scope.project_id)))
+    .returning();
+
+  return updated ? mapTrace(updated) : null;
+}
+
 export async function clearAll(scope: Scope): Promise<void> {
   await db
     .delete(spans)
