@@ -226,7 +226,7 @@ with client.trace("summarize-doc") as t:
 	<div class="flex justify-center py-12">
 		<div class="space-y-5 w-full max-w-5xl motion-rise-in">
 			<div class="space-y-1">
-				<h1 class="text-xl font-bold text-text">Traces</h1>
+				<h1 class="text-xl font-semibold tracking-tight">Traces</h1>
 				<div class="flex items-center gap-2">
 					<span class="w-1.5 h-1.5 rounded-full bg-success animate-pulse"></span>
 					<span class="text-xs text-text-muted">Listening for traces</span>
@@ -235,18 +235,18 @@ with client.trace("summarize-doc") as t:
 			{#if isCloudMode && !createdKey}
 				<div class="space-y-2">
 					{#if !showKeyForm}
-						<button onclick={() => (showKeyForm = true)} class="px-3 py-1.5 text-sm bg-accent text-bg font-semibold rounded hover:bg-accent/80 transition-colors">Create API key</button>
+						<button onclick={() => (showKeyForm = true)} class="btn-primary">Create API key</button>
 						<p class="text-[11px] text-text-muted">Or use an existing key from <a href="/settings/api-keys" class="text-accent hover:underline">Settings &rarr; API Keys</a></p>
 					{:else}
 						<div class="table-float p-3 space-y-3">
 							<div>
 								<label for="onboard-key-name" class="block text-xs text-text-secondary mb-1">Key name</label>
-								<input id="onboard-key-name" type="text" bind:value={keyName} placeholder="e.g. development" class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent" />
+								<input id="onboard-key-name" type="text" bind:value={keyName} placeholder="e.g. development" class="control-input" />
 							</div>
 							{#if createKeyError}<p class="text-[11px] text-danger">{createKeyError}</p>{/if}
 							<div class="flex gap-2">
-								<button onclick={handleCreateKey} disabled={creatingKey} class="px-3 py-1.5 text-sm bg-accent text-bg font-semibold rounded-lg hover:bg-accent/80 transition-colors disabled:opacity-50">{creatingKey ? 'Creating...' : 'Create key'}</button>
-								<button onclick={() => (showKeyForm = false)} class="px-3 py-1.5 text-sm bg-bg-tertiary text-text rounded-lg hover:bg-bg-secondary transition-colors">Cancel</button>
+								<button onclick={handleCreateKey} disabled={creatingKey} class="btn-primary">{creatingKey ? 'Creating...' : 'Create key'}</button>
+								<button onclick={() => (showKeyForm = false)} class="btn-secondary">Cancel</button>
 							</div>
 						</div>
 					{/if}
@@ -285,7 +285,12 @@ with client.trace("summarize-doc") as t:
 
 			<div class="flex-1"></div>
 
-			<input class="control-input h-8 text-[12px] w-64" placeholder="Search name, model, id..." bind:value={filterText} />
+			<div class="command-input-shell w-64">
+				<div class="pl-2.5 pr-1.5 text-text-muted/80">
+					<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
+				</div>
+				<input class="command-input text-[12px]" placeholder="Search name, model, id..." bind:value={filterText} />
+			</div>
 		</div>
 
 		<!-- Split: table + detail -->
@@ -306,7 +311,7 @@ with client.trace("summarize-doc") as t:
 					<!-- Spans table body -->
 					<div class="flex-1 overflow-auto motion-fade-in">
 						{#if filteredSpans.length === 0}
-							<div class="py-8 text-center text-sm text-text-muted">No spans match current filters</div>
+							<div class="py-10 text-center text-sm text-text-muted">No spans match current filters</div>
 						{:else}
 							{#each filteredSpans as s (s.id)}
 								{@const dur = spanDurationMs(s)}
@@ -345,7 +350,7 @@ with client.trace("summarize-doc") as t:
 					<!-- Traces table body -->
 					<div class="flex-1 overflow-auto motion-fade-in">
 						{#if filteredTraces.length === 0}
-							<div class="py-8 text-center text-sm text-text-muted">No traces match current filters</div>
+							<div class="py-10 text-center text-sm text-text-muted">No traces match current filters</div>
 						{:else}
 							{#each filteredTraces as trace (trace.id)}
 								{@const insights = traceInsights.get(trace.id) ?? toInsights([])}

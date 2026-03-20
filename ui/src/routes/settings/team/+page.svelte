@@ -141,9 +141,9 @@
 	<div class="space-y-2">
 		<h2 class="text-sm font-semibold text-text-secondary uppercase tracking-wide">Members</h2>
 		{#if loading}
-			<div class="text-text-muted text-sm py-8 text-center">Loading...</div>
+			<div class="text-text-muted text-sm py-10 text-center">Loading...</div>
 		{:else if members.length === 0}
-			<div class="table-float text-text-muted text-sm py-8 text-center">
+			<div class="table-float text-text-muted text-sm py-10 text-center">
 				No members yet.
 			</div>
 		{:else}

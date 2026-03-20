@@ -242,8 +242,8 @@
 	<!-- Header -->
 	<div class="flex items-center justify-between">
 		<div>
-			<h1 class="text-lg font-semibold text-text">Review</h1>
-			<p class="text-xs text-text-muted mt-0.5">Human annotation queue across all datasets</p>
+			<h1 class="text-xl font-semibold tracking-tight">Review</h1>
+			<p class="text-xs text-text-muted mt-1">Human annotation queue across all datasets</p>
 		</div>
 	</div>
 
@@ -403,10 +403,10 @@
 
 					<div class="flex items-center gap-2 pt-2 border-t border-border/60">
 						{#if reviewingItem.status === 'pending'}
-							<button class="px-4 py-1.5 text-xs bg-accent text-bg font-semibold rounded hover:bg-accent/80 transition-colors" onclick={() => handleClaim(reviewingItem.id)}>Claim & Start</button>
+							<button class="btn-primary h-7 text-xs" onclick={() => handleClaim(reviewingItem.id)}>Claim & Start</button>
 						{:else if reviewingItem.status === 'claimed'}
-							<button class="px-4 py-1.5 text-xs bg-success text-bg font-semibold rounded hover:bg-success/80 transition-colors disabled:opacity-50" onclick={handleApprove} disabled={submitting}>Approve</button>
-							<button class="px-4 py-1.5 text-xs bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded hover:bg-amber-400/20 transition-colors disabled:opacity-50" onclick={handleSubmitEdited} disabled={submitting}>Submit edits</button>
+							<button class="btn-primary h-7 text-xs" onclick={handleApprove} disabled={submitting}>Approve</button>
+							<button class="btn-secondary h-7 text-xs" onclick={handleSubmitEdited} disabled={submitting}>Submit edits</button>
 						{/if}
 						<div class="flex-1"></div>
 						{#if reviewingItem.claimed_by}

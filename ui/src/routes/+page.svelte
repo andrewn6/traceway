@@ -91,7 +91,7 @@
 	<h1 class="text-xl font-semibold tracking-tight">Dashboard</h1>
 
 	{#if !loaded}
-		<div class="text-text-muted text-sm py-8 text-center">Loading...</div>
+		<div class="text-text-muted text-sm py-10 text-center">Loading...</div>
 	{:else}
 		<!-- Stats cards — always visible -->
 		<div class="grid grid-cols-2 md:grid-cols-4 gap-3">

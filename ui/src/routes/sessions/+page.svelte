@@ -108,8 +108,13 @@
 	<!-- Left: Sessions list -->
 	<div class="w-80 border-r border-border/55 flex flex-col bg-bg-secondary/20 shrink-0">
 		<div class="p-3 border-b border-border/55 space-y-2">
-			<h1 class="text-sm font-semibold text-text">Sessions</h1>
-			<input class="control-input h-8 text-[12px] w-full" bind:value={q} placeholder="Search session id..." />
+			<h1 class="text-[13px] font-semibold text-text">Sessions</h1>
+			<div class="command-input-shell w-full">
+				<div class="pl-2.5 pr-1.5 text-text-muted/80">
+					<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
+				</div>
+				<input class="command-input text-[12px]" bind:value={q} placeholder="Search session id..." />
+			</div>
 		</div>
 		<div class="flex-1 overflow-auto">
 			{#if loading}
@@ -171,7 +176,7 @@
 					</div>
 					<div class="flex-1 overflow-auto">
 						{#if sessionTraces.length === 0}
-							<div class="py-8 text-center text-sm text-text-muted">No traces in this session</div>
+							<div class="py-10 text-center text-sm text-text-muted">No traces in this session</div>
 						{:else}
 							{#each sessionTraces as trace (trace.id)}
 								{@const spans = allSpans.get(trace.id) ?? []}

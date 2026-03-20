@@ -280,7 +280,7 @@
 				Unable to connect to the Traceway backend at <code class="text-accent">{apiTarget}</code>.
 				For local dev, run <code class="text-accent">cd backend/app && encore run</code>.
 			</div>
-			<button onclick={() => location.reload()} class="mt-2 px-4 py-1.5 text-sm bg-accent/10 text-accent rounded hover:bg-accent/20 transition-colors">
+			<button onclick={() => location.reload()} class="btn-secondary mt-2">
 				Retry
 			</button>
 		</div>
@@ -346,19 +346,10 @@
 					{/if}
 
 					<div class="flex justify-end gap-2 pt-1">
-						<button
-							type="button"
-							onclick={() => showNewProjectModal = false}
-							class="px-3 py-1.5 text-xs text-text-secondary hover:text-text transition-colors cursor-pointer"
-							disabled={newProjectLoading}
-						>
+						<button type="button" onclick={() => showNewProjectModal = false} class="btn-ghost h-7 text-xs" disabled={newProjectLoading}>
 							Cancel
 						</button>
-						<button
-							type="submit"
-							class="px-3 py-1.5 text-xs bg-accent text-white rounded-md hover:bg-accent/90 transition-colors disabled:opacity-50 cursor-pointer"
-							disabled={newProjectLoading || !newProjectName.trim()}
-						>
+						<button type="submit" class="btn-primary h-7 text-xs" disabled={newProjectLoading || !newProjectName.trim()}>
 							{newProjectLoading ? 'Creating...' : 'Create Project'}
 						</button>
 					</div>

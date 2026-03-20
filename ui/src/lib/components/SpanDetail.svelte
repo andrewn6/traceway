@@ -367,6 +367,12 @@
 					</div>
 				{/if}
 			</div>
+			{#if span.kind?.type === 'llm_call'}
+				<a href="/replay/{span.trace_id}?span={span.id}" class="query-chip h-6 text-[11px] gap-1 text-accent border-accent/30 hover:bg-accent/10 no-underline">
+					<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" /></svg>
+					Playground
+				</a>
+			{/if}
 			{#if exportSuccess}<span class="text-[10px] text-success">{exportSuccess}</span>{/if}
 			{#if reviewSuccess}<span class="text-[10px] text-success">{reviewSuccess}</span>{/if}
 			<div class="flex-1"></div>

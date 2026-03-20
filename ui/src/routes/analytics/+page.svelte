@@ -403,7 +403,7 @@
 
 	<!-- Add Chart button -->
 	<button
-		class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs bg-accent text-white hover:bg-accent-dim transition-colors cursor-pointer"
+		class="btn-primary h-7 text-xs"
 		onclick={openAddChart}
 	>
 		<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

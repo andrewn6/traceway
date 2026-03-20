@@ -81,8 +81,8 @@
 
 <div class="w-full space-y-5">
 	<div>
-		<h1 class="text-lg font-semibold tracking-tight">Billing</h1>
-		<p class="text-text-muted text-[12px] mt-0.5">Manage your plan and usage.</p>
+		<h1 class="text-xl font-semibold tracking-tight">Billing</h1>
+		<p class="text-xs text-text-muted mt-1">Manage your plan and usage.</p>
 	</div>
 
 	{#if error}
@@ -92,7 +92,7 @@
 	{/if}
 
 	{#if loading}
-		<div class="text-text-muted text-sm py-8 text-center">Loading...</div>
+		<div class="text-text-muted text-sm py-10 text-center">Loading...</div>
 	{:else if org}
 		<div class="grid grid-cols-1 lg:grid-cols-[160px_minmax(0,1fr)] gap-3.5 items-start">
 			<aside class="hidden lg:block">

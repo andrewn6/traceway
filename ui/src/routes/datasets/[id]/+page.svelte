@@ -723,54 +723,66 @@
 					<div>
 						<label for="edit-ds-name" class="block text-xs text-text-muted uppercase mb-1">Name</label>
 						<input id="edit-ds-name" type="text" bind:value={editName}
-							class="bg-bg-tertiary border border-border rounded px-2 py-1 text-sm text-text" />
+							class="control-input h-8 text-sm" />
 					</div>
 					<div class="flex-1">
 						<label for="edit-ds-desc" class="block text-xs text-text-muted uppercase mb-1">Description</label>
 						<input id="edit-ds-desc" type="text" bind:value={editDescription} placeholder="Optional description"
-							class="w-full bg-bg-tertiary border border-border rounded px-2 py-1 text-sm text-text placeholder:text-text-muted" />
+							class="control-input h-8 text-sm" />
 					</div>
-					<button type="submit" disabled={editSaving || !editName.trim()}
-						class="px-3 py-1 text-xs bg-amber-400 text-bg font-semibold rounded hover:bg-amber-300 transition-colors disabled:opacity-50">
+					<button type="submit" disabled={editSaving || !editName.trim()} class="btn-primary h-8 text-xs">
 						{editSaving ? 'Saving...' : 'Save'}
 					</button>
-					<button type="button" onclick={() => (showEditDataset = false)}
-						class="px-3 py-1 text-xs text-text-muted hover:text-text transition-colors">Cancel</button>
+					<button type="button" onclick={() => (showEditDataset = false)} class="btn-ghost h-8 text-xs">Cancel</button>
 				</form>
 			{:else}
-				<h1 class="text-lg font-bold">{dataset.name}</h1>
-				<span class="px-2 py-0.5 text-xs bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded">
+				<h1 class="text-xl font-semibold tracking-tight">{dataset.name}</h1>
+				<span class="text-[11px] text-text-muted font-mono tabular-nums">
 					{dataset.datapoint_count} datapoints
 				</span>
 				{#if dataset.description}
-					<span class="text-text-muted text-sm">{dataset.description}</span>
+					<span class="text-text-muted text-xs">{dataset.description}</span>
 				{/if}
-				<button
-					class="text-text-muted hover:text-text text-xs transition-colors"
-					onclick={startEditDataset}
-				>edit</button>
+				<button class="btn-ghost h-6 text-[11px]" onclick={startEditDataset}>edit</button>
 			{/if}
 		{:else if !loading}
-			<h1 class="text-lg font-bold text-text-muted">Dataset not found</h1>
+			<h1 class="text-xl font-semibold tracking-tight text-text-muted">Dataset not found</h1>
 		{/if}
 	</div>
 
-	<!-- Stats bar -->
+	<!-- Stats + tabs bar -->
 	{#if dataset && !loading}
-		<div class="bg-bg-secondary border border-border rounded-md p-3 flex items-center gap-4 text-xs">
-			<div class="flex items-center gap-1.5">
-				<span class="text-text-muted">Rows:</span>
-				<span class="font-mono text-text">{datasetStats.totalRows}</span>
+		<div class="flex items-center gap-3 border-b border-border/40 pb-2">
+			<div class="flex items-center gap-1">
+				<button class="query-chip {activeTab === 'datapoints' ? 'query-chip-active' : ''}" onclick={() => (activeTab = 'datapoints')}>
+					Datapoints
+					<span class="text-text-muted/60 ml-0.5">{datapoints.length}</span>
+				</button>
+				<button class="query-chip {activeTab === 'import' ? 'query-chip-active' : ''}" onclick={() => (activeTab = 'import')}>Import</button>
+				<button class="query-chip {activeTab === 'queue' ? 'query-chip-active' : ''}" onclick={() => (activeTab = 'queue')}>
+					Queue
+					{#if queueItemsByStatus.pending.length > 0}
+						<span class="text-warning ml-0.5">{queueItemsByStatus.pending.length}</span>
+					{/if}
+				</button>
+				<button class="query-chip {activeTab === 'evals' ? 'query-chip-active' : ''}" onclick={() => (activeTab = 'evals')}>
+					Evals
+					{#if runningEvalCount > 0}
+						<span class="text-purple-400 ml-0.5 animate-pulse">{runningEvalCount}</span>
+					{/if}
+				</button>
+				<button class="query-chip {activeTab === 'rules' ? 'query-chip-active' : ''}" onclick={() => (activeTab = 'rules')}>
+					Rules
+					{#if enabledRuleCount > 0}
+						<span class="text-accent ml-0.5">{enabledRuleCount}</span>
+					{/if}
+				</button>
 			</div>
-			<span class="text-text-muted/40">|</span>
-			<div class="flex items-center gap-1.5">
-				<span class="text-text-muted">Avg eval score:</span>
-				<span class="font-mono text-text">{datasetStats.avgEvalScore != null ? datasetStats.avgEvalScore.toFixed(2) : '\u2014'}</span>
-			</div>
-			<span class="text-text-muted/40">|</span>
-			<div class="flex items-center gap-1.5">
-				<span class="text-text-muted">Last import:</span>
-				<span class="font-mono text-text">{datasetStats.lastImport ? formatDate(datasetStats.lastImport) : '\u2014'}</span>
+			<div class="flex-1"></div>
+			<div class="flex items-center gap-3 text-[11px] text-text-muted">
+				<span><span class="text-text font-mono tabular-nums">{datasetStats.totalRows}</span> rows</span>
+				<span>eval: <span class="text-text font-mono tabular-nums">{datasetStats.avgEvalScore != null ? datasetStats.avgEvalScore.toFixed(2) : '\u2014'}</span></span>
+				<span>import: <span class="text-text font-mono tabular-nums">{datasetStats.lastImport ? formatDate(datasetStats.lastImport) : '\u2014'}</span></span>
 			</div>
 		</div>
 	{/if}
@@ -780,82 +792,8 @@
 	{:else if !dataset}
 		<div class="text-text-muted text-sm text-center py-8">Dataset not found</div>
 	{:else}
-		<!-- Layout: left sub-nav + content -->
-		<div class="grid grid-cols-1 lg:grid-cols-[200px_minmax(0,1fr)] gap-4 items-start">
-			<!-- Left sub-nav -->
-			<aside class="hidden lg:block">
-				<div class="app-toolbar-shell rounded-xl p-2 space-y-1 sticky top-18">
-					<button
-						class="w-full text-left px-2 py-1.5 text-xs rounded-lg {activeTab === 'datapoints' ? 'bg-bg-tertiary/85 border border-border/80 text-text' : 'text-text-muted hover:text-text hover:bg-bg-tertiary/35'} transition-colors"
-						onclick={() => (activeTab = 'datapoints')}
-					>
-						Datapoints
-						<span class="ml-1 text-text-muted">{datapoints.length}</span>
-					</button>
-					<button
-						class="w-full text-left px-2 py-1.5 text-xs rounded-lg {activeTab === 'import' ? 'bg-bg-tertiary/85 border border-border/80 text-text' : 'text-text-muted hover:text-text hover:bg-bg-tertiary/35'} transition-colors"
-						onclick={() => (activeTab = 'import')}
-					>
-						Import
-					</button>
-					<button
-						class="w-full text-left px-2 py-1.5 text-xs rounded-lg {activeTab === 'queue' ? 'bg-bg-tertiary/85 border border-border/80 text-text' : 'text-text-muted hover:text-text hover:bg-bg-tertiary/35'} transition-colors"
-						onclick={() => (activeTab = 'queue')}
-					>
-						Queue
-						{#if queueItemsByStatus.pending.length > 0}
-							<span class="ml-1 px-1.5 py-0.5 text-xs bg-warning/20 text-warning rounded">{queueItemsByStatus.pending.length}</span>
-						{/if}
-					</button>
-					<button
-						class="w-full text-left px-2 py-1.5 text-xs rounded-lg {activeTab === 'evals' ? 'bg-bg-tertiary/85 border border-border/80 text-text' : 'text-text-muted hover:text-text hover:bg-bg-tertiary/35'} transition-colors"
-						onclick={() => (activeTab = 'evals')}
-					>
-						Evals
-						{#if runningEvalCount > 0}
-							<span class="ml-1 px-1.5 py-0.5 text-xs bg-purple-400/20 text-purple-400 rounded animate-pulse">{runningEvalCount}</span>
-						{/if}
-					</button>
-					<button
-						class="w-full text-left px-2 py-1.5 text-xs rounded-lg {activeTab === 'rules' ? 'bg-bg-tertiary/85 border border-border/80 text-text' : 'text-text-muted hover:text-text hover:bg-bg-tertiary/35'} transition-colors"
-						onclick={() => (activeTab = 'rules')}
-					>
-						Rules
-						{#if enabledRuleCount > 0}
-							<span class="ml-1 px-1.5 py-0.5 text-xs bg-amber-400/20 text-amber-400 rounded">{enabledRuleCount}</span>
-						{/if}
-					</button>
-				</div>
-			</aside>
-
-			<!-- Mobile tab bar (visible on small screens) -->
-			<div class="lg:hidden app-toolbar-shell rounded-xl p-2">
-				<div class="flex flex-wrap items-center gap-1.5">
-					<button
-						class="query-chip {activeTab === 'datapoints' ? 'query-chip-active' : ''}"
-						onclick={() => (activeTab = 'datapoints')}
-					>Datapoints</button>
-					<button
-						class="query-chip {activeTab === 'import' ? 'query-chip-active' : ''}"
-						onclick={() => (activeTab = 'import')}
-					>Import</button>
-					<button
-						class="query-chip {activeTab === 'queue' ? 'query-chip-active' : ''}"
-						onclick={() => (activeTab = 'queue')}
-					>Queue</button>
-					<button
-						class="query-chip {activeTab === 'evals' ? 'query-chip-active' : ''}"
-						onclick={() => (activeTab = 'evals')}
-					>Evals</button>
-					<button
-						class="query-chip {activeTab === 'rules' ? 'query-chip-active' : ''}"
-						onclick={() => (activeTab = 'rules')}
-					>Rules</button>
-				</div>
-			</div>
-
-			<!-- Content area -->
-			<div class="min-w-0">
+		<!-- Content area -->
+		<div class="min-w-0">
 				<!-- Tab: Datapoints -->
 				{#if activeTab === 'datapoints'}
 					<div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_420px] gap-0 items-start">
@@ -1602,27 +1540,26 @@
 							</div>
 						{:else}
 							<div class="flex items-center gap-2">
-								<button
-									class="px-3 py-1.5 text-xs bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded hover:bg-amber-400/20 transition-colors"
-									onclick={() => (showNewRuleForm = !showNewRuleForm)}
-								>{showNewRuleForm ? 'Cancel' : '+ New Rule'}</button>
+								<button class="btn-secondary h-7 text-[12px]" onclick={() => (showNewRuleForm = !showNewRuleForm)}>
+									{showNewRuleForm ? 'Cancel' : '+ New Rule'}
+								</button>
 							</div>
 
 							<!-- New Rule form -->
 							{#if showNewRuleForm}
-								<div class="bg-bg-secondary border border-border rounded p-4 space-y-3">
-									<div class="text-sm font-semibold text-text">New Capture Rule</div>
+								<div class="table-float p-3 space-y-3 motion-rise-in">
+									<div class="text-[13px] font-semibold text-text">New Capture Rule</div>
+
 									<div>
-										<label for="rule-name" class="block text-xs text-text-muted uppercase mb-1">Name *</label>
-										<input id="rule-name" type="text" bind:value={ruleFormName} placeholder="e.g. slow production calls"
-											class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
+										<label for="rule-name" class="label-micro block uppercase mb-1">Name *</label>
+										<input id="rule-name" type="text" bind:value={ruleFormName} placeholder="e.g. slow production calls" class="control-input h-8 text-[12px]" />
 									</div>
-									<div class="text-xs text-text-muted uppercase">Filters</div>
-									<div class="grid grid-cols-3 gap-3">
+
+									<div class="label-micro uppercase">Filters</div>
+									<div class="grid grid-cols-3 gap-2">
 										<div>
-											<label for="rule-kind" class="block text-xs text-text-muted mb-1">Span Kind</label>
-											<select id="rule-kind" bind:value={ruleFormSpanKind}
-												class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text">
+											<label for="rule-kind" class="block text-[10px] text-text-muted mb-0.5">Span Kind</label>
+											<select id="rule-kind" bind:value={ruleFormSpanKind} class="control-select h-7 text-[12px]">
 												<option value="">any</option>
 												<option value="llm_call">llm_call</option>
 												<option value="tool_call">tool_call</option>
@@ -1632,35 +1569,30 @@
 											</select>
 										</div>
 										<div>
-											<label for="rule-model" class="block text-xs text-text-muted mb-1">Model</label>
-											<input id="rule-model" type="text" bind:value={ruleFormModel} placeholder="any"
-												class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
+											<label for="rule-model" class="block text-[10px] text-text-muted mb-0.5">Model</label>
+											<input id="rule-model" type="text" bind:value={ruleFormModel} placeholder="any" class="control-input h-7 text-[12px]" />
 										</div>
 										<div>
-											<label for="rule-provider" class="block text-xs text-text-muted mb-1">Provider</label>
-											<input id="rule-provider" type="text" bind:value={ruleFormProvider} placeholder="any"
-												class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
+											<label for="rule-provider" class="block text-[10px] text-text-muted mb-0.5">Provider</label>
+											<input id="rule-provider" type="text" bind:value={ruleFormProvider} placeholder="any" class="control-input h-7 text-[12px]" />
 										</div>
 									</div>
-									<div class="grid grid-cols-3 gap-3">
+									<div class="grid grid-cols-3 gap-2">
 										<div>
-											<label for="rule-status" class="block text-xs text-text-muted mb-1">Status</label>
-											<select id="rule-status" bind:value={ruleFormStatus}
-												class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text">
+											<label for="rule-status" class="block text-[10px] text-text-muted mb-0.5">Status</label>
+											<select id="rule-status" bind:value={ruleFormStatus} class="control-select h-7 text-[12px]">
 												<option value="">any</option>
 												<option value="completed">completed</option>
 												<option value="failed">failed</option>
 											</select>
 										</div>
 										<div>
-											<label for="rule-name-contains" class="block text-xs text-text-muted mb-1">Name Contains</label>
-											<input id="rule-name-contains" type="text" bind:value={ruleFormNameContains} placeholder=""
-												class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
+											<label for="rule-name-contains" class="block text-[10px] text-text-muted mb-0.5">Name Contains</label>
+											<input id="rule-name-contains" type="text" bind:value={ruleFormNameContains} class="control-input h-7 text-[12px]" />
 										</div>
 										<div>
-											<label for="rule-sample" class="block text-xs text-text-muted mb-1">Sample Rate</label>
-											<select id="rule-sample" bind:value={ruleFormSampleRate}
-												class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text">
+											<label for="rule-sample" class="block text-[10px] text-text-muted mb-0.5">Sample Rate</label>
+											<select id="rule-sample" bind:value={ruleFormSampleRate} class="control-select h-7 text-[12px]">
 												<option value={1.0}>100%</option>
 												<option value={0.5}>50%</option>
 												<option value={0.25}>25%</option>
@@ -1669,58 +1601,47 @@
 											</select>
 										</div>
 									</div>
-									<div class="grid grid-cols-2 gap-3">
+									<div class="grid grid-cols-2 gap-2">
 										<div>
-											<label for="rule-latency" class="block text-xs text-text-muted mb-1">Min Latency (ms)</label>
-											<input id="rule-latency" type="text" bind:value={ruleFormMinLatency} placeholder=""
-												class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
+											<label for="rule-latency" class="block text-[10px] text-text-muted mb-0.5">Min Latency (ms)</label>
+											<input id="rule-latency" type="text" bind:value={ruleFormMinLatency} class="control-input h-7 text-[12px]" />
 										</div>
 										<div>
-											<label for="rule-tokens" class="block text-xs text-text-muted mb-1">Min Tokens</label>
-											<input id="rule-tokens" type="text" bind:value={ruleFormMinTokens} placeholder=""
-												class="w-full bg-bg-tertiary border border-border rounded px-3 py-1.5 text-sm text-text placeholder:text-text-muted" />
+											<label for="rule-tokens" class="block text-[10px] text-text-muted mb-0.5">Min Tokens</label>
+											<input id="rule-tokens" type="text" bind:value={ruleFormMinTokens} class="control-input h-7 text-[12px]" />
 										</div>
 									</div>
 									<div class="flex items-center gap-2">
-										<button
-											class="px-4 py-2 text-sm bg-amber-400 text-bg font-semibold rounded hover:bg-amber-300 transition-colors disabled:opacity-50"
-											disabled={ruleCreating || !ruleFormName.trim()}
-											onclick={handleCreateRule}
-										>{ruleCreating ? 'Saving...' : 'Save Rule'}</button>
-										<button
-											class="text-text-secondary hover:text-text text-sm transition-colors"
-											onclick={() => (showNewRuleForm = false)}
-										>Cancel</button>
+										<button class="btn-primary h-7 text-[12px]" disabled={ruleCreating || !ruleFormName.trim()} onclick={handleCreateRule}>
+											{ruleCreating ? 'Saving...' : 'Save Rule'}
+										</button>
+										<button class="btn-ghost h-7 text-[12px]" onclick={() => (showNewRuleForm = false)}>Cancel</button>
 									</div>
 								</div>
 							{/if}
 
 							<!-- Rule list -->
 							{#each captureRules as rule (rule.id)}
-								<div class="bg-bg-secondary border border-border rounded p-3">
+								<div class="table-float p-3">
 									<div class="flex items-center gap-2">
-										<span class="w-2 h-2 rounded-full {rule.enabled ? 'bg-success' : 'bg-text-muted'}"></span>
-											<span class="text-sm text-text font-medium flex-1">{rule.name}</span>
-											<button
-												class="w-9 h-5 rounded-full transition-colors relative {rule.enabled ? 'bg-success' : 'bg-bg-tertiary'}"
-												aria-label={`Toggle rule ${rule.name}`}
-												title={`Toggle rule ${rule.name}`}
-												onclick={() => handleToggleRule(rule.id)}
-											>
-											<span class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform {rule.enabled ? 'translate-x-4' : ''}"></span>
-										</button>
+										<span class="w-1.5 h-1.5 rounded-full shrink-0 {rule.enabled ? 'bg-success' : 'bg-text-muted'}"></span>
+										<span class="text-[13px] text-text font-medium flex-1">{rule.name}</span>
 										<button
-											class="text-text-muted hover:text-danger text-xs transition-colors"
-											onclick={() => handleDeleteRule(rule.id)}
-										>delete</button>
+											class="w-8 h-4 rounded-full transition-colors relative shrink-0 {rule.enabled ? 'bg-success' : 'bg-bg-tertiary border border-border'}"
+											aria-label={`Toggle rule ${rule.name}`}
+											onclick={() => handleToggleRule(rule.id)}
+										>
+											<span class="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform {rule.enabled ? 'translate-x-4' : ''}"></span>
+										</button>
+										<button class="btn-ghost h-6 text-[10px] text-text-muted hover:text-danger" onclick={() => handleDeleteRule(rule.id)}>delete</button>
 									</div>
-									<div class="flex items-center gap-1 mt-1.5">
+									<div class="flex items-center gap-1 mt-1.5 flex-wrap">
 										{#each ruleFilterTags(rule) as tag}
-											<span class="bg-bg-tertiary text-text-secondary rounded px-1.5 py-0.5 text-xs">{tag}</span>
+											<span class="query-chip h-5 text-[10px]">{tag}</span>
 										{/each}
 									</div>
-									<div class="text-xs text-text-muted mt-1">
-										Sample: {Math.round(rule.sample_rate * 100)}% &middot; Captured: {rule.captured_count} datapoints
+									<div class="text-[11px] text-text-muted mt-1.5">
+										Sample: {Math.round(rule.sample_rate * 100)}% · Captured: <span class="font-mono tabular-nums">{rule.captured_count}</span> datapoints
 									</div>
 								</div>
 							{/each}
@@ -1728,6 +1649,5 @@
 					</div>
 				{/if}
 			</div>
-		</div>
 	{/if}
 </div>

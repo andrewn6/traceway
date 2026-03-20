@@ -148,7 +148,7 @@
 	});
 </script>
 
-<div class="w-full space-y-3.5">
+<div class="w-full space-y-5">
 	<div>
 		<h1 class="text-xl font-semibold tracking-tight">Usage</h1>
 		<p class="text-text-muted text-[13px] mt-0.5">Quota and activity for your current workspace.</p>
@@ -159,7 +159,7 @@
 	{/if}
 
 	{#if loading || !org}
-		<div class="text-text-muted text-sm py-8 text-center">Loading...</div>
+		<div class="text-text-muted text-sm py-10 text-center">Loading...</div>
 	{:else}
 		<section class="space-y-2.5">
 			<div class="flex items-center gap-1.5 px-0.5">

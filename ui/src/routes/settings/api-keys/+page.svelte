@@ -141,9 +141,9 @@
 
 	<!-- Keys list -->
 	{#if loading}
-		<div class="text-text-muted text-sm py-8 text-center">Loading...</div>
+		<div class="text-text-muted text-sm py-10 text-center">Loading...</div>
 	{:else if keys.length === 0}
-		<div class="table-float text-text-muted text-sm py-8 text-center">
+		<div class="table-float text-text-muted text-sm py-10 text-center">
 			No API keys yet. Create one to get started.
 		</div>
 	{:else}

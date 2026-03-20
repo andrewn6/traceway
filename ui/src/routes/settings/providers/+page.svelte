@@ -335,7 +335,7 @@
 
 	<!-- Active connections -->
 	{#if loading}
-		<div class="text-text-muted text-sm py-8 text-center">Loading...</div>
+		<div class="text-text-muted text-sm py-10 text-center">Loading...</div>
 	{:else if connections.length === 0 && !showModal}
 		<div class="table-float text-center py-12 border-dashed">
 			<p class="text-text-muted text-sm mb-1">No providers connected yet.</p>
@@ -402,12 +402,10 @@
 								class="w-full bg-bg-tertiary border border-border rounded-lg px-3 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-accent" />
 						</div>
 						<div class="flex gap-2">
-							<button type="submit" disabled={saving}
-								class="px-3 py-1.5 text-xs bg-accent text-bg font-semibold rounded-lg hover:bg-accent/80 disabled:opacity-50">
+							<button type="submit" disabled={saving} class="btn-primary h-7 text-xs">
 								{saving ? 'Saving...' : 'Save'}
 							</button>
-							<button type="button" onclick={() => { editingId = null; }}
-								class="px-3 py-1.5 text-xs text-text-muted hover:text-text">Cancel</button>
+							<button type="button" onclick={() => { editingId = null; }} class="btn-ghost h-7 text-xs">Cancel</button>
 						</div>
 					</form>
 				{:else}

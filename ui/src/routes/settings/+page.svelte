@@ -108,7 +108,7 @@
 	<h1 class="text-xl font-semibold tracking-tight">Settings</h1>
 
 	{#if loading}
-		<div class="text-text-muted text-sm py-8 text-center">Loading...</div>
+		<div class="text-text-muted text-sm py-10 text-center">Loading...</div>
 	{:else}
 
 		<!-- Account (cloud mode) -->
@@ -250,23 +250,20 @@
 						<p class="text-sm text-text">This action cannot be undone. All data will be permanently deleted.</p>
 						<div class="flex gap-2">
 							<button
-								class="bg-danger text-white px-3 py-1.5 rounded text-sm font-semibold hover:opacity-90 transition-opacity"
+								class="btn-primary h-8 text-sm !bg-danger !border-danger hover:!opacity-90"
 								onclick={handleClear}
 								disabled={clearing}
 							>
 								{clearing ? 'Clearing...' : 'Yes, delete everything'}
 							</button>
-							<button
-								class="bg-bg-tertiary text-text px-3 py-1.5 rounded text-sm hover:bg-bg-secondary transition-colors"
-								onclick={() => showClearConfirm = false}
-							>
+							<button class="btn-secondary h-8 text-sm" onclick={() => showClearConfirm = false}>
 								Cancel
 							</button>
 						</div>
 					</div>
 				{:else}
 					<button
-						class="border border-danger/50 text-danger px-3 py-1.5 rounded text-sm hover:bg-danger/10 transition-colors"
+						class="btn-ghost h-8 text-sm !text-danger !border-danger/50 hover:!bg-danger/10"
 						onclick={() => showClearConfirm = true}
 					>
 						Clear all data

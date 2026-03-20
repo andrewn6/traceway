@@ -437,8 +437,8 @@
 
 <div class="app-shell-wide motion-rise-in">
 	<div class="mb-4">
-		<h1 class="text-lg font-semibold text-text">Approvals</h1>
-		<p class="text-xs text-text-muted mt-0.5">Trace-linked human approval queue for model and agent outputs</p>
+		<h1 class="text-xl font-semibold tracking-tight">Approvals</h1>
+		<p class="text-xs text-text-muted mt-1">Trace-linked human approval queue for model and agent outputs</p>
 	</div>
 
 	<div class="table-float motion-rise-in">
@@ -500,7 +500,7 @@
 		{#if loading}
 			<div class="text-text-muted text-sm text-center py-10">Loading approvals...</div>
 		{:else if filteredItems.length === 0}
-			<div class="px-3 py-8 text-center text-sm text-text-muted">No items match current filters.</div>
+			<div class="px-3 py-10 text-center text-sm text-text-muted">No items match current filters.</div>
 		{:else}
 			<div class="max-h-[min(72vh,980px)] overflow-y-auto">
 				<div class="grid grid-cols-[34px_100px_1fr_170px_130px_110px_120px] gap-3 px-3 py-2 table-head-compact border-b border-border/55 sticky top-0 z-10 bg-bg-secondary/96 backdrop-blur-sm">
