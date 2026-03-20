@@ -462,8 +462,8 @@
 		title="Add API key"
 		subtitle={selectedProvider ? selectedProvider.name : 'Provider connection'}
 		width={modalWidth}
-		on:close={closeModal}
-		on:width={(e) => (modalWidth = e.detail.width)}
+		onclose={closeModal}
+		onwidth={(w) => (modalWidth = w)}
 	>
 		<div class="space-y-4">
 				{#if error}

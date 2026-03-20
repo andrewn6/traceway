@@ -101,6 +101,18 @@ export async function requireSession(req: IncomingMessage, res: ServerResponse):
 }
 
 export async function requireScope(req: IncomingMessage, res: ServerResponse): Promise<RequestScope | null> {
+  // Local dev mode: if TRACEWAY_LOCAL_DEV is set and localhost, skip auth
+  const isLocalDev = process.env.TRACEWAY_LOCAL_DEV?.trim() === "true";
+  const hostHeader = req.headers.host ?? "";
+  const isLocalhost = hostHeader.includes("localhost") || hostHeader.includes("127.0.0.1");
+  
+  if (isLocalDev && isLocalhost) {
+    const scope = await defaultScopeForLocal();
+    if (scope) {
+      return { org_id: scope.org_id, project_id: scope.project_id, principal: "local_dev" };
+    }
+  }
+
   const bearer = bearerToken(req);
   const apiKeyScope = await scopeFromApiKey(bearer);
   if (apiKeyScope) {

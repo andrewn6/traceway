@@ -5,7 +5,7 @@ pub mod filter;
 
 use std::collections::HashMap;
 
-
+use lru::LruCache;
 use trace::{
     CaptureRule, CaptureRuleId, Datapoint, DatapointId, Dataset, DatasetId, EvalResult,
     EvalResultId, EvalRun, EvalRunId, FileVersion, ProviderConnection, ProviderConnectionId,
@@ -15,42 +15,95 @@ use trace::{
 pub use backend::StorageBackend;
 pub use error::StorageError;
 pub use filter::{
-    CursorInner, DatapointFilter, FileFilter, Page, Pagination, SortOrder, SpanFilter,
-    TraceFilter, decode_cursor, encode_cursor,
+    decode_cursor, encode_cursor, CursorInner, DatapointFilter, FileFilter, Page, Pagination,
+    SortOrder, SpanFilter, TraceFilter,
 };
+
+const DEFAULT_MAX_SPANS: usize = 50_000;
+const DEFAULT_MAX_TRACES: usize = 10_000;
+const DEFAULT_MAX_DATASETS: usize = 5_000;
+const DEFAULT_MAX_DATAPOINTS: usize = 5_000;
+
+fn get_cache_size(env_var: &str, default: usize) -> usize {
+    std::env::var(env_var)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
+fn max_spans() -> std::num::NonZero<usize> {
+    std::num::NonZero::new(get_cache_size(
+        "TRACEWAY_CACHE_MAX_SPANS",
+        DEFAULT_MAX_SPANS,
+    ))
+    .unwrap_or(std::num::NonZero::new(1).unwrap())
+}
+
+fn max_traces() -> std::num::NonZero<usize> {
+    std::num::NonZero::new(get_cache_size(
+        "TRACEWAY_CACHE_MAX_TRACES",
+        DEFAULT_MAX_TRACES,
+    ))
+    .unwrap_or(std::num::NonZero::new(1).unwrap())
+}
+
+fn max_datasets() -> std::num::NonZero<usize> {
+    std::num::NonZero::new(get_cache_size(
+        "TRACEWAY_CACHE_MAX_DATASETS",
+        DEFAULT_MAX_DATASETS,
+    ))
+    .unwrap_or(std::num::NonZero::new(1).unwrap())
+}
+
+fn max_datapoints() -> std::num::NonZero<usize> {
+    std::num::NonZero::new(get_cache_size(
+        "TRACEWAY_CACHE_MAX_DATAPOINTS",
+        DEFAULT_MAX_DATAPOINTS,
+    ))
+    .unwrap_or(std::num::NonZero::new(1).unwrap())
+}
 
 // --- In-memory span store ---
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SpanStore {
-    spans: HashMap<SpanId, Span>,
+    spans: LruCache<SpanId, Span>,
     traces: HashMap<TraceId, Vec<SpanId>>,
+}
+
+impl Default for SpanStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SpanStore {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            spans: LruCache::new(max_spans()),
+            traces: HashMap::new(),
+        }
     }
 
     pub fn insert(&mut self, span: Span) -> SpanId {
         let id = span.id();
         let trace_id = span.trace_id();
-        self.spans.insert(id, span);
+        self.spans.put(id, span);
         self.traces.entry(trace_id).or_default().push(id);
         id
     }
 
-    pub fn get(&self, id: SpanId) -> Option<&Span> {
+    pub fn get(&mut self, id: SpanId) -> Option<&Span> {
         self.spans.get(&id)
     }
 
     pub fn remove(&mut self, id: SpanId) -> Option<Span> {
-        self.spans.remove(&id)
+        self.spans.pop(&id)
     }
 
     pub fn replace(&mut self, span: Span) {
         let id = span.id();
-        self.spans.insert(id, span);
+        self.spans.put(id, span);
     }
 
     pub fn spans_for_trace(&self, trace_id: TraceId) -> &[SpanId] {
@@ -65,7 +118,7 @@ impl SpanStore {
     }
 
     pub fn all_spans(&self) -> impl Iterator<Item = &Span> {
-        self.spans.values()
+        self.spans.iter().map(|(_, span)| span)
     }
 
     pub fn span_count(&self) -> usize {
@@ -77,11 +130,12 @@ impl SpanStore {
     }
 
     pub fn delete_span(&mut self, id: SpanId) -> bool {
-        if let Some(span) = self.spans.remove(&id) {
-            if let Some(span_ids) = self.traces.get_mut(&span.trace_id()) {
+        if let Some(span) = self.spans.pop(&id) {
+            let trace_id = span.trace_id();
+            if let Some(span_ids) = self.traces.get_mut(&trace_id) {
                 span_ids.retain(|&sid| sid != id);
                 if span_ids.is_empty() {
-                    self.traces.remove(&span.trace_id());
+                    self.traces.remove(&trace_id);
                 }
             }
             true
@@ -94,7 +148,7 @@ impl SpanStore {
         if let Some(span_ids) = self.traces.remove(&trace_id) {
             let count = span_ids.len();
             for id in span_ids {
-                self.spans.remove(&id);
+                self.spans.pop(&id);
             }
             count
         } else {
@@ -108,8 +162,10 @@ impl SpanStore {
     }
 
     pub fn filter_spans(&self, filter: &SpanFilter) -> Vec<&Span> {
-        let mut results: Vec<&Span> = self.spans
-            .values()
+        let mut results: Vec<&Span> = self
+            .spans
+            .iter()
+            .map(|(_, span)| span)
             .filter(|span| {
                 if let Some(ref kind) = filter.kind {
                     if span.kind().kind_name() != kind {
@@ -201,11 +257,23 @@ impl SpanStore {
                 // Full-text search: case-insensitive contains on serialized input/output
                 if let Some(ref text) = filter.text_contains {
                     let needle = text.to_lowercase();
-                    let in_input = span.input()
-                        .map(|v| serde_json::to_string(v).unwrap_or_default().to_lowercase().contains(&needle))
+                    let in_input = span
+                        .input()
+                        .map(|v| {
+                            serde_json::to_string(v)
+                                .unwrap_or_default()
+                                .to_lowercase()
+                                .contains(&needle)
+                        })
                         .unwrap_or(false);
-                    let in_output = span.output()
-                        .map(|v| serde_json::to_string(v).unwrap_or_default().to_lowercase().contains(&needle))
+                    let in_output = span
+                        .output()
+                        .map(|v| {
+                            serde_json::to_string(v)
+                                .unwrap_or_default()
+                                .to_lowercase()
+                                .contains(&needle)
+                        })
                         .unwrap_or(false);
                     let in_name = span.name().to_lowercase().contains(&needle);
                     if !in_input && !in_output && !in_name {
@@ -215,18 +283,34 @@ impl SpanStore {
 
                 if let Some(ref text) = filter.input_contains {
                     let needle = text.to_lowercase();
-                    let found = span.input()
-                        .map(|v| serde_json::to_string(v).unwrap_or_default().to_lowercase().contains(&needle))
+                    let found = span
+                        .input()
+                        .map(|v| {
+                            serde_json::to_string(v)
+                                .unwrap_or_default()
+                                .to_lowercase()
+                                .contains(&needle)
+                        })
                         .unwrap_or(false);
-                    if !found { return false; }
+                    if !found {
+                        return false;
+                    }
                 }
 
                 if let Some(ref text) = filter.output_contains {
                     let needle = text.to_lowercase();
-                    let found = span.output()
-                        .map(|v| serde_json::to_string(v).unwrap_or_default().to_lowercase().contains(&needle))
+                    let found = span
+                        .output()
+                        .map(|v| {
+                            serde_json::to_string(v)
+                                .unwrap_or_default()
+                                .to_lowercase()
+                                .contains(&needle)
+                        })
                         .unwrap_or(false);
-                    if !found { return false; }
+                    if !found {
+                        return false;
+                    }
                 }
 
                 true
@@ -240,19 +324,38 @@ impl SpanStore {
                 "started_at" => {
                     results.sort_by(|a, b| {
                         let cmp = a.started_at().cmp(&b.started_at());
-                        if desc { cmp.reverse() } else { cmp }
+                        if desc {
+                            cmp.reverse()
+                        } else {
+                            cmp
+                        }
                     });
                 }
                 "duration" => {
                     results.sort_by(|a, b| {
-                        let cmp = a.duration_ms().unwrap_or(0).cmp(&b.duration_ms().unwrap_or(0));
-                        if desc { cmp.reverse() } else { cmp }
+                        let cmp = a
+                            .duration_ms()
+                            .unwrap_or(0)
+                            .cmp(&b.duration_ms().unwrap_or(0));
+                        if desc {
+                            cmp.reverse()
+                        } else {
+                            cmp
+                        }
                     });
                 }
                 "tokens" => {
                     results.sort_by(|a, b| {
-                        let cmp = a.kind().total_tokens().unwrap_or(0).cmp(&b.kind().total_tokens().unwrap_or(0));
-                        if desc { cmp.reverse() } else { cmp }
+                        let cmp = a
+                            .kind()
+                            .total_tokens()
+                            .unwrap_or(0)
+                            .cmp(&b.kind().total_tokens().unwrap_or(0));
+                        if desc {
+                            cmp.reverse()
+                        } else {
+                            cmp
+                        }
                     });
                 }
                 "cost" => {
@@ -260,13 +363,21 @@ impl SpanStore {
                         let ca = a.kind().cost().unwrap_or(0.0);
                         let cb = b.kind().cost().unwrap_or(0.0);
                         let cmp = ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal);
-                        if desc { cmp.reverse() } else { cmp }
+                        if desc {
+                            cmp.reverse()
+                        } else {
+                            cmp
+                        }
                     });
                 }
                 "name" => {
                     results.sort_by(|a, b| {
                         let cmp = a.name().cmp(b.name());
-                        if desc { cmp.reverse() } else { cmp }
+                        if desc {
+                            cmp.reverse()
+                        } else {
+                            cmp
+                        }
                     });
                 }
                 _ => {
@@ -292,10 +403,10 @@ impl SpanStore {
 
 pub struct PersistentStore<B: StorageBackend> {
     memory: SpanStore,
-    trace_meta: HashMap<TraceId, Trace>,
+    trace_meta: LruCache<TraceId, Trace>,
     file_versions: Vec<FileVersion>,
-    datasets: HashMap<DatasetId, Dataset>,
-    datapoints: HashMap<DatapointId, Datapoint>,
+    datasets: LruCache<DatasetId, Dataset>,
+    datapoints: LruCache<DatapointId, Datapoint>,
     queue_items: HashMap<QueueItemId, QueueItem>,
     eval_runs: HashMap<EvalRunId, EvalRun>,
     eval_results: HashMap<EvalResultId, EvalResult>,
@@ -339,9 +450,18 @@ impl<B: StorageBackend> PersistentStore<B> {
             tracing::info!(count = span_count, "loaded spans from storage backend");
         }
 
-        let trace_meta: HashMap<_, _> = traces_list.into_iter().map(|t| (t.id, t)).collect();
-        let datasets: HashMap<_, _> = ds_list.into_iter().map(|d| (d.id, d)).collect();
-        let datapoints: HashMap<_, _> = dp_list.into_iter().map(|d| (d.id, d)).collect();
+        let mut trace_meta = LruCache::new(max_traces());
+        for t in traces_list {
+            trace_meta.put(t.id, t);
+        }
+        let mut datasets = LruCache::new(max_datasets());
+        for d in ds_list {
+            datasets.put(d.id, d);
+        }
+        let mut datapoints = LruCache::new(max_datapoints());
+        for d in dp_list {
+            datapoints.put(d.id, d);
+        }
         let queue_items: HashMap<_, _> = qi_list.into_iter().map(|q| (q.id, q)).collect();
         let eval_runs: HashMap<_, _> = er_list.into_iter().map(|r| (r.id, r)).collect();
         let eval_results: HashMap<_, _> = eres_list.into_iter().map(|r| (r.id, r)).collect();
@@ -381,7 +501,7 @@ impl<B: StorageBackend> PersistentStore<B> {
         Ok(id)
     }
 
-    pub fn get(&self, id: SpanId) -> Option<&Span> {
+    pub fn get(&mut self, id: SpanId) -> Option<&Span> {
         self.memory.get(id)
     }
 
@@ -462,8 +582,8 @@ impl<B: StorageBackend> PersistentStore<B> {
             Ok(traces) => {
                 let mut loaded = 0;
                 for trace in traces {
-                    if !self.trace_meta.contains_key(&trace.id) {
-                        self.trace_meta.insert(trace.id, trace);
+                    if !self.trace_meta.contains(&trace.id) {
+                        self.trace_meta.put(trace.id, trace);
                         loaded += 1;
                     }
                 }
@@ -512,15 +632,13 @@ impl<B: StorageBackend> PersistentStore<B> {
         // Try memory first, then fall back to backend
         let span = match self.memory.remove(id) {
             Some(s) => s,
-            None => {
-                match self.backend.get_span(id).await {
-                    Ok(Some(s)) => {
-                        tracing::debug!(%id, "complete_span: loaded span from backend");
-                        s
-                    }
-                    _ => return Ok(None),
+            None => match self.backend.get_span(id).await {
+                Ok(Some(s)) => {
+                    tracing::debug!(%id, "complete_span: loaded span from backend");
+                    s
                 }
-            }
+                _ => return Ok(None),
+            },
         };
         if span.status().is_terminal() {
             self.memory.replace(span);
@@ -543,15 +661,13 @@ impl<B: StorageBackend> PersistentStore<B> {
     ) -> Result<Option<Span>, StorageError> {
         let span = match self.memory.remove(id) {
             Some(s) => s,
-            None => {
-                match self.backend.get_span(id).await {
-                    Ok(Some(s)) => {
-                        tracing::debug!(%id, "complete_span_with_kind: loaded span from backend");
-                        s
-                    }
-                    _ => return Ok(None),
+            None => match self.backend.get_span(id).await {
+                Ok(Some(s)) => {
+                    tracing::debug!(%id, "complete_span_with_kind: loaded span from backend");
+                    s
                 }
-            }
+                _ => return Ok(None),
+            },
         };
         if span.status().is_terminal() {
             self.memory.replace(span);
@@ -563,8 +679,14 @@ impl<B: StorageBackend> PersistentStore<B> {
             let kind_json = serde_json::to_value(&kind).ok()?;
             let obj = json.as_object_mut()?;
             obj.insert("kind".to_string(), kind_json);
-            obj.insert("status".to_string(), serde_json::Value::String("completed".to_string()));
-            obj.insert("ended_at".to_string(), serde_json::to_value(chrono::Utc::now()).ok()?);
+            obj.insert(
+                "status".to_string(),
+                serde_json::Value::String("completed".to_string()),
+            );
+            obj.insert(
+                "ended_at".to_string(),
+                serde_json::to_value(chrono::Utc::now()).ok()?,
+            );
             if let Some(out) = &output {
                 obj.insert("output".to_string(), out.clone());
             }
@@ -581,18 +703,20 @@ impl<B: StorageBackend> PersistentStore<B> {
 
     /// Fail a span (immutable transition: Running -> Failed).
     /// Falls back to the storage backend if the span is not in memory.
-    pub async fn fail_span(&mut self, id: SpanId, error: impl Into<String>) -> Result<Option<Span>, StorageError> {
+    pub async fn fail_span(
+        &mut self,
+        id: SpanId,
+        error: impl Into<String>,
+    ) -> Result<Option<Span>, StorageError> {
         let span = match self.memory.remove(id) {
             Some(s) => s,
-            None => {
-                match self.backend.get_span(id).await {
-                    Ok(Some(s)) => {
-                        tracing::debug!(%id, "fail_span: loaded span from backend");
-                        s
-                    }
-                    _ => return Ok(None),
+            None => match self.backend.get_span(id).await {
+                Ok(Some(s)) => {
+                    tracing::debug!(%id, "fail_span: loaded span from backend");
+                    s
                 }
-            }
+                _ => return Ok(None),
+            },
         };
         if span.status().is_terminal() {
             self.memory.replace(span);
@@ -616,14 +740,18 @@ impl<B: StorageBackend> PersistentStore<B> {
         self.backend.delete_trace_spans(trace_id).await?;
         self.backend.delete_trace(trace_id).await?;
         let count = self.memory.delete_trace(trace_id);
-        self.trace_meta.remove(&trace_id);
+        self.trace_meta.pop(&trace_id);
         Ok(count)
     }
 
     /// Delete all spans started before the given cutoff time.
     /// Returns the number of spans deleted.
-    pub async fn delete_spans_before(&mut self, cutoff: chrono::DateTime<chrono::Utc>) -> Result<usize, StorageError> {
-        let expired_ids: Vec<SpanId> = self.memory
+    pub async fn delete_spans_before(
+        &mut self,
+        cutoff: chrono::DateTime<chrono::Utc>,
+    ) -> Result<usize, StorageError> {
+        let expired_ids: Vec<SpanId> = self
+            .memory
             .all_spans()
             .filter(|s| s.started_at() < cutoff)
             .map(|s| s.id())
@@ -636,13 +764,16 @@ impl<B: StorageBackend> PersistentStore<B> {
         }
 
         // Also clean up traces that now have zero spans
-        let empty_traces: Vec<TraceId> = self.trace_meta.keys()
+        let empty_traces: Vec<TraceId> = self
+            .trace_meta
+            .iter()
+            .map(|(tid, _)| tid)
             .filter(|tid| self.memory.spans_for_trace(**tid).is_empty())
             .cloned()
             .collect();
         for tid in empty_traces {
             self.backend.delete_trace(tid).await?;
-            self.trace_meta.remove(&tid);
+            self.trace_meta.pop(&tid);
         }
 
         if count > 0 {
@@ -671,16 +802,16 @@ impl<B: StorageBackend> PersistentStore<B> {
 
     pub async fn save_trace(&mut self, trace: Trace) -> Result<(), StorageError> {
         self.backend.save_trace(&trace).await?;
-        self.trace_meta.insert(trace.id, trace);
+        self.trace_meta.put(trace.id, trace);
         Ok(())
     }
 
-    pub fn get_trace(&self, id: TraceId) -> Option<&Trace> {
+    pub fn get_trace(&mut self, id: TraceId) -> Option<&Trace> {
         self.trace_meta.get(&id)
     }
 
     pub fn all_traces(&self) -> impl Iterator<Item = &Trace> {
-        self.trace_meta.values()
+        self.trace_meta.iter().map(|(_, t)| t)
     }
 
     // --- File methods ---
@@ -735,24 +866,28 @@ impl<B: StorageBackend> PersistentStore<B> {
 
     pub async fn save_dataset(&mut self, dataset: Dataset) -> Result<(), StorageError> {
         self.backend.save_dataset(&dataset).await?;
-        self.datasets.insert(dataset.id, dataset);
+        self.datasets.put(dataset.id, dataset);
         Ok(())
     }
 
-    pub fn get_dataset(&self, id: DatasetId) -> Option<&Dataset> {
+    pub fn get_dataset(&mut self, id: DatasetId) -> Option<&Dataset> {
         self.datasets.get(&id)
+    }
+
+    pub fn contains_dataset(&self, id: DatasetId) -> bool {
+        self.datasets.contains(&id)
     }
 
     /// Get a dataset, falling back to the storage backend if not in memory.
     /// Loads and caches the dataset in memory on fallback hit.
     pub async fn get_dataset_or_load(&mut self, id: DatasetId) -> Option<&Dataset> {
-        if self.datasets.contains_key(&id) {
+        if self.datasets.contains(&id) {
             return self.datasets.get(&id);
         }
         match self.backend.get_dataset(id).await {
             Ok(Some(ds)) => {
                 tracing::debug!(%id, "get_dataset_or_load: loaded from backend");
-                self.datasets.insert(id, ds);
+                self.datasets.put(id, ds);
                 self.datasets.get(&id)
             }
             _ => None,
@@ -760,26 +895,27 @@ impl<B: StorageBackend> PersistentStore<B> {
     }
 
     pub fn all_datasets(&self) -> impl Iterator<Item = &Dataset> {
-        self.datasets.values()
+        self.datasets.iter().map(|(_, d)| d)
     }
 
     pub async fn delete_dataset(&mut self, id: DatasetId) -> Result<bool, StorageError> {
-        if !self.datasets.contains_key(&id) {
+        if !self.datasets.contains(&id) {
             return Ok(false);
         }
         // Delete from backend first (cascade handled by FK in SQLite)
         self.backend.delete_dataset(id).await?;
         // Then clean up cache
-        self.datasets.remove(&id);
+        self.datasets.pop(&id);
         // Remove associated datapoints from memory
         let dp_ids: Vec<DatapointId> = self
             .datapoints
-            .values()
+            .iter()
+            .map(|(_, dp)| dp)
             .filter(|dp| dp.dataset_id == id)
             .map(|dp| dp.id)
             .collect();
         for dp_id in &dp_ids {
-            self.datapoints.remove(dp_id);
+            self.datapoints.pop(dp_id);
         }
         // Remove associated queue items from memory
         let qi_ids: Vec<QueueItemId> = self
@@ -798,17 +934,17 @@ impl<B: StorageBackend> PersistentStore<B> {
             .filter(|r| r.dataset_id == id)
             .map(|r| r.id)
             .collect();
-        for run_id in &run_ids {
-            self.eval_runs.remove(run_id);
-            let result_ids: Vec<EvalResultId> = self
-                .eval_results
-                .values()
-                .filter(|r| r.run_id == *run_id)
-                .map(|r| r.id)
-                .collect();
-            for rid in result_ids {
-                self.eval_results.remove(&rid);
-            }
+        for rid in &run_ids {
+            self.eval_runs.remove(rid);
+        }
+        let result_ids: Vec<EvalResultId> = self
+            .eval_results
+            .values()
+            .filter(|r| r.run_id == id)
+            .map(|r| r.id)
+            .collect();
+        for rid in &result_ids {
+            self.eval_results.remove(rid);
         }
         // Remove associated capture rules from memory
         let rule_ids: Vec<CaptureRuleId> = self
@@ -817,8 +953,8 @@ impl<B: StorageBackend> PersistentStore<B> {
             .filter(|r| r.dataset_id == id)
             .map(|r| r.id)
             .collect();
-        for rule_id in &rule_ids {
-            self.capture_rules.remove(rule_id);
+        for rid in &rule_ids {
+            self.capture_rules.remove(rid);
         }
         Ok(true)
     }
@@ -831,17 +967,18 @@ impl<B: StorageBackend> PersistentStore<B> {
 
     pub async fn save_datapoint(&mut self, dp: Datapoint) -> Result<(), StorageError> {
         self.backend.save_datapoint(&dp).await?;
-        self.datapoints.insert(dp.id, dp);
+        self.datapoints.put(dp.id, dp);
         Ok(())
     }
 
-    pub fn get_datapoint(&self, id: DatapointId) -> Option<&Datapoint> {
+    pub fn get_datapoint(&mut self, id: DatapointId) -> Option<&Datapoint> {
         self.datapoints.get(&id)
     }
 
     pub fn datapoints_for_dataset(&self, dataset_id: DatasetId) -> Vec<&Datapoint> {
         self.datapoints
-            .values()
+            .iter()
+            .map(|(_, dp)| dp)
             .filter(|dp| dp.dataset_id == dataset_id)
             .collect()
     }
@@ -854,7 +991,7 @@ impl<B: StorageBackend> PersistentStore<B> {
             Ok(dps) => {
                 let count = dps.len();
                 for dp in dps {
-                    self.datapoints.entry(dp.id).or_insert(dp);
+                    self.datapoints.put(dp.id, dp);
                 }
                 tracing::debug!(%dataset_id, count, "synced datapoints from backend");
             }
@@ -866,19 +1003,20 @@ impl<B: StorageBackend> PersistentStore<B> {
 
     pub fn datapoint_count_for_dataset(&self, dataset_id: DatasetId) -> usize {
         self.datapoints
-            .values()
+            .iter()
+            .map(|(_, dp)| dp)
             .filter(|dp| dp.dataset_id == dataset_id)
             .count()
     }
 
     pub async fn delete_datapoint(&mut self, id: DatapointId) -> Result<bool, StorageError> {
-        if !self.datapoints.contains_key(&id) {
+        if !self.datapoints.contains(&id) {
             return Ok(false);
         }
         // Delete from backend first
         self.backend.delete_datapoint(id).await?;
         // Then clean up cache
-        self.datapoints.remove(&id);
+        self.datapoints.pop(&id);
         let qi_ids: Vec<QueueItemId> = self
             .queue_items
             .values()
@@ -1031,10 +1169,7 @@ impl<B: StorageBackend> PersistentStore<B> {
     }
 
     pub fn all_enabled_capture_rules(&self) -> Vec<&CaptureRule> {
-        self.capture_rules
-            .values()
-            .filter(|r| r.enabled)
-            .collect()
+        self.capture_rules.values().filter(|r| r.enabled).collect()
     }
 
     pub async fn delete_capture_rule(&mut self, id: CaptureRuleId) -> Result<bool, StorageError> {
@@ -1048,7 +1183,10 @@ impl<B: StorageBackend> PersistentStore<B> {
 
     // --- Provider Connection operations ---
 
-    pub async fn save_provider_connection(&mut self, conn: ProviderConnection) -> Result<(), StorageError> {
+    pub async fn save_provider_connection(
+        &mut self,
+        conn: ProviderConnection,
+    ) -> Result<(), StorageError> {
         self.backend.save_provider_connection(&conn).await?;
         self.provider_connections.insert(conn.id, conn);
         Ok(())
@@ -1062,7 +1200,10 @@ impl<B: StorageBackend> PersistentStore<B> {
         self.provider_connections.values().collect()
     }
 
-    pub async fn delete_provider_connection(&mut self, id: ProviderConnectionId) -> Result<bool, StorageError> {
+    pub async fn delete_provider_connection(
+        &mut self,
+        id: ProviderConnectionId,
+    ) -> Result<bool, StorageError> {
         if !self.provider_connections.contains_key(&id) {
             return Ok(false);
         }

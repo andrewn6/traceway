@@ -3,10 +3,10 @@
 	let { children } = $props();
 
 	const tabs = [
+		{ href: '/settings', label: 'General' },
 		{ href: '/settings/providers', label: 'Providers' },
-		{ href: '/settings', label: 'Settings' },
-		{ href: '/settings/team', label: 'Team' },
 		{ href: '/settings/api-keys', label: 'API Keys' },
+		{ href: '/settings/team', label: 'Team' },
 		{ href: '/settings/usage', label: 'Usage' },
 		{ href: '/settings/billing', label: 'Billing' }
 	];
@@ -17,20 +17,16 @@
 	}
 </script>
 
-<div class="app-shell-wide space-y-4">
-	<nav class="app-toolbar-shell rounded-xl p-2" aria-label="Settings sections">
-		<div class="flex items-center gap-2 overflow-x-auto pb-0.5">
-			{#each tabs as tab}
-				<a
-					href={tab.href}
-					class="shrink-0 rounded-lg px-3 py-2 text-sm border transition-colors {isActive(tab.href)
-						? 'bg-bg-tertiary/85 border-border/80 text-text'
-						: 'border-transparent text-text-secondary hover:text-text hover:bg-bg-tertiary/40'}"
-				>
-					{tab.label}
-				</a>
-			{/each}
-		</div>
+<div class="app-shell-wide space-y-4 motion-rise-in">
+	<nav class="flex items-center gap-1 border-b border-border/40 pb-2" aria-label="Settings sections">
+		{#each tabs as tab}
+			<a
+				href={tab.href}
+				class="query-chip text-[12px] {isActive(tab.href) ? 'query-chip-active' : ''}"
+			>
+				{tab.label}
+			</a>
+		{/each}
 	</nav>
 
 	<div>

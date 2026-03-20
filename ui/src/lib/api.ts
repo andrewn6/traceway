@@ -505,6 +505,34 @@ export const testProviderConnection = (body: { provider: string; base_url?: stri
 export const listProviderModels = (connId: string) =>
 	get<ProviderModelsResponse>(`/provider-connections/${connId}/models`);
 
+// ─── Replay ──────────────────────────────────────────────────────────
+
+export interface LlmCallReplay {
+	span_id: string;
+	name: string;
+	model: string;
+	provider: string | null;
+	input: unknown;
+	output: unknown;
+	input_tokens: number | null;
+	output_tokens: number | null;
+	cost: number;
+	duration_ms: number | null;
+	started_at: string;
+	ended_at: string | null;
+}
+
+export interface ReplayableTrace {
+	trace_id: string;
+	trace_name: string | null;
+	llm_calls: LlmCallReplay[];
+	total_cost: number;
+	total_tokens: number;
+}
+
+export const getReplayableTrace = (traceId: string) =>
+	get<ReplayableTrace>(`/replay/${traceId}`);
+
 // ─── Export ──────────────────────────────────────────────────────────
 
 export const exportJson = (traceId?: string) =>

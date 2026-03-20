@@ -224,7 +224,7 @@ with client.trace("summarize-doc") as t:
 {:else if traces.length === 0}
 	<!-- Empty state: onboarding -->
 	<div class="flex justify-center py-12">
-		<div class="space-y-5 w-full max-w-5xl">
+		<div class="space-y-5 w-full max-w-5xl motion-rise-in">
 			<div class="space-y-1">
 				<h1 class="text-xl font-bold text-text">Traces</h1>
 				<div class="flex items-center gap-2">
@@ -266,23 +266,24 @@ with client.trace("summarize-doc") as t:
 	</div>
 {:else}
 	<!-- Main data view: split pane -->
-	<div class="flex flex-col h-[calc(100vh-10rem)] -m-4 lg:-m-5 rounded-xl overflow-hidden border border-border/40 bg-bg-secondary/30">
+	<div class="flex flex-col h-[calc(100vh-10rem)] -m-4 lg:-m-5 rounded-xl overflow-hidden border border-border/40 bg-bg-secondary/30 motion-rise-in">
 		<!-- Filter bar -->
-		<div class="flex items-center gap-2 px-4 py-2 border-b border-border/55 bg-bg-secondary/40 shrink-0">
+		<div class="flex items-center gap-2 px-3 py-2 border-b border-border/55 bg-bg-secondary/40 shrink-0">
 			<div class="flex items-center gap-0.5 rounded-lg border border-border/50 bg-bg-tertiary/35 p-0.5">
 				<button class="px-3 py-1 text-[12px] rounded-md transition-colors {viewMode === 'spans' ? 'bg-bg-tertiary text-text border border-border' : 'text-text-muted hover:text-text'}" onclick={() => (viewMode = 'spans')}>Spans</button>
 				<button class="px-3 py-1 text-[12px] rounded-md transition-colors {viewMode === 'traces' ? 'bg-bg-tertiary text-text border border-border' : 'text-text-muted hover:text-text'}" onclick={() => (viewMode = 'traces')}>Traces</button>
 			</div>
 
-			<div class="flex-1"></div>
+			<!-- Time range chips -->
+			<div class="flex items-center gap-1">
+				<button class={rangeDays === '5m' ? 'query-chip query-chip-active' : 'query-chip'} onclick={() => (rangeDays = '5m')}>5m</button>
+				<button class={rangeDays === '1h' ? 'query-chip query-chip-active' : 'query-chip'} onclick={() => (rangeDays = '1h')}>1h</button>
+				<button class={rangeDays === '1d' ? 'query-chip query-chip-active' : 'query-chip'} onclick={() => (rangeDays = '1d')}>1d</button>
+				<button class={rangeDays === '7d' ? 'query-chip query-chip-active' : 'query-chip'} onclick={() => (rangeDays = '7d')}>7d</button>
+				<button class={rangeDays === '30d' ? 'query-chip query-chip-active' : 'query-chip'} onclick={() => (rangeDays = '30d')}>30d</button>
+			</div>
 
-			<select bind:value={rangeDays} class="control-select h-8 w-[110px] text-[12px]">
-				<option value="5m">Last 5 mins</option>
-				<option value="1h">Last 1 hour</option>
-				<option value="1d">Last 1 day</option>
-				<option value="7d">Last 7 days</option>
-				<option value="30d">Last 30 days</option>
-			</select>
+			<div class="flex-1"></div>
 
 			<input class="control-input h-8 text-[12px] w-64" placeholder="Search name, model, id..." bind:value={filterText} />
 		</div>
@@ -303,7 +304,7 @@ with client.trace("summarize-doc") as t:
 						<span class="text-right">Latency</span>
 					</div>
 					<!-- Spans table body -->
-					<div class="flex-1 overflow-auto">
+					<div class="flex-1 overflow-auto motion-fade-in">
 						{#if filteredSpans.length === 0}
 							<div class="py-8 text-center text-sm text-text-muted">No spans match current filters</div>
 						{:else}
@@ -311,7 +312,7 @@ with client.trace("summarize-doc") as t:
 								{@const dur = spanDurationMs(s)}
 								{@const st = spanStatus(s)}
 								<button
-									class="grid grid-cols-[140px_1fr_80px_120px_70px_70px_70px] gap-2 px-4 py-2 border-b border-border/30 w-full text-left text-[12px] transition-colors items-center
+									class="grid grid-cols-[140px_1fr_80px_120px_70px_70px_70px] gap-2 px-4 py-2 border-b border-border/30 w-full text-left text-[12px] motion-row items-center
 										{selectedDetailSpan?.id === s.id ? 'bg-accent/8 border-l-2 border-l-accent' : 'hover:bg-bg-secondary/40'}"
 									onclick={() => selectSpanRow(s)}
 								>
@@ -342,7 +343,7 @@ with client.trace("summarize-doc") as t:
 						<span class="text-right">Spans</span>
 					</div>
 					<!-- Traces table body -->
-					<div class="flex-1 overflow-auto">
+					<div class="flex-1 overflow-auto motion-fade-in">
 						{#if filteredTraces.length === 0}
 							<div class="py-8 text-center text-sm text-text-muted">No traces match current filters</div>
 						{:else}
@@ -351,7 +352,7 @@ with client.trace("summarize-doc") as t:
 								{@const spans = traceSpans.get(trace.id) ?? []}
 								{@const root = spans.find(s => !s.parent_id)}
 								<button
-									class="grid grid-cols-[140px_1fr_80px_120px_70px_70px_70px_50px] gap-2 px-4 py-2 border-b border-border/30 w-full text-left text-[12px] transition-colors items-center
+									class="grid grid-cols-[140px_1fr_80px_120px_70px_70px_70px_50px] gap-2 px-4 py-2 border-b border-border/30 w-full text-left text-[12px] motion-row items-center
 										{selectedTraceId === trace.id ? 'bg-accent/8 border-l-2 border-l-accent' : 'hover:bg-bg-secondary/40'}"
 									onclick={() => selectTraceRow(trace.id)}
 								>
@@ -410,6 +411,10 @@ with client.trace("summarize-doc") as t:
 							<div class="text-[13px] font-medium text-text truncate">{rootSpan?.name ?? 'Trace'}</div>
 							<div class="text-[10px] text-text-muted font-mono">{shortId(selectedTraceId)}</div>
 						</div>
+						<a
+							class="text-[11px] text-warning hover:text-warning/80 transition-colors shrink-0"
+							href="/replay/{selectedTraceId}"
+						>Replay</a>
 						<button
 							class="text-[11px] text-accent hover:text-accent/80 transition-colors shrink-0"
 							onclick={() => goto(`/traces/${selectedTraceId}`)}

@@ -37,7 +37,13 @@ from .types import (
 class SpanContext:
     """Context manager for a span that auto-completes on exit or fails on exception."""
 
-    def __init__(self, client: "Traceway", span_id: str, trace_id: str, kind: SpanKind | None = None):
+    def __init__(
+        self,
+        client: "Traceway",
+        span_id: str,
+        trace_id: str,
+        kind: SpanKind | None = None,
+    ):
         self._client = client
         self._span_id = span_id
         self._trace_id = trace_id
@@ -108,7 +114,7 @@ class TraceContext:
         input: Any = None,
     ) -> Generator[SpanContext, None, None]:
         """Convenience: create an LlmCall span within this trace.
-        
+
         After yielding, if ctx._output has 'input_tokens' and 'output_tokens' keys,
         the span kind is automatically updated with token counts.
         """
@@ -139,9 +145,10 @@ class Traceway:
         url: str | None = None,
         api_key: str | None = None,
         api_prefix: str | None = None,
+        backend_token: str | None = None,
     ):
         """Initialize the Traceway client.
-        
+
         Args:
             url: Base URL of the Traceway server. Defaults to TRACEWAY_URL env var
                  or http://localhost:4000
@@ -150,6 +157,8 @@ class Traceway:
             api_prefix: API prefix to use for requests. Defaults to TRACEWAY_API_PREFIX
                        or "auto". In auto mode, the client tries /api first and then /
                        for compatibility across backend versions.
+            backend_token: Internal token for local dev. Defaults to TRACEWAY_BACKEND_TOKEN env var.
+                          Use this for local development when not using API keys.
         """
         self._base_url = (
             url or os.environ.get("TRACEWAY_URL") or "http://localhost:4000"
@@ -157,13 +166,16 @@ class Traceway:
 
         env_prefix = os.environ.get("TRACEWAY_API_PREFIX")
         self._api_prefix = api_prefix if api_prefix is not None else env_prefix
-        
+
         self._api_key = api_key or os.environ.get("TRACEWAY_API_KEY")
-        
+        self._backend_token = backend_token or os.environ.get("TRACEWAY_BACKEND_TOKEN")
+
         headers = {}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
-        
+        if self._backend_token:
+            headers["x-traceway-control-token"] = self._backend_token
+
         self._client = httpx.Client(headers=headers)
 
     def close(self) -> None:
@@ -189,7 +201,11 @@ class Traceway:
         return ["/api", ""]
 
     def _build_url(self, prefix: str, path: str) -> str:
-        clean_prefix = "" if prefix in ("", "/") else (prefix if prefix.startswith("/") else f"/{prefix}")
+        clean_prefix = (
+            ""
+            if prefix in ("", "/")
+            else (prefix if prefix.startswith("/") else f"/{prefix}")
+        )
         clean_path = path if path.startswith("/") else f"/{path}"
         return f"{self._base_url}{clean_prefix}{clean_path}"
 
@@ -228,7 +244,9 @@ class Traceway:
 
     # ─── Trace operations ─────────────────────────────────────────────
 
-    def create_trace(self, name: str | None = None, tags: list[str] | None = None) -> Trace:
+    def create_trace(
+        self, name: str | None = None, tags: list[str] | None = None
+    ) -> Trace:
         data: dict[str, Any] = {}
         if name is not None:
             data["name"] = name
@@ -263,7 +281,9 @@ class Traceway:
         resp = self._request("POST", "/spans", json=data)
         return CreatedSpan.from_dict(resp)
 
-    def complete_span(self, span_id: str, *, output: Any = None, kind: SpanKind | None = None) -> None:
+    def complete_span(
+        self, span_id: str, *, output: Any = None, kind: SpanKind | None = None
+    ) -> None:
         data: dict[str, Any] = {}
         if output is not None:
             data["output"] = output
@@ -310,10 +330,12 @@ class Traceway:
         if not versions:
             raise FileNotFoundError(f"No tracked versions found for path: {path}")
         latest = versions[0]
-        return self._request_text("GET", f"/files/content/{quote(latest.hash, safe='')}")
+        return self._request_text(
+            "GET", f"/files/content/{quote(latest.hash, safe='')}"
+        )
 
     def file_versions(self, path: str) -> list[FileVersion]:
-        quoted_path = quote(path, safe='')
+        quoted_path = quote(path, safe="")
         try:
             resp = self._request("GET", f"/files/{quoted_path}/versions")
             versions_raw = resp if isinstance(resp, list) else resp.get("versions", [])
@@ -328,7 +350,11 @@ class Traceway:
             derived: list[FileVersion] = []
             for span in self.get_spans().spans:
                 kind = span.kind
-                if isinstance(kind, FsReadKind) and kind.path == path and kind.file_version:
+                if (
+                    isinstance(kind, FsReadKind)
+                    and kind.path == path
+                    and kind.file_version
+                ):
                     derived.append(
                         FileVersion(
                             hash=kind.file_version,
@@ -339,7 +365,11 @@ class Traceway:
                             created_by_trace=span.trace_id,
                         )
                     )
-                elif isinstance(kind, FsWriteKind) and kind.path == path and kind.file_version:
+                elif (
+                    isinstance(kind, FsWriteKind)
+                    and kind.path == path
+                    and kind.file_version
+                ):
                     derived.append(
                         FileVersion(
                             hash=kind.file_version,
@@ -361,7 +391,7 @@ class Traceway:
         return versions
 
     def file_traces(self, path: str) -> dict[str, list[dict[str, str]]]:
-        quoted_path = quote(path, safe='')
+        quoted_path = quote(path, safe="")
         try:
             return self._request("GET", f"/files/{quoted_path}/traces")
         except httpx.HTTPStatusError as e:
@@ -443,14 +473,18 @@ class Traceway:
         return Datapoint.from_dict(resp)
 
     def create_datapoint(self, dataset_id: str, kind: dict[str, Any]) -> Datapoint:
-        resp = self._request("POST", f"/datasets/{dataset_id}/datapoints", json={"kind": kind})
+        resp = self._request(
+            "POST", f"/datasets/{dataset_id}/datapoints", json={"kind": kind}
+        )
         return Datapoint.from_dict(resp)
 
     def delete_datapoint(self, dataset_id: str, datapoint_id: str) -> None:
         self._request("DELETE", f"/datasets/{dataset_id}/datapoints/{datapoint_id}")
 
     def export_span_to_dataset(self, dataset_id: str, span_id: str) -> Datapoint:
-        resp = self._request("POST", f"/datasets/{dataset_id}/export-span", json={"span_id": span_id})
+        resp = self._request(
+            "POST", f"/datasets/{dataset_id}/export-span", json={"span_id": span_id}
+        )
         return Datapoint.from_dict(resp)
 
     # ─── Queue operations ─────────────────────────────────────────────
@@ -459,7 +493,9 @@ class Traceway:
         resp = self._request("GET", f"/datasets/{dataset_id}/queue")
         return QueueList.from_dict(resp)
 
-    def enqueue_datapoints(self, dataset_id: str, datapoint_ids: list[str]) -> list[QueueItem]:
+    def enqueue_datapoints(
+        self, dataset_id: str, datapoint_ids: list[str]
+    ) -> list[QueueItem]:
         resp = self._request(
             "POST",
             f"/datasets/{dataset_id}/queue",
@@ -474,18 +510,24 @@ class Traceway:
                 return []
         return []
 
-    def claim_queue_item(self, item_id: str, claimed_by: str | None = None) -> QueueItem:
+    def claim_queue_item(
+        self, item_id: str, claimed_by: str | None = None
+    ) -> QueueItem:
         data: dict[str, Any] = {}
         if claimed_by is not None:
             data["claimed_by"] = claimed_by
-        resp = self._request("POST", f"/queue/{item_id}/claim", json=data if data else None)
+        resp = self._request(
+            "POST", f"/queue/{item_id}/claim", json=data if data else None
+        )
         return QueueItem.from_dict(resp)
 
     def submit_queue_item(self, item_id: str, edited_data: Any = None) -> QueueItem:
         data: dict[str, Any] = {}
         if edited_data is not None:
             data["edited_data"] = edited_data
-        resp = self._request("POST", f"/queue/{item_id}/submit", json=data if data else None)
+        resp = self._request(
+            "POST", f"/queue/{item_id}/submit", json=data if data else None
+        )
         return QueueItem.from_dict(resp)
 
     # ─── Delete operations ────────────────────────────────────────────

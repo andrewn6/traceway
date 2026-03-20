@@ -38,6 +38,7 @@ from traceway import CustomKind, Traceway  # type: ignore[import-not-found]
 TRACEWAY_URL = os.environ.get("TRACEWAY_URL", "http://localhost:4000")
 TRACEWAY_UI_URL = os.environ.get("TRACEWAY_UI_URL", "http://localhost:5173")
 TRACEWAY_API_KEY = os.environ.get("TRACEWAY_API_KEY")
+TRACEWAY_BACKEND_TOKEN = os.environ.get("TRACEWAY_BACKEND_TOKEN")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 
@@ -51,12 +52,39 @@ class SupportScenario:
 
 
 SCENARIOS: list[SupportScenario] = [
-    SupportScenario("Maya", "My shipment is 3 days late and this is a birthday gift.", "high", "expedite-and-credit"),
-    SupportScenario("Chris", "I was charged twice for the same order.", "high", "refund-duplicate"),
-    SupportScenario("Ava", "I need to change my delivery address after checkout.", "medium", "address-change"),
-    SupportScenario("Noah", "The product arrived damaged and I need a replacement.", "high", "replacement"),
-    SupportScenario("Liam", "I want to return this item but lost the original box.", "low", "return-exception"),
-    SupportScenario("Emma", "Can you pause my subscription for two months?", "medium", "subscription-pause"),
+    SupportScenario(
+        "Maya",
+        "My shipment is 3 days late and this is a birthday gift.",
+        "high",
+        "expedite-and-credit",
+    ),
+    SupportScenario(
+        "Chris", "I was charged twice for the same order.", "high", "refund-duplicate"
+    ),
+    SupportScenario(
+        "Ava",
+        "I need to change my delivery address after checkout.",
+        "medium",
+        "address-change",
+    ),
+    SupportScenario(
+        "Noah",
+        "The product arrived damaged and I need a replacement.",
+        "high",
+        "replacement",
+    ),
+    SupportScenario(
+        "Liam",
+        "I want to return this item but lost the original box.",
+        "low",
+        "return-exception",
+    ),
+    SupportScenario(
+        "Emma",
+        "Can you pause my subscription for two months?",
+        "medium",
+        "subscription-pause",
+    ),
 ]
 
 
@@ -107,7 +135,12 @@ def run_one_trace(tw: Traceway, idx: int) -> str:
                 "urgency": scenario.urgency,
             },
         ) as span:
-            span.set_output({"ticket_id": f"T-{10000 + idx}", "channel": random.choice(["chat", "email"])})
+            span.set_output(
+                {
+                    "ticket_id": f"T-{10000 + idx}",
+                    "channel": random.choice(["chat", "email"]),
+                }
+            )
 
         with t.llm_call(
             "claude-understand-intent",
@@ -170,7 +203,10 @@ def run_one_trace(tw: Traceway, idx: int) -> str:
             "claude-draft-customer-reply",
             model=CLAUDE_MODEL,
             provider="anthropic",
-            input={"issue": scenario.issue, "decision_summary": decision["content"][:500]},
+            input={
+                "issue": scenario.issue,
+                "decision_summary": decision["content"][:500],
+            },
         ) as span:
             draft_reply = call_claude(
                 messages=[
@@ -197,7 +233,9 @@ def run_one_trace(tw: Traceway, idx: int) -> str:
             span.set_output(
                 {
                     "approved": approved,
-                    "reviewer": random.choice(["ops-lead", "qa-manager", "support-supervisor"]),
+                    "reviewer": random.choice(
+                        ["ops-lead", "qa-manager", "support-supervisor"]
+                    ),
                     "reason": "ready" if approved else "needs_policy_clarification",
                 }
             )
@@ -211,7 +249,9 @@ def run_one_trace(tw: Traceway, idx: int) -> str:
                 {
                     "status": "sent" if approved else "held",
                     "follow_up_required": not approved,
-                    "estimated_csat": random.choice(["high", "medium", "high", "medium", "low"]),
+                    "estimated_csat": random.choice(
+                        ["high", "medium", "high", "medium", "low"]
+                    ),
                 }
             )
 
@@ -219,19 +259,37 @@ def run_one_trace(tw: Traceway, idx: int) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate local Claude support-agent traces")
-    parser.add_argument("--runs", type=int, default=12, help="Number of customer-support traces to generate")
+    parser = argparse.ArgumentParser(
+        description="Generate local Claude support-agent traces"
+    )
+    parser.add_argument(
+        "--runs",
+        type=int,
+        default=12,
+        help="Number of customer-support traces to generate",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
-    if not TRACEWAY_API_KEY:
-        print("Missing TRACEWAY_API_KEY. Create one in Traceway settings.")
-        sys.exit(1)
     if not ANTHROPIC_API_KEY:
         print("Missing ANTHROPIC_API_KEY. Set it in your .env file.")
+        sys.exit(1)
+
+    # For local dev, prefer backend token; fall back to API key
+    auth = None
+    if TRACEWAY_BACKEND_TOKEN:
+        auth = {"backend_token": TRACEWAY_BACKEND_TOKEN}
+        print(f"Using backend token auth (local dev)")
+    elif TRACEWAY_API_KEY:
+        auth = {"api_key": TRACEWAY_API_KEY}
+        print(f"Using API key auth")
+    else:
+        print(
+            "Missing auth. Set TRACEWAY_BACKEND_TOKEN or TRACEWAY_API_KEY in your .env file."
+        )
         sys.exit(1)
 
     print(f"Traceway API: {TRACEWAY_URL}")
@@ -241,7 +299,13 @@ def main() -> None:
     started = time.time()
     trace_ids: list[str] = []
 
-    with Traceway(url=TRACEWAY_URL, api_key=TRACEWAY_API_KEY) as tw:
+    tw_kwargs = {"url": TRACEWAY_URL}
+    if auth.get("backend_token"):
+        tw_kwargs["backend_token"] = auth["backend_token"]
+    else:
+        tw_kwargs["api_key"] = auth["api_key"]
+
+    with Traceway(**tw_kwargs) as tw:
         for i in range(args.runs):
             trace_id = run_one_trace(tw, i)
             trace_ids.append(trace_id)

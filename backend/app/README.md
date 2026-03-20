@@ -5,13 +5,19 @@ This service is now the browser-facing product API for Traceway.
 ## Local development
 
 1. Install Encore CLI: <https://encore.dev/docs/ts/install>
-2. Create local env file from template:
+2. Install dependencies (this app uses [Bun](https://bun.sh) for the lockfile):
+
+```bash
+bun install
+```
+
+3. Create local env file from template:
 
 ```bash
 cp .env.example .env
 ```
 
-3. Run backend:
+4. Run backend:
 
 ```bash
 encore run
@@ -29,7 +35,7 @@ Encore local dashboard: <http://localhost:9400>
 - `ALLOWED_ORIGINS`: browser origins for CORS
 - `TRACEWAY_BACKEND_TOKEN`: internal service token for system calls
 - `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`: billing integration
-- `TURBOPUFFER_API_KEY`, `TURBOPUFFER_UPSERT_URL`: secondary search indexing
+- `TURBOPUFFER_API_KEY`, `TURBOPUFFER_NAMESPACE` (default `traceway`), `TURBOPUFFER_REGION` (default `gcp-us-central1`): secondary search indexing via the official Turbopuffer SDK; optional `TURBOPUFFER_BASE_URL`, `TURBOPUFFER_TIMEOUT`
 
 See `.env.example` for the full list.
 

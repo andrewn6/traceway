@@ -6,7 +6,7 @@ import { defaultScopeForLocal } from "../auth/service";
 import { JsonValue } from "../core/json";
 import { DatasetsService } from "../datasets/service";
 import { handlePreflight, json, readJsonBody, requireScope, setCors } from "../shared/http";
-import { addTraceTags, getSpan, getTraceSpans, listSpans, listTraces, type SpanItem, type TraceItem } from "../tracing/service";
+import { addTraceTags, getSpan, getTraceSpans, listSessions, listSpans, listTraces, type SpanItem, type TraceItem } from "../tracing/service";
 
 type Scope = { org_id: string; project_id: string };
 
@@ -102,6 +102,43 @@ const TOOL_DEFS: ToolDef[] = [
         span_id: { type: "string", description: "Span ID" },
       },
       required: ["dataset_id", "span_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_session_traces",
+    description: "Get all traces in a session (session_id tag). Useful for viewing full agent conversation history.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        session_id: { type: "string", description: "Session ID to get traces for" },
+      },
+      required: ["session_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_sessions",
+    description: "List all agent sessions (groups of related traces). Sessions are created by tagging traces with session_id:xxx.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Maximum sessions to return (default 20, max 100)" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "search_memory",
+    description: "Search through LLM call inputs and outputs for specific content. Use for finding past responses or context.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Text to search for in span inputs and outputs" },
+        limit: { type: "number", description: "Maximum spans to return (default 10, max 50)" },
+        since: { type: "string", description: "Time filter (e.g., 24h, 7d)" },
+      },
+      required: ["query"],
       additionalProperties: false,
     },
   },
@@ -492,6 +529,191 @@ async function toolAddToDataset(scope: Scope, args: Record<string, unknown>) {
   };
 }
 
+async function toolGetSessionTraces(scope: Scope, args: Record<string, unknown>) {
+  const sessionId = typeof args.session_id === "string" ? args.session_id : "";
+  if (!sessionId) throw new Error("session_id is required");
+
+  const traces = await listTraces(scope);
+  const spans = await listSpans(scope);
+  
+  const sessionTraces = traces.filter(t => {
+    const tags = t.tags ?? [];
+    return tags.some(tag => 
+      tag === `session_id:${sessionId}` || 
+      tag === `session:${sessionId}`
+    );
+  }).sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime());
+
+  const byTrace = new Map<string, SpanItem[]>();
+  for (const s of spans) {
+    const arr = byTrace.get(s.trace_id) ?? [];
+    arr.push(s);
+    byTrace.set(s.trace_id, arr);
+  }
+
+  const summaries = sessionTraces.map(t => summarizeTrace(t, byTrace.get(t.id) ?? []));
+
+  const lines: string[] = [];
+  lines.push(`Session: ${sessionId}`);
+  lines.push(`Total traces: ${summaries.length}`);
+  lines.push("");
+  
+  for (const s of summaries) {
+    lines.push(`Trace ${s.id}`);
+    lines.push(`  Status: ${s.status} | Duration: ${s.duration_ms ?? "ongoing"}ms | Tokens: ${s.total_tokens} | Cost: $${s.total_cost}`);
+    lines.push(`  Started: ${s.started_at}`);
+    if (s.tags?.length) lines.push(`  Tags: ${s.tags.join(", ")}`);
+    lines.push("");
+  }
+
+  return {
+    content: textContent(lines.join("\n")),
+    structuredContent: { session_id: sessionId, traces: summaries, count: summaries.length },
+  };
+}
+
+async function toolListSessions(scope: Scope, args: Record<string, unknown>) {
+  const traces = await listTraces(scope);
+  const spans = await listSpans(scope);
+  
+  const sessionMap = new Map<string, { trace_count: number; span_count: number; total_tokens: number; total_cost: number; started_at: string; ended_at?: string | null }>();
+  
+  for (const t of traces) {
+    const tags = t.tags ?? [];
+    for (const tag of tags) {
+      if (tag.startsWith("session_id:") || tag.startsWith("session:")) {
+        const sessionId = tag.split(":").slice(1).join(":");
+        const existing = sessionMap.get(sessionId) ?? {
+          trace_count: 0,
+          span_count: 0,
+          total_tokens: 0,
+          total_cost: 0,
+          started_at: t.started_at,
+        };
+        existing.trace_count++;
+        sessionMap.set(sessionId, existing);
+      }
+    }
+  }
+
+  for (const s of spans) {
+    const trace = traces.find(t => t.id === s.trace_id);
+    if (!trace) continue;
+    const tags = trace.tags ?? [];
+    for (const tag of tags) {
+      if (tag.startsWith("session_id:") || tag.startsWith("session:")) {
+        const sessionId = tag.split(":").slice(1).join(":");
+        const existing = sessionMap.get(sessionId);
+        if (existing) {
+          existing.span_count++;
+          const kind = s.kind as Record<string, unknown>;
+          if (kind.type === "llm_call") {
+            existing.total_tokens += (kind.input_tokens as number ?? 0) + (kind.output_tokens as number ?? 0);
+            existing.total_cost += kind.cost as number ?? 0;
+          }
+        }
+      }
+    }
+  }
+
+  const sessions = [...sessionMap.entries()]
+    .map(([id, data]) => ({ id, ...data }))
+    .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
+
+  const limitRaw = typeof args.limit === "number" ? args.limit : 20;
+  const limit = Math.max(1, Math.min(100, Math.floor(limitRaw)));
+  const sliced = sessions.slice(0, limit);
+
+  const lines: string[] = [];
+  lines.push(`Active sessions: ${sessions.length}`);
+  lines.push("");
+  for (const s of sliced) {
+    lines.push(`Session ${s.id}`);
+    lines.push(`  Traces: ${s.trace_count} | Spans: ${s.span_count} | Tokens: ${s.total_tokens} | Cost: $${s.total_cost.toFixed(4)}`);
+    lines.push(`  Last active: ${s.started_at}`);
+    lines.push("");
+  }
+
+  return {
+    content: textContent(lines.join("\n")),
+    structuredContent: { sessions: sliced, count: sliced.length, total: sessions.length },
+  };
+}
+
+async function toolSearchMemory(scope: Scope, args: Record<string, unknown>) {
+  const query = typeof args.query === "string" ? args.query.toLowerCase().trim() : "";
+  if (!query) throw new Error("query is required");
+
+  const sinceMs = args.since ? parseSinceMs(args.since as string) : null;
+  const now = Date.now();
+  
+  const limitRaw = typeof args.limit === "number" ? args.limit : 10;
+  const limit = Math.max(1, Math.min(50, Math.floor(limitRaw)));
+
+  const spans = await listSpans(scope);
+  const traces = await listTraces(scope);
+  const traceMap = new Map(traces.map(t => [t.id, t]));
+
+  const results: { span: SpanItem; trace: TraceItem | undefined; relevance: string }[] = [];
+
+  for (const s of spans) {
+    if (sinceMs !== null && now - new Date(s.started_at).getTime() > sinceMs) continue;
+    
+    const inputStr = safeString(s.input).toLowerCase();
+    const outputStr = safeString(s.output).toLowerCase();
+    
+    let relevance = "";
+    if (outputStr.includes(query)) {
+      relevance = "output";
+    } else if (inputStr.includes(query)) {
+      relevance = "input";
+    }
+    
+    if (!relevance) continue;
+
+    const trace = traceMap.get(s.trace_id);
+    results.push({
+      span: s,
+      trace,
+      relevance,
+    });
+
+    if (results.length >= limit) break;
+  }
+
+  const lines: string[] = [];
+  lines.push(`Found ${results.length} spans matching "${query}"`);
+  lines.push("");
+
+  for (const r of results) {
+    const kind = r.span.kind as Record<string, unknown>;
+    const content = r.relevance === "output" ? r.span.output : r.span.input;
+    const preview = truncateText(content, 300);
+    
+    lines.push(`Span ${r.span.id} [${kind.type ?? "unknown"}] (matched in ${r.relevance})`);
+    lines.push(`  Trace: ${r.trace?.id ?? "unknown"}`);
+    if (r.trace?.name) lines.push(`  Name: ${r.trace.name}`);
+    lines.push(`  ${preview}`);
+    lines.push("");
+  }
+
+  return {
+    content: textContent(lines.join("\n")),
+    structuredContent: { 
+      query,
+      results: results.map(r => ({
+        span_id: r.span.id,
+        trace_id: r.span.trace_id,
+        name: r.span.name,
+        kind: (r.span.kind as Record<string, unknown>).type,
+        relevance: r.relevance,
+        started_at: r.span.started_at,
+      })),
+      count: results.length 
+    },
+  };
+}
+
 async function callTool(scope: Scope, name: string, args: Record<string, unknown>) {
   if (name === "list_recent_traces") return toolListRecent(scope, args);
   if (name === "search_traces") return toolSearchTraces(scope, args);
@@ -499,6 +721,9 @@ async function callTool(scope: Scope, name: string, args: Record<string, unknown
   if (name === "get_span") return toolGetSpan(scope, args);
   if (name === "tag_trace") return toolTagTrace(scope, args);
   if (name === "add_to_dataset") return toolAddToDataset(scope, args);
+  if (name === "get_session_traces") return toolGetSessionTraces(scope, args);
+  if (name === "list_sessions") return toolListSessions(scope, args);
+  if (name === "search_memory") return toolSearchMemory(scope, args);
   throw new Error(`unknown tool: ${name}`);
 }
 

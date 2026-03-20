@@ -108,8 +108,8 @@
 		title="Invite team member"
 		subtitle="Send an email invite"
 		width={invitePanelWidth}
-		on:close={() => (showInvite = false)}
-		on:width={(e) => (invitePanelWidth = e.detail.width)}
+		onclose={() => (showInvite = false)}
+		onwidth={(w) => (invitePanelWidth = w)}
 	>
 		<form onsubmit={handleInvite} class="space-y-3">
 			<div>

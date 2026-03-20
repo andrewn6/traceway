@@ -117,8 +117,8 @@
 		title="New API key"
 		subtitle="Create an ingestion key"
 		width={createPanelWidth}
-		on:close={() => (showCreate = false)}
-		on:width={(e) => (createPanelWidth = e.detail.width)}
+		onclose={() => (showCreate = false)}
+		onwidth={(w) => (createPanelWidth = w)}
 	>
 		<form onsubmit={handleCreate} class="space-y-3">
 			<div>

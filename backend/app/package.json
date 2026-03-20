@@ -12,8 +12,9 @@
     "typescript": "^5.2.2"
   },
   "dependencies": {
+    "@turbopuffer/turbopuffer": "^1.20.0",
     "drizzle-orm": "^0.36.0",
-    "encore.dev": "^1.55.0",
+    "encore.dev": "^1.56.0",
     "pg": "^8.13.1",
     "resend": "^6.9.4"
   },

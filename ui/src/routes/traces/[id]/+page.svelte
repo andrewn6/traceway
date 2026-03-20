@@ -252,46 +252,46 @@
 {:else if spans.length === 0}
 	<div class="text-text-muted text-sm text-center py-16">Trace not found</div>
 {:else}
-	<div class="flex flex-col h-[calc(100vh-8rem)] -m-4 lg:-m-5 rounded-xl overflow-hidden border border-border/40 bg-bg-secondary/20">
+	<div class="flex flex-col h-[calc(100vh-4.5rem)] -m-4 lg:-m-5 overflow-hidden bg-bg motion-rise-in">
 		<!-- Header -->
-		<div class="flex items-center gap-2.5 px-4 py-2 border-b border-border/55 bg-bg-secondary/30 shrink-0">
-			<a href="/traces" class="text-text-secondary hover:text-text text-[13px] shrink-0">&larr; Traces</a>
-			<span class="text-border/50">/</span>
-			<h1 class="text-[13px] font-semibold font-mono truncate max-w-[10rem]">{shortId(traceId)}</h1>
+		<div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/55 bg-bg-secondary/40 shrink-0">
+			<a href="/traces" class="text-text-muted hover:text-text text-[12px] shrink-0 transition-colors">&larr;</a>
+			<span class="text-[12px] text-text-muted">/</span>
+			<span class="text-[12px] font-medium font-mono text-text truncate">{shortId(traceId)}</span>
 
-			<span class="px-2 py-0.5 rounded text-[11px] border shrink-0
-				{traceStatus === 'completed' ? 'bg-success/15 text-success border-success/25' :
-				 traceStatus === 'running' ? 'bg-warning/15 text-warning border-warning/25' :
-				 'bg-danger/15 text-danger border-danger/25'}">
+			<span class="px-1.5 py-0.5 rounded text-[10px] border shrink-0
+				{traceStatus === 'completed' ? 'bg-success/10 text-success border-success/20' :
+				 traceStatus === 'running' ? 'bg-warning/10 text-warning border-warning/20' :
+				 'bg-danger/10 text-danger border-danger/20'}">
 				{traceStatus}
 			</span>
 
-			<div class="hidden md:flex items-center gap-1.5 text-[11px] text-text-secondary font-mono shrink-0">
+			<div class="flex items-center gap-1 text-[11px] text-text-muted font-mono shrink-0">
 				{#if totalDuration !== null}
 					<span>{totalDuration < 1000 ? `${totalDuration}ms` : `${(totalDuration / 1000).toFixed(2)}s`}</span>
 				{/if}
 				{#if totalTokens}
-					<span class="text-border/60">&middot;</span>
+					<span class="text-border/50">&middot;</span>
 					<span>{totalTokens.toLocaleString()} tok</span>
 				{/if}
 				{#if totalCost}
-					<span class="text-border/60">&middot;</span>
+					<span class="text-border/50">&middot;</span>
 					<span class="text-success">${totalCost.toFixed(4)}</span>
 				{/if}
-				<span class="text-border/60">&middot;</span>
-				<span class="text-text-muted">{spans.length} spans</span>
+				<span class="text-border/50">&middot;</span>
+				<span>{spans.length} spans</span>
 			</div>
 
-			<div class="ml-auto flex items-center gap-1 shrink-0">
+			<div class="ml-auto flex items-center gap-0.5 shrink-0">
 				<button
-					class="btn-ghost h-7 text-[11px] px-2.5"
+					class="btn-ghost h-6 text-[11px] px-2"
 					onclick={() => { showAddSpan = !showAddSpan; }}
 				>{showAddSpan ? 'Cancel' : '+ Span'}</button>
-				<button class="btn-ghost h-7 text-[11px] px-2.5" onclick={handleExportTrace}>Export</button>
+				<button class="btn-ghost h-6 text-[11px] px-2" onclick={handleExportTrace}>Export</button>
 				<button
-					class="btn-ghost h-7 text-[11px] px-2.5 {confirmDeleteTrace ? '!text-danger !border-danger/30' : ''}"
+					class="btn-ghost h-6 text-[11px] px-2 {confirmDeleteTrace ? '!text-danger !border-danger/30' : ''}"
 					onclick={handleDeleteTrace}
-				>{confirmDeleteTrace ? 'Confirm delete?' : 'Delete'}</button>
+				>{confirmDeleteTrace ? 'Confirm?' : 'Delete'}</button>
 			</div>
 		</div>
 
@@ -366,52 +366,52 @@
 			class:select-none={isDragging}
 		>
 			<!-- Left panel: search + tree -->
-			<div class="min-h-0 flex flex-col" style="width: {splitPercent}%">
+			<div class="min-h-0 flex flex-col border-r border-border/40" style="width: {splitPercent}%">
 				<!-- Search toolbar -->
-				<div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/55 bg-bg-secondary/20 shrink-0">
-					<svg class="w-3.5 h-3.5 text-text-muted shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+				<div class="flex items-center gap-1.5 px-2.5 py-1 border-b border-border/40 shrink-0">
+					<svg class="w-3 h-3 text-text-muted/60 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 						<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
 					</svg>
 					<input
 						bind:this={searchInputEl}
 						bind:value={searchQuery}
 						type="text"
-						placeholder="Search spans..."
-						class="flex-1 bg-transparent text-[12px] text-text placeholder:text-text-muted/50 focus:outline-none min-w-0"
+						placeholder="Search spans... (/)"
+						class="flex-1 bg-transparent text-[11px] text-text placeholder:text-text-muted/40 focus:outline-none min-w-0"
 					/>
 					<button
-						class="query-chip h-6 text-[11px] {showFilters ? 'query-chip-active' : ''}"
+						class="query-chip h-5 text-[10px] {showFilters ? 'query-chip-active' : ''}"
 						onclick={() => (showFilters = !showFilters)}
 					>
 						Filters
 						{#if hasActiveFilters}
-							<span class="w-1.5 h-1.5 rounded-full bg-warning shrink-0"></span>
+							<span class="w-1 h-1 rounded-full bg-warning shrink-0"></span>
 						{/if}
 					</button>
 					<button
-						class="query-chip h-6 text-[11px] {showMetadata ? 'query-chip-active' : ''}"
+						class="query-chip h-5 text-[10px] {showMetadata ? 'query-chip-active' : ''}"
 						onclick={() => (showMetadata = !showMetadata)}
 					>Meta</button>
 				</div>
 
 				<!-- Filter row (collapsible) -->
 				{#if showFilters}
-					<div class="flex items-center gap-1.5 px-3 py-1.5 border-b border-border/55 bg-bg-tertiary/20 shrink-0 motion-rise-in">
-						<select bind:value={statusFilter} class="control-select h-7 text-[11px] w-28">
+					<div class="flex items-center gap-1 px-2.5 py-1 border-b border-border/40 shrink-0 motion-rise-in">
+						<select bind:value={statusFilter} class="control-select h-6 text-[10px] w-24">
 							<option value="all">All status</option>
 							<option value="running">Running</option>
 							<option value="completed">Completed</option>
 							<option value="failed">Failed</option>
 						</select>
-						<select bind:value={kindFilter} class="control-select h-7 text-[11px] w-28">
+						<select bind:value={kindFilter} class="control-select h-6 text-[10px] w-24">
 							<option value="all">All kinds</option>
 							<option value="llm_call">LLM call</option>
 							<option value="fs_read">File read</option>
 							<option value="fs_write">File write</option>
 							<option value="custom">Custom</option>
 						</select>
-						<button class="btn-ghost h-7 text-[11px]" onclick={clearFilters}>Reset</button>
-						<span class="text-[10px] text-text-muted ml-auto">{timelineSpans.length}/{spans.length}</span>
+						<button class="btn-ghost h-6 text-[10px]" onclick={clearFilters}>Reset</button>
+						<span class="text-[10px] text-text-muted ml-auto tabular-nums">{timelineSpans.length}/{spans.length}</span>
 					</div>
 				{/if}
 
@@ -428,18 +428,18 @@
 			<!-- Resizable divider -->
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
-				class="w-px shrink-0 cursor-col-resize relative group"
+				class="w-0 shrink-0 cursor-col-resize relative group z-10"
 				onpointerdown={onDividerPointerDown}
 				onpointermove={onDividerPointerMove}
 				onpointerup={onDividerPointerUp}
 			>
-				<div class="absolute inset-y-0 -left-[3px] -right-[3px] z-10"></div>
-				<div class="absolute inset-y-0 left-0 right-0 bg-border/55 group-hover:bg-accent/60 transition-colors"
+				<div class="absolute inset-y-0 -left-[3px] -right-[3px]"></div>
+				<div class="absolute inset-y-0 -left-px -right-px group-hover:bg-accent/60 transition-colors"
 					class:!bg-accent={isDragging}></div>
 			</div>
 
 			<!-- Right panel: span detail -->
-			<div class="flex-1 min-h-0 overflow-hidden">
+			<div class="flex-1 min-h-0 overflow-hidden bg-bg">
 				{#if selectedSpan}
 					<SpanDetail span={selectedSpan} {onSpanAction} allSpans={spans} />
 				{:else}

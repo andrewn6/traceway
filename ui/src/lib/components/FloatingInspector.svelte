@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { createEventDispatcher } from 'svelte';
-
 	type WidthMode = 'compact' | 'default' | 'wide';
 
 	let {
@@ -9,21 +7,27 @@
 		subtitle = '',
 		width = 'default' as WidthMode,
 		showBackdrop = true,
-		children
+		children,
+		onclose,
+		onwidth
+	}: {
+		open?: boolean;
+		title?: string;
+		subtitle?: string;
+		width?: WidthMode;
+		showBackdrop?: boolean;
+		children?: any;
+		onclose?: () => void;
+		onwidth?: (width: WidthMode) => void;
 	} = $props();
-
-	const dispatch = createEventDispatcher<{
-		close: void;
-		width: { width: WidthMode };
-	}>();
 
 	function cycleWidth() {
 		const next: WidthMode = width === 'compact' ? 'default' : width === 'default' ? 'wide' : 'compact';
-		dispatch('width', { width: next });
+		onwidth?.(next);
 	}
 
 	function close() {
-		dispatch('close');
+		onclose?.();
 	}
 
 	const widthClass = $derived.by(() => {
@@ -37,8 +41,8 @@
 	onkeydown={(e) => {
 		if (!open) return;
 		if (e.key === 'Escape') close();
-		if (e.key === '[') dispatch('width', { width: 'compact' });
-		if (e.key === ']') dispatch('width', { width: 'wide' });
+		if (e.key === '[') onwidth?.('compact');
+		if (e.key === ']') onwidth?.('wide');
 	}}
 />
 

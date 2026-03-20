@@ -87,16 +87,8 @@ pub fn compute_analytics(spans: &[&Span], query: &AnalyticsQuery) -> AnalyticsRe
         let mut key = HashMap::new();
         for field in fields {
             let val = match field {
-                GroupByField::Model => span
-                    .kind()
-                    .model()
-                    .unwrap_or("unknown")
-                    .to_string(),
-                GroupByField::Provider => span
-                    .kind()
-                    .provider()
-                    .unwrap_or("unknown")
-                    .to_string(),
+                GroupByField::Model => span.kind().model().unwrap_or("unknown").to_string(),
+                GroupByField::Provider => span.kind().provider().unwrap_or("unknown").to_string(),
                 GroupByField::Kind => span.kind().kind_name().to_string(),
                 GroupByField::Status => span.status().as_str().to_string(),
                 GroupByField::Trace => span.trace_id().to_string(),

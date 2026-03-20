@@ -49,7 +49,7 @@ pub async fn process_capture_rules(
         // Check that the target dataset exists
         let dataset_exists = {
             let r = store.read().await;
-            r.get_dataset(rule.dataset_id).is_some()
+            r.contains_dataset(rule.dataset_id)
         };
         if !dataset_exists {
             tracing::warn!(

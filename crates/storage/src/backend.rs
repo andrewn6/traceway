@@ -77,7 +77,8 @@ pub trait StorageBackend: Send + Sync {
     async fn delete_datapoint(&self, id: DatapointId) -> Result<bool, StorageError>;
 
     /// Delete all datapoints for a dataset. Returns count of deleted.
-    async fn delete_dataset_datapoints(&self, dataset_id: DatasetId) -> Result<usize, StorageError>;
+    async fn delete_dataset_datapoints(&self, dataset_id: DatasetId)
+        -> Result<usize, StorageError>;
 
     // --- Queue operations ---
 
@@ -88,7 +89,8 @@ pub trait StorageBackend: Send + Sync {
     async fn get_queue_item(&self, id: QueueItemId) -> Result<Option<QueueItem>, StorageError>;
 
     /// List queue items for a dataset.
-    async fn list_queue_items(&self, dataset_id: DatasetId) -> Result<Vec<QueueItem>, StorageError>;
+    async fn list_queue_items(&self, dataset_id: DatasetId)
+        -> Result<Vec<QueueItem>, StorageError>;
 
     /// Delete a queue item by ID. Returns true if deleted.
     async fn delete_queue_item(&self, id: QueueItemId) -> Result<bool, StorageError>;
@@ -127,10 +129,16 @@ pub trait StorageBackend: Send + Sync {
     async fn save_capture_rule(&self, rule: &CaptureRule) -> Result<(), StorageError>;
 
     /// Get a capture rule by ID.
-    async fn get_capture_rule(&self, id: CaptureRuleId) -> Result<Option<CaptureRule>, StorageError>;
+    async fn get_capture_rule(
+        &self,
+        id: CaptureRuleId,
+    ) -> Result<Option<CaptureRule>, StorageError>;
 
     /// List capture rules for a dataset.
-    async fn list_capture_rules(&self, dataset_id: DatasetId) -> Result<Vec<CaptureRule>, StorageError>;
+    async fn list_capture_rules(
+        &self,
+        dataset_id: DatasetId,
+    ) -> Result<Vec<CaptureRule>, StorageError>;
 
     /// Delete a capture rule by ID. Returns true if deleted.
     async fn delete_capture_rule(&self, id: CaptureRuleId) -> Result<bool, StorageError>;
@@ -234,16 +242,23 @@ pub trait StorageBackend: Send + Sync {
     // --- Provider Connection operations ---
 
     /// Save or update a provider connection.
-    async fn save_provider_connection(&self, conn: &ProviderConnection) -> Result<(), StorageError>;
+    async fn save_provider_connection(&self, conn: &ProviderConnection)
+        -> Result<(), StorageError>;
 
     /// Get a provider connection by ID.
-    async fn get_provider_connection(&self, id: ProviderConnectionId) -> Result<Option<ProviderConnection>, StorageError>;
+    async fn get_provider_connection(
+        &self,
+        id: ProviderConnectionId,
+    ) -> Result<Option<ProviderConnection>, StorageError>;
 
     /// List all provider connections.
     async fn list_provider_connections(&self) -> Result<Vec<ProviderConnection>, StorageError>;
 
     /// Delete a provider connection by ID. Returns true if deleted.
-    async fn delete_provider_connection(&self, id: ProviderConnectionId) -> Result<bool, StorageError>;
+    async fn delete_provider_connection(
+        &self,
+        id: ProviderConnectionId,
+    ) -> Result<bool, StorageError>;
 
     /// Load all provider connections. Used during store initialization.
     async fn load_all_provider_connections(&self) -> Result<Vec<ProviderConnection>, StorageError> {

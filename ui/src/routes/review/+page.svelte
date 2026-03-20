@@ -315,12 +315,15 @@
 				<span class="text-right">State</span>
 			</div>
 			{#each filteredItems as item (item.id)}
-				<button
-					class="w-full grid grid-cols-[80px_1fr_110px_92px_70px] gap-3 items-center px-4 py-2.5 transition-colors text-left motion-row
+				<div
+					class="w-full grid grid-cols-[80px_1fr_110px_92px_70px] gap-3 items-center px-4 py-2.5 cursor-pointer text-left motion-row
 						{reviewingItem?.id === item.id
 							? 'bg-accent/5'
 							: 'hover:bg-bg-tertiary/20'}"
+					role="row"
+					tabindex="0"
 					onclick={() => startReview(item)}
+					onkeydown={(e) => { if (e.key === 'Enter') startReview(item); }}
 				>
 					<span class="text-[12px] text-text-muted truncate">
 						{datasetName(item.dataset_id)}
@@ -341,20 +344,18 @@
 
 					<div class="text-right">
 					{#if item.status === 'pending'}
-						<!-- svelte-ignore a11y_click_events_have_key_events -->
-						<span
+						<button
+							type="button"
 							class="px-2 py-1 text-[10px] bg-accent/10 text-accent border border-accent/20 rounded hover:bg-accent/20 transition-colors shrink-0"
-							role="button"
-							tabindex="0"
 							onclick={(e) => { e.stopPropagation(); handleClaim(item.id); }}
-						>Claim</span>
+						>Claim</button>
 					{:else if item.status === 'claimed'}
 						<span class="px-2 py-0.5 text-[10px] text-accent border border-accent/20 rounded shrink-0">reviewing</span>
 					{:else}
 						<span class="px-2 py-0.5 text-[10px] text-success border border-success/20 rounded shrink-0">done</span>
 					{/if}
 					</div>
-				</button>
+				</div>
 			{/each}
 		</div>
 
@@ -363,8 +364,8 @@
 			title={reviewingItem ? `Review ${shortId(reviewingItem.id)}` : 'Review'}
 			subtitle={reviewingItem ? `Dataset: ${datasetName(reviewingItem.dataset_id)}` : ''}
 			width={inspectorWidth}
-			on:close={closeReview}
-			on:width={(e) => (inspectorWidth = e.detail.width)}
+			onclose={closeReview}
+			onwidth={(w) => (inspectorWidth = w)}
 		>
 			{#if reviewingItem}
 				<div class="space-y-3">

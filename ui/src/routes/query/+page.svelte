@@ -1139,8 +1139,8 @@
 		title={inspectedSpan?.name ?? 'Span'}
 		subtitle={inspectedSpan ? `${spanKindLabel(inspectedSpan)} - ${spanStatus(inspectedSpan)}` : ''}
 		width={inspectorWidth}
-		on:close={() => (inspectedSpan = null)}
-		on:width={(e) => (inspectorWidth = e.detail.width)}
+		onclose={() => (inspectedSpan = null)}
+		onwidth={(w) => (inspectorWidth = w)}
 	>
 		{#if inspectedSpan}
 			<div class="space-y-3">

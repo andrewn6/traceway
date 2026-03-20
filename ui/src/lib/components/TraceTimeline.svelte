@@ -21,11 +21,11 @@
 	} = $props();
 
 	// ── Constants ──────────────────────────────────────────────────────
-	const SPAN_ROW_HEIGHT = 40;
-	const PREVIEW_LINE_HEIGHT = 17;
-	const PREVIEW_PADDING = 6;
+	const SPAN_ROW_HEIGHT = 30;
+	const PREVIEW_LINE_HEIGHT = 16;
+	const PREVIEW_PADDING = 4;
 	const OVERSCAN = 10;
-	const INDENT_PX = 20;
+	const INDENT_PX = 16;
 
 	/** Estimate preview height based on text length (rough char-per-line estimate) */
 	function previewHeight(text: string): number {
@@ -369,28 +369,26 @@
 
 <div class="flex flex-col h-full min-h-0 bg-transparent">
 	<!-- Toolbar -->
-	<div class="flex items-center gap-2 px-3 py-2.5 border-b border-border/55 shrink-0 bg-bg-secondary/30 backdrop-blur-sm">
-		{#if viewMode === 'tree' || viewMode === 'flat'}
-			<span class="text-[11px] uppercase tracking-[0.1em] text-text-muted">{flatTree.filter(n => n.type === 'span').length} spans</span>
-		{/if}
+	<div class="flex items-center gap-1.5 px-2 py-1 border-b border-border/40 shrink-0">
+		<span class="text-[10px] uppercase tracking-[0.08em] text-text-muted/70 tabular-nums">{flatTree.filter(n => n.type === 'span').length} spans</span>
 
 		<div class="flex-1"></div>
 
 		{#if viewMode === 'tree'}
-			<div class="flex items-center gap-0.5 text-[11px] text-text-muted bg-bg-tertiary/35 border border-border/50 rounded-md px-1.5 py-0.5">
-				<button class="hover:text-text transition-colors duration-150 px-1" onclick={expandAll}>expand</button>
-				<span class="text-border">/</span>
-				<button class="hover:text-text transition-colors duration-150 px-1" onclick={collapseAll}>collapse</button>
+			<div class="flex items-center gap-0 text-[10px] text-text-muted">
+				<button class="hover:text-text transition-colors px-1" onclick={expandAll}>expand</button>
+				<span class="text-border/40">/</span>
+				<button class="hover:text-text transition-colors px-1" onclick={collapseAll}>collapse</button>
 			</div>
 		{/if}
 
 		<!-- View mode toggle -->
-		<div class="flex items-center bg-bg-tertiary/45 border border-border/55 rounded-md text-[11px] p-0.5 backdrop-blur-sm">
+		<div class="flex items-center bg-bg-tertiary/30 border border-border/40 rounded-md text-[10px] p-px">
 			{#each (['tree', 'flat', 'timeline', 'reader'] as const) as mode}
 				<button
-					class="px-2 py-0.5 rounded transition-colors duration-150 capitalize {viewMode === mode ? 'bg-accent/20 text-accent border border-accent/35' : 'text-text-muted hover:text-text'}"
+					class="px-1.5 py-px rounded transition-colors capitalize {viewMode === mode ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text'}"
 					onclick={() => viewMode = mode}
-				>{mode}</button>
+				>{mode === 'timeline' ? 'Time' : mode}</button>
 			{/each}
 		</div>
 	</div>
@@ -416,8 +414,8 @@
 					{#if node.type === 'preview'}
 						<!-- Content preview block -->
 						<div
-							class="absolute left-0 right-0 cursor-pointer transition-colors duration-100
-								{selectedId === s.id ? 'bg-accent/8 border-l-2 border-l-accent' : 'border-l-2 border-l-transparent hover:bg-bg-tertiary/50'}"
+							class="absolute left-0 right-0 cursor-pointer motion-row
+								{selectedId === s.id ? 'bg-accent/8 border-l-2 border-l-accent' : 'border-l-2 border-l-transparent hover:bg-bg-tertiary/30'}"
 							style="top: {topPx}px; height: {node.height}px"
 							role="button"
 							tabindex={0}
@@ -425,8 +423,8 @@
 							onclick={() => onSelect?.(s)}
 							onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') onSelect?.(s); }}
 						>
-							<div class="overflow-hidden pr-3" style="padding-left: {(node.depth + (viewMode === 'tree' ? 1 : 0)) * INDENT_PX + 46}px; padding-top: 3px">
-								<p class="text-[12px] text-text-muted/82 leading-[19px] line-clamp-3">{node.text}</p>
+							<div class="overflow-hidden pr-2" style="padding-left: {(node.depth + (viewMode === 'tree' ? 1 : 0)) * INDENT_PX + 36}px; padding-top: 2px">
+								<p class="text-[11px] text-text-muted/70 leading-[16px] line-clamp-3">{node.text}</p>
 							</div>
 						</div>
 					{:else}
@@ -434,10 +432,13 @@
 						{@const status = spanStatus(s)}
 						{@const duration = spanDurationMs(s)}
 						{@const model = modelBadge(s)}
+						{@const cost = costBadge(s)}
+						{@const tokens = tokenCount(s)}
+						{@const bytes = bytesBadge(s)}
 						{@const bar = barProps(s)}
 						<div
-							class="absolute left-0 right-0 flex items-center text-xs transition-colors duration-100 group
-								{selectedId === s.id ? 'bg-accent/10 border-l-2 border-l-accent' : 'hover:bg-bg-tertiary/40 border-l-2 border-l-transparent'}"
+							class="absolute left-0 right-0 flex items-center text-xs motion-row group border-b border-border/10
+								{selectedId === s.id ? 'bg-accent/8 border-l-2 border-l-accent' : 'hover:bg-bg-tertiary/30 border-l-2 border-l-transparent'}"
 							style="top: {topPx}px; height: {node.height}px"
 							role="button"
 							tabindex={0}
@@ -445,62 +446,68 @@
 							onclick={() => onSelect?.(s)}
 							onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect?.(s); } }}
 						>
-							<!-- Span info (left) -->
-							<div class="flex items-center gap-1.5 pl-2 overflow-hidden min-w-0" style="width: 52%">
+							<!-- Tree indent + status + name -->
+							<div class="flex items-center gap-1 pl-1.5 overflow-hidden min-w-0 flex-1">
 								{#if viewMode === 'tree'}
-									<div class="relative flex items-center shrink-0" style="width: {node.depth * INDENT_PX + 20}px">
+									<div class="relative flex items-center shrink-0" style="width: {node.depth * INDENT_PX + 16}px">
 										{#if node.depth > 0}
-											<div class="absolute top-0 bottom-0 border-l border-border/25" style="left: {node.depth * INDENT_PX - 10}px"></div>
-											<div class="absolute top-1/2 border-t border-border/25 w-2" style="left: {node.depth * INDENT_PX - 10}px"></div>
+											<div class="absolute top-0 bottom-0 border-l border-border/15" style="left: {node.depth * INDENT_PX - 8}px"></div>
+											<div class="absolute top-1/2 border-t border-border/15 w-1.5" style="left: {node.depth * INDENT_PX - 8}px"></div>
 										{/if}
 										<div style="width: {node.depth * INDENT_PX}px"></div>
 										{#if node.hasChildren}
 											<button
 												type="button"
 												aria-label={collapsed.has(s.id) ? `Expand ${s.name}` : `Collapse ${s.name}`}
-												class="w-5 h-5 flex items-center justify-center text-text-muted hover:text-text transition-colors duration-100 rounded-sm hover:bg-bg-tertiary/80"
+												class="w-4 h-4 flex items-center justify-center text-text-muted hover:text-text transition-colors rounded-sm"
 												onclick={(e: MouseEvent) => { e.stopPropagation(); toggleCollapse(s.id); }}
 											>
 												{#if collapsed.has(s.id)}
-													<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M4 2l6 4-6 4V2z"/></svg>
+													<svg class="w-2.5 h-2.5" viewBox="0 0 12 12" fill="currentColor"><path d="M4 2l6 4-6 4V2z"/></svg>
 												{:else}
-													<svg class="w-3 h-3" viewBox="0 0 12 12" fill="currentColor"><path d="M2 4l4 6 4-6H2z"/></svg>
+													<svg class="w-2.5 h-2.5" viewBox="0 0 12 12" fill="currentColor"><path d="M2 4l4 6 4-6H2z"/></svg>
 												{/if}
 											</button>
 										{:else}
-											<div class="w-5"></div>
+											<div class="w-4"></div>
 										{/if}
 									</div>
 								{/if}
 
 								<span class="w-1.5 h-1.5 rounded-full shrink-0 {statusDotClass(s)}"></span>
 
-								<div class="shrink-0">
-									<SpanKindIcon span={s} />
-								</div>
-
-								<span class="text-text truncate text-[12px] font-medium tracking-[0.01em]">{s.name}</span>
+								<span class="text-text truncate text-[11px] font-medium">{s.name}</span>
 
 								{#if node.hasChildren && collapsed.has(s.id)}
-									<span class="shrink-0 text-text-muted text-[10px] bg-bg-tertiary rounded px-1.5 py-px">+{node.descendantCount}</span>
+									<span class="shrink-0 text-text-muted/50 text-[9px] bg-bg-tertiary/50 rounded px-1 py-px">+{node.descendantCount}</span>
 								{/if}
 							</div>
 
-							<!-- Duration -->
-							<div class="shrink-0 w-16 text-right pr-3">
-								<span class="text-[11px] text-text-muted font-mono">{formatDuration(duration)}</span>
-							</div>
+							<!-- Right: duration + model tag + tokens + cost -->
+							<div class="flex items-center gap-1.5 shrink-0 pr-2.5">
+								<span class="text-[10px] text-text-muted/70 font-mono tabular-nums">{formatDuration(duration)}</span>
 
-							<!-- Gantt bar -->
-							<div class="flex-1 relative h-[14px] mr-3">
-								<div
-									class="absolute top-0 h-full rounded-[3px] {status === 'running' ? 'animate-pulse' : ''}"
-									style="left: {bar.left}; width: {bar.width}; background-color: {bar.color}; opacity: 0.85"
-								>
-									{#if showMetadata && model}
-										<span class="absolute inset-0 flex items-center justify-end pr-1.5 text-[9px] text-white/75 font-medium truncate pointer-events-none">{model}</span>
-									{/if}
-								</div>
+								{#if showMetadata && model}
+									<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold truncate max-w-[160px]"
+										style="background-color: {bar.color}; color: white"
+									>{model}</span>
+								{/if}
+
+								{#if showMetadata && tokens}
+									<span class="text-[10px] text-text-muted/60 font-mono tabular-nums">{tokens}</span>
+								{/if}
+
+								{#if showMetadata && cost}
+									<span class="text-[10px] text-success/70 font-mono tabular-nums">{cost}</span>
+								{/if}
+
+								{#if showMetadata && bytes}
+									<span class="text-[10px] text-text-muted/60 font-mono tabular-nums">{bytes}</span>
+								{/if}
+
+								{#if node.hasChildren}
+									<svg class="w-3 h-3 text-text-muted/40 shrink-0 group-hover:text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+								{/if}
 							</div>
 						</div>
 					{/if}

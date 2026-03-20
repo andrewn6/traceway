@@ -8,6 +8,9 @@
 		submitQueueItem,
 		subscribeEvents,
 		shortId,
+		getAuthConfig,
+		getAuthMe,
+		getOrgMembers,
 		type QueueItem,
 		type DatasetWithCount,
 		type Datapoint,
@@ -393,11 +396,26 @@
 		}
 	});
 
-	$effect(() => {
-		load();
-	});
+	async function resolveReviewerName() {
+		try {
+			const config = await getAuthConfig();
+			if (config.mode === 'cloud') {
+				const me = await getAuthMe();
+				if (me.user_id) {
+					const members = await getOrgMembers();
+					const self = members.find((m) => m.id === me.user_id);
+					if (self?.name) claimName = self.name;
+					else if (self?.email) claimName = self.email;
+				}
+			}
+		} catch {
+			// Local mode or auth unavailable — keep default 'reviewer'
+		}
+	}
 
 	onMount(() => {
+		load();
+		resolveReviewerName();
 		document.addEventListener('keydown', onKeydown);
 		const unsub = subscribeEvents((event) => {
 			if (event.type === 'queue_item_updated') {
@@ -417,101 +435,106 @@
 	});
 </script>
 
-<div class="app-shell-wide space-y-4">
-	<div class="flex items-center justify-between">
-		<div>
-			<h1 class="text-lg font-semibold text-text">Approvals</h1>
-			<p class="text-xs text-text-muted mt-0.5">Trace-linked human approval queue for model and agent outputs</p>
-		</div>
+<div class="app-shell-wide motion-rise-in">
+	<div class="mb-4">
+		<h1 class="text-lg font-semibold text-text">Approvals</h1>
+		<p class="text-xs text-text-muted mt-0.5">Trace-linked human approval queue for model and agent outputs</p>
 	</div>
 
-	<div class="app-toolbar-shell rounded-xl p-2 space-y-2">
-		<div class="flex items-center gap-1.5 flex-wrap">
-			<button class="query-chip {savedView === 'all' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'all')}>All queue</button>
-			<button class="query-chip {savedView === 'mine' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'mine')}>My queue</button>
-			<button class="query-chip {savedView === 'unclaimed' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'unclaimed')}>Unclaimed</button>
-			<button class="query-chip {savedView === 'completed_today' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'completed_today')}>Completed today</button>
-			<div class="flex-1"></div>
+	<div class="table-float motion-rise-in">
+		<!-- Toolbar -->
+		<div class="p-2 space-y-2 border-b border-border/55">
+			<!-- Row 1: Views + status chips + actions -->
 			<div class="flex items-center gap-1.5">
-				<input class="control-input h-8 text-[12px] w-[120px]" bind:value={claimName} placeholder="Reviewer" />
-				<button class="btn-secondary h-8 text-[12px]" disabled={!nextPending} onclick={claimNextPending}>Claim next</button>
-				<button class="btn-ghost h-8 text-[12px]" disabled={!nextClaimedByMe} onclick={openNextClaimedByMe}>Open next</button>
+				<button class="query-chip {savedView === 'all' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'all')}>All queue</button>
+				<button class="query-chip {savedView === 'mine' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'mine')}>My queue</button>
+				<button class="query-chip {savedView === 'unclaimed' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'unclaimed')}>Unclaimed</button>
+				<button class="query-chip {savedView === 'completed_today' ? 'query-chip-active' : ''}" onclick={() => (savedView = 'completed_today')}>Completed today</button>
+				<div class="w-px h-4 bg-border/40 mx-0.5"></div>
+				<button class={statusFilterClass('pending')} onclick={() => (statusFilter = 'pending')}>Pending ({counts.pending})</button>
+				<button class={statusFilterClass('claimed')} onclick={() => (statusFilter = 'claimed')}>Claimed ({counts.claimed})</button>
+				<button class={statusFilterClass('completed')} onclick={() => (statusFilter = 'completed')}>Completed ({counts.completed})</button>
+				<button class={statusFilterClass('all')} onclick={() => (statusFilter = 'all')}>All ({counts.total})</button>
+				<div class="flex-1"></div>
+				<button class="btn-secondary h-7 text-[12px]" disabled={!nextPending} onclick={claimNextPending}>Claim next</button>
+				<button class="btn-ghost h-7 text-[12px]" disabled={!nextClaimedByMe} onclick={openNextClaimedByMe}>Open next</button>
 			</div>
-		</div>
 
-		<div class="flex items-center gap-1.5 flex-wrap">
-			<button class={statusFilterClass('pending')} onclick={() => (statusFilter = 'pending')}>Pending ({counts.pending})</button>
-			<button class={statusFilterClass('claimed')} onclick={() => (statusFilter = 'claimed')}>Claimed ({counts.claimed})</button>
-			<button class={statusFilterClass('completed')} onclick={() => (statusFilter = 'completed')}>Completed ({counts.completed})</button>
-			<button class={statusFilterClass('all')} onclick={() => (statusFilter = 'all')}>All ({counts.total})</button>
-			<div class="w-px h-5 bg-border/40 mx-1"></div>
-			<select bind:value={datasetFilter} class="control-select shrink-0 h-7 text-[12px] w-[170px]">
-				<option value="all">All datasets</option>
-				{#each datasets as ds (ds.id)}
-					<option value={ds.id}>{ds.name}</option>
-				{/each}
-			</select>
-			<select bind:value={sortBy} class="control-select shrink-0 h-7 text-[12px] w-[140px]">
-				<option value="created_desc">Newest first</option>
-				<option value="created_asc">Oldest first</option>
-				<option value="status">Status priority</option>
-			</select>
-			<button class="query-chip h-7 {mineOnly ? 'query-chip-active' : ''}" onclick={() => (mineOnly = !mineOnly)}>Mine</button>
-			<div class="flex-1"></div>
-			<input class="control-input h-7 text-[12px] w-[200px]" bind:value={searchQuery} placeholder="Search..." />
-			<div class="text-[12px] text-text-muted tabular-nums">{filteredItems.length} items</div>
-		</div>
-
-		{#if selectedVisibleCount > 0}
-			<div class="flex items-center gap-2 text-[12px] border border-border/50 rounded-lg px-2 py-1.5 bg-bg-tertiary/30">
-				<span class="text-text-muted">{selectedVisibleCount} selected</span>
-				<button class="btn-secondary h-7 text-[11px]" disabled={submitting} onclick={bulkClaimSelected}>Bulk claim</button>
-				<button class="btn-primary h-7 text-[11px]" disabled={submitting} onclick={bulkApproveSelected}>Bulk approve</button>
-				<button class="btn-ghost h-7 text-[11px]" onclick={() => (selectedIds = new Set())}>Clear</button>
-			</div>
-		{/if}
-	</div>
-
-	{#if loading}
-		<div class="text-text-muted text-sm text-center py-10">Loading approvals...</div>
-	{:else}
-		<div class="table-float overflow-hidden">
-			{#if filteredItems.length === 0}
-				<div class="px-3 py-8 text-center text-sm text-text-muted">No items match current filters.</div>
-			{:else}
-				<div class="max-h-[min(72vh,980px)] overflow-y-auto">
-					<div class="grid grid-cols-[34px_100px_1fr_170px_130px_110px_120px] gap-3 px-3 py-2 table-head-compact border-b border-border/55 sticky top-0 z-10 bg-bg-secondary/96 backdrop-blur-sm">
-						<label class="flex items-center justify-center"><input type="checkbox" checked={allVisibleSelected} onchange={toggleSelectAllVisible} class="accent-accent" /></label>
-						<span>Status</span>
-						<span>Dataset / Item</span>
-						<span>Datapoint</span>
-						<span>Created</span>
-						<span>Reviewer</span>
-						<span class="text-right">Action</span>
-					</div>
-					{#each filteredItems as item (item.id)}
-						<button type="button" class="w-full text-left grid grid-cols-[34px_100px_1fr_170px_130px_110px_120px] gap-3 items-center px-3 py-2 border-b border-border/45 border-l-2 {rowAccent(item.status)} hover:bg-bg-secondary/45 motion-row cursor-pointer" onclick={() => { selectedItemId = item.id; detailOpen = true; }}>
-							<div class="flex items-center justify-center">
-								<input type="checkbox" checked={selectedIds.has(item.id)} onclick={(e) => e.stopPropagation()} onchange={() => toggleSelected(item.id)} class="accent-accent" />
-							</div>
-							<div><span class={`px-2 py-0.5 rounded text-[11px] border ${statusTone(item.status)}`}>{item.status}</span></div>
-							<div class="min-w-0">
-								<div class="text-[13px] text-text truncate">{datasetName(item.dataset_id)}</div>
-								<div class="text-[11px] text-text-muted font-mono truncate">{shortId(item.id)}</div>
-							</div>
-							<div class="text-[12px] font-mono text-text-secondary truncate">{shortId(item.datapoint_id)}</div>
-							<div class="text-[12px] text-text-muted">{formatDate(item.created_at)}</div>
-							<div class="text-[12px] text-text-muted truncate">{item.claimed_by ?? '-'}</div>
-							<div class="text-right">
-								<span class="btn-secondary h-7 text-[11px] inline-flex items-center">Review</span>
-							</div>
-						</button>
+			<!-- Row 2: Filters + search -->
+			<div class="flex items-center gap-1.5">
+				<select bind:value={datasetFilter} class="control-select shrink-0 h-7 text-[12px] w-[140px]">
+					<option value="all">All datasets</option>
+					{#each datasets as ds (ds.id)}
+						<option value={ds.id}>{ds.name}</option>
 					{/each}
+				</select>
+				<select bind:value={sortBy} class="control-select shrink-0 h-7 text-[12px] w-[120px]">
+					<option value="created_desc">Newest first</option>
+					<option value="created_asc">Oldest first</option>
+					<option value="status">By status</option>
+				</select>
+				<button class="query-chip {mineOnly ? 'query-chip-active' : ''}" onclick={() => (mineOnly = !mineOnly)}>Mine</button>
+				<div class="flex-1"></div>
+				<div class="command-input-shell w-[240px]">
+					<div class="pl-2.5 pr-1.5 text-text-muted/80">
+						<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
+					</div>
+					<input bind:value={searchQuery} type="text" placeholder="Search items..." class="command-input" />
+				</div>
+				<span class="text-[11px] text-text-muted tabular-nums shrink-0">{filteredItems.length} items</span>
+			</div>
+
+			<!-- Bulk actions (conditional) -->
+			{#if selectedVisibleCount > 0}
+				<div class="flex items-center gap-2 text-[12px] rounded-lg px-2.5 py-1.5 bg-bg-tertiary/40 motion-rise-in">
+					<span class="text-text-muted">{selectedVisibleCount} selected</span>
+					<div class="flex-1"></div>
+					<button class="btn-secondary h-7 text-[11px]" disabled={submitting} onclick={bulkClaimSelected}>Bulk claim</button>
+					<button class="btn-primary h-7 text-[11px]" disabled={submitting} onclick={bulkApproveSelected}>Bulk approve</button>
+					<button class="btn-ghost h-7 text-[11px]" onclick={() => (selectedIds = new Set())}>Clear</button>
 				</div>
 			{/if}
 		</div>
 
-		{#if detailOpen && selectedItem}
+		<!-- Table content -->
+		{#if loading}
+			<div class="text-text-muted text-sm text-center py-10">Loading approvals...</div>
+		{:else if filteredItems.length === 0}
+			<div class="px-3 py-8 text-center text-sm text-text-muted">No items match current filters.</div>
+		{:else}
+			<div class="max-h-[min(72vh,980px)] overflow-y-auto">
+				<div class="grid grid-cols-[34px_100px_1fr_170px_130px_110px_120px] gap-3 px-3 py-2 table-head-compact border-b border-border/55 sticky top-0 z-10 bg-bg-secondary/96 backdrop-blur-sm">
+					<label class="flex items-center justify-center"><input type="checkbox" checked={allVisibleSelected} onchange={toggleSelectAllVisible} class="accent-accent" /></label>
+					<span>Status</span>
+					<span>Dataset / Item</span>
+					<span>Datapoint</span>
+					<span>Created</span>
+					<span>Reviewer</span>
+					<span class="text-right">Action</span>
+				</div>
+				{#each filteredItems as item (item.id)}
+					<button type="button" class="w-full text-left grid grid-cols-[34px_100px_1fr_170px_130px_110px_120px] gap-3 items-center px-3 py-2 border-b border-border/45 border-l-2 {rowAccent(item.status)} hover:bg-bg-secondary/45 motion-row cursor-pointer" onclick={() => { selectedItemId = item.id; detailOpen = true; }}>
+						<div class="flex items-center justify-center">
+							<input type="checkbox" checked={selectedIds.has(item.id)} onclick={(e) => e.stopPropagation()} onchange={() => toggleSelected(item.id)} class="accent-accent" />
+						</div>
+						<div><span class={`px-2 py-0.5 rounded text-[11px] border ${statusTone(item.status)}`}>{item.status}</span></div>
+						<div class="min-w-0">
+							<div class="text-[13px] text-text truncate">{datasetName(item.dataset_id)}</div>
+							<div class="text-[11px] text-text-muted font-mono truncate">{shortId(item.id)}</div>
+						</div>
+						<div class="text-[12px] font-mono text-text-secondary truncate">{shortId(item.datapoint_id)}</div>
+						<div class="text-[12px] text-text-muted">{formatDate(item.created_at)}</div>
+						<div class="text-[12px] text-text-muted truncate">{item.claimed_by ?? '-'}</div>
+						<div class="text-right">
+							<span class="btn-secondary h-7 text-[11px] inline-flex items-center">Review</span>
+						</div>
+					</button>
+				{/each}
+			</div>
+		{/if}
+	</div>
+
+	{#if detailOpen && selectedItem}
 			<button type="button" class="fixed inset-0 z-40 bg-black/35" onclick={() => (detailOpen = false)} aria-label="Close approval review modal"></button>
 			<div class="fixed left-1/2 -translate-x-1/2 top-[9.5rem] bottom-[4.25rem] w-[min(920px,calc(100vw-2rem))] z-50 table-float rounded-xl overflow-y-auto motion-rise-in">
 				<div class="px-3 py-2 border-b border-border/55 bg-gradient-to-r from-bg-secondary/75 via-bg-secondary/45 to-transparent sticky top-0 z-10 backdrop-blur-md flex items-center justify-between gap-2">
@@ -572,5 +595,4 @@
 				</div>
 			</div>
 		{/if}
-	{/if}
 </div>

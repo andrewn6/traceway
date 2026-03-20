@@ -273,16 +273,16 @@
 	{@const error = spanError(span)}
 	{@const meta = kindMeta(span)}
 
-	<div class="flex flex-col h-full min-h-0 text-[13px]">
+	<div class="flex flex-col h-full min-h-0 text-[12px]">
 		<!-- Header -->
-		<div class="px-4 py-3 border-b border-border/55 shrink-0 space-y-2 bg-bg-secondary/20">
-			<div class="flex items-center gap-2">
+		<div class="px-3 py-2 border-b border-border/40 shrink-0 space-y-1.5">
+			<div class="flex items-center gap-1.5">
 				<SpanKindIcon {span} />
-				<h2 class="font-semibold text-[15px] text-text flex-1 truncate tracking-tight">Span {shortId(span.id)}</h2>
+				<h2 class="font-semibold text-[13px] text-text flex-1 truncate">Span {shortId(span.id)}</h2>
 				<StatusBadge {status} />
 				{#if onClose}
-					<button onclick={onClose} class="w-7 h-7 rounded-lg flex items-center justify-center text-text-muted hover:text-text hover:bg-bg-tertiary/70 transition-colors" aria-label="Close">
-						<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+					<button onclick={onClose} class="w-6 h-6 rounded flex items-center justify-center text-text-muted hover:text-text hover:bg-bg-tertiary/70 transition-colors" aria-label="Close">
+						<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
 					</button>
 				{/if}
 			</div>
@@ -326,7 +326,7 @@
 		{/if}
 
 		<!-- Action bar -->
-		<div class="flex items-center gap-1.5 px-4 py-1.5 border-b border-border/55 shrink-0 bg-bg-secondary/10 flex-wrap">
+		<div class="flex items-center gap-1 px-3 py-1 border-b border-border/40 shrink-0 flex-wrap">
 			<div class="relative">
 				<button class="query-chip h-6 text-[11px] gap-1" onclick={openExportDropdown}>
 					Add to dataset
@@ -394,19 +394,19 @@
 		{/if}
 
 		<!-- Tabs -->
-		<div class="flex items-center border-b border-border/55 shrink-0 bg-bg-secondary/10">
-			<button class="px-4 py-2 text-[12px] font-medium border-b-2 transition-colors {activeTab === 'messages' ? 'border-accent text-text' : 'border-transparent text-text-muted hover:text-text-secondary'}" onclick={() => (activeTab = 'messages')}>
+		<div class="flex items-center border-b border-border/40 shrink-0">
+			<button class="px-3 py-1.5 text-[11px] font-medium border-b-2 transition-colors {activeTab === 'messages' ? 'border-accent text-text' : 'border-transparent text-text-muted hover:text-text-secondary'}" onclick={() => (activeTab = 'messages')}>
 				{isFileSpan ? 'File' : 'Messages'}
 			</button>
-			<button class="px-4 py-2 text-[12px] font-medium border-b-2 transition-colors {activeTab === 'metadata' ? 'border-accent text-text' : 'border-transparent text-text-muted hover:text-text-secondary'}" onclick={() => (activeTab = 'metadata')}>
+			<button class="px-3 py-1.5 text-[11px] font-medium border-b-2 transition-colors {activeTab === 'metadata' ? 'border-accent text-text' : 'border-transparent text-text-muted hover:text-text-secondary'}" onclick={() => (activeTab = 'metadata')}>
 				Metadata
 			</button>
 			<div class="flex-1"></div>
 			{#if activeTab === 'messages' && !isFileSpan}
-				<div class="flex items-center gap-0.5 pr-3 text-[10px]">
-					<button class="px-2 py-1 rounded transition-colors {formatMode === 'pretty' ? 'bg-bg-tertiary text-text border border-border' : 'text-text-muted hover:text-text-secondary'}" onclick={() => (formatMode = 'pretty')}>Pretty</button>
-					<button class="px-2 py-1 rounded transition-colors {formatMode === 'json' ? 'bg-bg-tertiary text-text border border-border' : 'text-text-muted hover:text-text-secondary'}" onclick={() => (formatMode = 'json')}>JSON</button>
-					<button class="px-2 py-1 rounded transition-colors {formatMode === 'yaml' ? 'bg-bg-tertiary text-text border border-border' : 'text-text-muted hover:text-text-secondary'}" onclick={() => (formatMode = 'yaml')}>YAML</button>
+				<div class="flex items-center gap-0 pr-2 text-[10px]">
+					<button class="px-1.5 py-0.5 rounded transition-colors {formatMode === 'pretty' ? 'bg-bg-tertiary text-text border border-border' : 'text-text-muted hover:text-text-secondary'}" onclick={() => (formatMode = 'pretty')}>Pretty</button>
+					<button class="px-1.5 py-0.5 rounded transition-colors {formatMode === 'json' ? 'bg-bg-tertiary text-text border border-border' : 'text-text-muted hover:text-text-secondary'}" onclick={() => (formatMode = 'json')}>JSON</button>
+					<button class="px-1.5 py-0.5 rounded transition-colors {formatMode === 'yaml' ? 'bg-bg-tertiary text-text border border-border' : 'text-text-muted hover:text-text-secondary'}" onclick={() => (formatMode = 'yaml')}>YAML</button>
 				</div>
 			{/if}
 		</div>
