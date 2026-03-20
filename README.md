@@ -1,3 +1,7 @@
+<!-- blastgit-banner:start -->
+> Contribute to traceway & earn on Blastgit: <https://www.blastgit.com/repo/traceway-f3181ccf0dc4>
+<!-- blastgit-banner:end -->
+
 # Traceway
 
 Observability for LLM apps: traces, spans, tokens, cost, datasets, review queues, and analytics.
