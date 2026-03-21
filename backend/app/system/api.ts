@@ -1,6 +1,7 @@
 import { api } from "encore.dev/api";
 
-import { stats } from "../tracing/service";
+import { tracing } from "~encore/clients";
+
 import { handlePreflight, json, requireSession, setCors } from "../shared/http";
 
 export const healthPublic = api.raw({ expose: true, method: "GET", path: "/health" }, async (req, res) => {
@@ -8,7 +9,7 @@ export const healthPublic = api.raw({ expose: true, method: "GET", path: "/healt
   setCors(req, res);
   const session = await requireSession(req, res);
   if (!session) return;
-  const count = await stats(session);
+  const count = await tracing.getStatsRpc(session);
   json(res, 200, {
     status: "ok",
     version: "encore",

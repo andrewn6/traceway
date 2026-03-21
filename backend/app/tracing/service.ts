@@ -3,8 +3,9 @@ import { and, asc, desc, eq, gt } from "drizzle-orm";
 import { db } from "../core/database";
 import { eventLog, fileContents, fileVersions, spans, traces } from "../core/schema";
 import { newId } from "../core/utils";
+import { search } from "~encore/clients";
+
 import { enrichKindWithCost, estimateCost } from "./pricing";
-import { mirrorSpan, mirrorTrace } from "../search/turbopuffer";
 
 type Scope = { org_id: string; project_id: string };
 
@@ -182,7 +183,7 @@ export async function createTrace(scope: Scope, input: { id?: string; name?: str
 
   const trace = mapTrace(row);
   await appendEvent(scope, "trace_created", { type: "trace_created", trace });
-  void mirrorTrace({
+  void search.mirrorTraceRpc({
     id: trace.id,
     kind: "trace",
     org_id: scope.org_id,
@@ -303,7 +304,7 @@ export async function createSpan(
 
   const span = mapSpan(row);
   await appendEvent(scope, "span_created", { type: "span_created", span });
-  void mirrorSpan({
+  void search.mirrorSpanRpc({
     id: span.id,
     kind: "span",
     org_id: scope.org_id,

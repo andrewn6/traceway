@@ -1,8 +1,9 @@
 import { randomBytes, scryptSync, timingSafeEqual, createHash, randomUUID } from "node:crypto";
 import { and, eq, gt, isNull } from "drizzle-orm";
 
+import { email as emailService } from "~encore/clients";
+
 import { db } from "../core/database";
-import { sendInviteEmail, sendPasswordResetEmail } from "../email/resend";
 import {
   apiKeys,
   authSessions,
@@ -540,7 +541,7 @@ export async function createInvite(token: string | undefined, email: string, rol
   if (!me || !me.user_id) return null;
   const inviteToken = randomBytes(32).toString("base64url");
   const [inviter] = await db.select({ name: users.name }).from(users).where(eq(users.id, me.user_id)).limit(1);
-  await sendInviteEmail(normalizeEmail(email), inviteToken, inviter?.name ?? undefined);
+  await emailService.sendInviteEmailRpc({ email: normalizeEmail(email), token: inviteToken, inviter_name: inviter?.name ?? undefined });
   const now = new Date();
   const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
   const [inv] = await db
@@ -674,7 +675,7 @@ export async function issuePasswordReset(email: string): Promise<{ ok: boolean; 
 
   const token = randomBytes(32).toString("base64url");
   try {
-    await sendPasswordResetEmail(user.email, token);
+    await emailService.sendPasswordResetEmailRpc({ email: user.email, token });
   } catch (err) {
     console.error("[auth] failed to send password reset email", err);
   }

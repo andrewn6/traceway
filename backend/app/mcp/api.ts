@@ -501,10 +501,10 @@ async function toolAddToDataset(scope: Scope, args: Record<string, unknown>) {
   if (!datasetId) throw new Error("dataset_id is required");
   if (!spanId) throw new Error("span_id is required");
 
-  const dataset = await DatasetsService.get(scope.org_id, scope.project_id, datasetId);
+  const dataset = await datasets.getDataset({ org_id: scope.org_id, project_id: scope.project_id, id: datasetId });
   if (!dataset) throw new Error("dataset not found");
 
-  const span = await getSpan(scope, spanId);
+  const { span } = await tracing.getSpanRpc({ ...scope, span_id: spanId });
   if (!span) throw new Error("span not found");
 
   const kind = {
@@ -514,7 +514,7 @@ async function toolAddToDataset(scope: Scope, args: Record<string, unknown>) {
     actual_output: (span.output ?? null) as JsonValue,
   } as JsonValue;
 
-  const datapoint = await DatasetsService.createDatapoint({
+  const datapoint = await datasets.createDatapoint({
     org_id: scope.org_id,
     project_id: scope.project_id,
     dataset_id: datasetId,
