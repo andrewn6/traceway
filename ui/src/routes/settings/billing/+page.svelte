@@ -94,14 +94,7 @@
 	{#if loading}
 		<div class="text-text-muted text-sm py-10 text-center">Loading...</div>
 	{:else if org}
-		<div class="grid grid-cols-1 lg:grid-cols-[160px_minmax(0,1fr)] gap-3.5 items-start">
-			<aside class="hidden lg:block">
-				<div class="app-toolbar-shell rounded-xl p-1.5 space-y-0.5 sticky top-18">
-					<div class="px-2 py-1 text-[11px] rounded-md border border-border/70 bg-bg-tertiary/60 text-text">Plan &amp; Billing</div>
-				</div>
-			</aside>
-
-			<div class="space-y-3.5">
+		<div class="space-y-3.5">
 				<div class="table-float p-3.5">
 					<div class="flex items-center justify-between gap-4">
 						<div>
@@ -181,7 +174,6 @@
 				</div>
 
 				<p class="text-xs text-text-muted">Plans are billed monthly via <a href="https://polar.sh" target="_blank" rel="noopener noreferrer" class="text-accent hover:underline">Polar</a>.</p>
-			</div>
 		</div>
 	{/if}
 </div>

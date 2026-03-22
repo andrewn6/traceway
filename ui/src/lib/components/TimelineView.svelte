@@ -159,18 +159,58 @@
 		return s.kind.type;
 	}
 
+	// Per-model color palette (matches TraceTimeline)
+	const MODEL_COLORS: [string, string][] = [
+		['claude',    '#c084fc'],
+		['gpt-4o',    '#fb923c'],
+		['gpt-4',     '#f97316'],
+		['gpt-3',     '#fbbf24'],
+		['o1',        '#a78bfa'],
+		['o3',        '#818cf8'],
+		['gemini',    '#34d399'],
+		['llama',     '#f472b6'],
+		['mistral',   '#38bdf8'],
+		['deepseek',  '#2dd4bf'],
+		['command',   '#fb7185'],
+	];
+	const LLM_FALLBACK = ['#ec4899', '#8b5cf6', '#f59e0b', '#06b6d4'];
+	let modelColorMap = new Map<string, string>();
+
+	function colorForModel(model: string): string {
+		const cached = modelColorMap.get(model);
+		if (cached) return cached;
+		const lower = model.toLowerCase();
+		for (const [prefix, c] of MODEL_COLORS) {
+			if (lower.includes(prefix)) { modelColorMap.set(model, c); return c; }
+		}
+		let h = 0;
+		for (let i = 0; i < model.length; i++) h = (h * 31 + model.charCodeAt(i)) | 0;
+		const c = LLM_FALLBACK[Math.abs(h) % LLM_FALLBACK.length];
+		modelColorMap.set(model, c);
+		return c;
+	}
+
 	function barColor(s: Span): string {
 		const status = spanStatus(s);
 		if (status === 'failed') return 'bg-danger/75 border-danger/90';
 		if (status === 'running') return 'bg-warning/70 border-warning/90 animate-pulse';
 		if (!s.kind) return 'bg-text-muted/45 border-text-muted/70';
+		// Use inline style for per-model colors on LLM calls
 		switch (s.kind.type) {
-			case 'llm_call': return 'bg-accent/80 border-accent';
-			case 'fs_read': return 'bg-emerald-500/65 border-emerald-400';
-			case 'fs_write': return 'bg-teal-500/65 border-teal-300';
-			case 'custom': return 'bg-slate-500/60 border-slate-300/70';
+			case 'llm_call': return '__llm__';
+			case 'tool_call': return 'bg-amber-500/70 border-amber-400';
+			case 'fs_read': return 'bg-sky-500/65 border-sky-400';
+			case 'fs_write': return 'bg-emerald-500/65 border-emerald-400';
+			case 'custom': return 'bg-indigo-500/50 border-indigo-400/70';
 			default: return 'bg-text-muted/45 border-text-muted/70';
 		}
+	}
+
+	function barStyle(s: Span): string {
+		if (barColor(s) !== '__llm__') return '';
+		const model = s.kind?.type === 'llm_call' ? (s.kind.model ?? '') : '';
+		const c = model ? colorForModel(model) : '#ec4899';
+		return `background-color: ${c}; border-color: ${c}`;
 	}
 
 	function formatDuration(ms: number | null): string {
@@ -341,7 +381,10 @@
 						{#if showMetadata}
 							<span class="shrink-0 text-[10px] text-text-secondary bg-bg-tertiary/60 border border-border/45 rounded px-1.5 py-px font-mono">{formatDuration(row.durationMs)}</span>
 							{#if model}
-								<span class="shrink-0 text-[10px] text-accent bg-accent/10 border border-accent/30 rounded px-1.5 py-px max-w-[24%] truncate">{model}</span>
+								{@const mc = colorForModel(model)}
+								<span class="shrink-0 text-[10px] rounded px-1.5 py-px max-w-[24%] truncate font-semibold"
+									style="background-color: {mc}; color: white"
+								>{model}</span>
 							{/if}
 							{#if provider}
 								<span class="shrink-0 text-[10px] text-text-muted bg-bg-tertiary/45 border border-border/45 rounded px-1.5 py-px">{provider}</span>
@@ -365,9 +408,9 @@
 
 							<!-- Bar -->
 							<div
-								class="absolute top-1.5 bottom-1.5 rounded-[5px] border {barColor(s)} flex items-center overflow-hidden cursor-pointer shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]
+								class="absolute top-1.5 bottom-1.5 rounded-[5px] border {barColor(s) === '__llm__' ? '' : barColor(s)} flex items-center overflow-hidden cursor-pointer shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]
 									{selectedId === s.id ? 'ring-1 ring-accent ring-offset-1 ring-offset-bg' : ''}"
-								style="left: {row.startPct}%; width: max({MIN_BAR_PX}px, {row.widthPct}%)"
+								style="left: {row.startPct}%; width: max({MIN_BAR_PX}px, {row.widthPct}%); {barStyle(s)}"
 								role="button"
 								tabindex={-1}
 								onmouseenter={(e) => showTooltip(e, s)}

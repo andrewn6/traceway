@@ -277,6 +277,54 @@
 		return `${(ms / 1000).toFixed(2)}s`;
 	}
 
+	// Per-model color palette for LLM calls (vibrant, distinct)
+	const MODEL_COLORS: [string, string][] = [
+		['claude',    '#c084fc'], // purple
+		['gpt-4o',    '#fb923c'], // orange
+		['gpt-4',     '#f97316'], // deep orange
+		['gpt-3',     '#fbbf24'], // amber
+		['o1',        '#a78bfa'], // violet
+		['o3',        '#818cf8'], // indigo
+		['gemini',    '#34d399'], // emerald
+		['llama',     '#f472b6'], // pink
+		['mistral',   '#38bdf8'], // sky
+		['deepseek',  '#2dd4bf'], // teal
+		['command',   '#fb7185'], // rose
+		['qwen',      '#a3e635'], // lime
+	];
+	const LLM_FALLBACK_COLORS = ['#ec4899', '#8b5cf6', '#f59e0b', '#06b6d4', '#10b981', '#ef4444', '#6366f1'];
+	let modelColorCache = new Map<string, string>();
+
+	function colorForModel(model: string): string {
+		const cached = modelColorCache.get(model);
+		if (cached) return cached;
+		const lower = model.toLowerCase();
+		for (const [prefix, color] of MODEL_COLORS) {
+			if (lower.includes(prefix)) {
+				modelColorCache.set(model, color);
+				return color;
+			}
+		}
+		// Hash-based fallback for unknown models
+		let hash = 0;
+		for (let i = 0; i < model.length; i++) hash = (hash * 31 + model.charCodeAt(i)) | 0;
+		const color = LLM_FALLBACK_COLORS[Math.abs(hash) % LLM_FALLBACK_COLORS.length];
+		modelColorCache.set(model, color);
+		return color;
+	}
+
+	function spanColor(s: Span): string {
+		const kind = kindType(s);
+		if (kind === 'llm_call') {
+			const model = s.kind?.type === 'llm_call' ? (s.kind.model ?? '') : '';
+			return model ? colorForModel(model) : '#ec4899';
+		}
+		if (kind === 'tool_call') return '#f59e0b';   // amber
+		if (kind === 'fs_read') return '#38bdf8';      // sky
+		if (kind === 'fs_write') return '#34d399';     // emerald
+		return '#6366f1';                               // indigo for custom
+	}
+
 	function barProps(s: Span): { left: string; width: string; color: string } {
 		const start = new Date(spanStartedAt(s)).getTime();
 		const endStr = spanEndedAt(s);
@@ -285,23 +333,20 @@
 		const leftPct = range > 0 ? ((start - timeRange.min) / range) * 100 : 0;
 		const widthPct = range > 0 ? Math.max(1.5, ((end - start) / range) * 100) : 100;
 
-		const kind = kindType(s);
-		let color: string;
-		switch (kind) {
-			case 'llm_call': color = '#ec4899'; break;
-			case 'fs_read': color = '#06b6d4'; break;
-			case 'fs_write': color = '#10b981'; break;
-			default: color = '#6366f1'; break;
-		}
-
-		return { left: `${leftPct}%`, width: `${widthPct}%`, color };
+		return { left: `${leftPct}%`, width: `${widthPct}%`, color: spanColor(s) };
 	}
 
 	function statusDotClass(s: Span): string {
 		const st = spanStatus(s);
 		if (st === 'running') return 'bg-warning animate-pulse';
 		if (st === 'failed') return 'bg-danger';
-		return 'bg-success';
+		return ''; // use inline color instead
+	}
+
+	function statusDotStyle(s: Span): string {
+		const st = spanStatus(s);
+		if (st === 'running' || st === 'failed') return '';
+		return `background-color: ${spanColor(s)}`;
 	}
 
 	function extractPreviewText(s: Span): string | null {
@@ -474,7 +519,7 @@
 									</div>
 								{/if}
 
-								<span class="w-1.5 h-1.5 rounded-full shrink-0 {statusDotClass(s)}"></span>
+								<span class="w-1.5 h-1.5 rounded-full shrink-0 {statusDotClass(s)}" style={statusDotStyle(s)}></span>
 
 								<span class="text-text truncate text-[11px] font-medium">{s.name}</span>
 
@@ -483,30 +528,38 @@
 								{/if}
 							</div>
 
-							<!-- Right: duration + model tag + tokens + cost -->
+							<!-- Right: duration + model/kind tag + tokens + cost -->
 							<div class="flex items-center gap-1.5 shrink-0 pr-2.5">
-								<span class="text-[10px] text-text-muted/70 font-mono tabular-nums">{formatDuration(duration)}</span>
+								<span class="text-[10px] text-text-muted/60 font-mono tabular-nums">{formatDuration(duration)}</span>
 
-								{#if showMetadata && model}
-									<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold truncate max-w-[160px]"
-										style="background-color: {bar.color}; color: white"
+								{#if model}
+									<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold truncate max-w-[150px]"
+										style="background-color: {spanColor(s)}; color: white"
 									>{model}</span>
+								{:else if kindType(s) !== 'custom'}
+									<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium truncate"
+										style="background-color: {spanColor(s)}20; color: {spanColor(s)}; border: 1px solid {spanColor(s)}30"
+									>{kindType(s).replace('_', ' ')}</span>
 								{/if}
 
-								{#if showMetadata && tokens}
-									<span class="text-[10px] text-text-muted/60 font-mono tabular-nums">{tokens}</span>
+								{#if showMetadata && s.kind?.type === 'llm_call' && s.kind.provider}
+									<span class="text-[9px] text-text-muted/50">{s.kind.provider}</span>
 								{/if}
 
-								{#if showMetadata && cost}
-									<span class="text-[10px] text-success/70 font-mono tabular-nums">{cost}</span>
+								{#if tokens}
+									<span class="text-[10px] text-text-muted/50 font-mono tabular-nums">{tokens}</span>
 								{/if}
 
-								{#if showMetadata && bytes}
-									<span class="text-[10px] text-text-muted/60 font-mono tabular-nums">{bytes}</span>
+								{#if cost}
+									<span class="text-[10px] font-mono tabular-nums" style="color: {spanColor(s)}">{cost}</span>
+								{/if}
+
+								{#if bytes}
+									<span class="text-[10px] text-text-muted/50 font-mono tabular-nums">{bytes}</span>
 								{/if}
 
 								{#if node.hasChildren}
-									<svg class="w-3 h-3 text-text-muted/40 shrink-0 group-hover:text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+									<svg class="w-3 h-3 text-text-muted/30 shrink-0 group-hover:text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
 								{/if}
 							</div>
 						</div>
