@@ -7,9 +7,22 @@
 	let { span, onSpanAction, allSpans = [], onClose }: { span: Span | null; onSpanAction?: () => void; allSpans?: Span[]; onClose?: () => void } = $props();
 
 	let activeTab: 'messages' | 'metadata' = $state('messages');
+
+	// Per-model color (matches TraceTimeline)
+	const MODEL_COLORS: [string, string][] = [
+		['claude', '#c084fc'], ['gpt-4o', '#fb923c'], ['gpt-4', '#f97316'], ['gpt-3', '#fbbf24'],
+		['o1', '#a78bfa'], ['o3', '#818cf8'], ['gemini', '#34d399'], ['llama', '#f472b6'],
+		['mistral', '#38bdf8'], ['deepseek', '#2dd4bf'], ['command', '#fb7185'],
+	];
+	function modelColor(model: string): string {
+		const lower = model.toLowerCase();
+		for (const [prefix, color] of MODEL_COLORS) { if (lower.includes(prefix)) return color; }
+		return '#8b5cf6';
+	}
 	let formatMode: 'pretty' | 'json' | 'yaml' = $state('pretty');
 	let inputExpanded = $state(true);
 	let outputExpanded = $state(true);
+	let collapsedSections: Set<string> = $state(new Set());
 
 	// File content (for fs_read / fs_write spans)
 	let fileContent = $state('');
@@ -288,18 +301,18 @@
 			</div>
 
 			{#if span.kind?.type === 'llm_call'}
+				{@const mc = modelColor(span.kind.model ?? '')}
 				<div class="flex items-center gap-1.5 flex-wrap text-[11px]">
-					<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-bg-tertiary border border-border text-text-secondary font-mono">
-						<svg class="w-3 h-3 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456Z" /></svg>
+					<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold" style="background-color: {mc}; color: white">
 						{span.kind.model}
 					</span>
-					<span class="px-2 py-0.5 rounded bg-bg-tertiary border border-border text-text-muted font-mono">
+					<span class="text-text-muted font-mono tabular-nums">
 						{((span.kind.input_tokens ?? 0) + (span.kind.output_tokens ?? 0)).toLocaleString()} tok
 					</span>
-					<span class="px-2 py-0.5 rounded bg-success/10 border border-success/20 text-success font-mono">
+					<span class="font-mono tabular-nums" style="color: {mc}">
 						${(span.kind.cost ?? 0).toFixed(4)}
 					</span>
-					<span class="px-2 py-0.5 rounded bg-bg-tertiary border border-border text-text-muted font-mono">
+					<span class="text-text-muted/60 font-mono tabular-nums">
 						{span.kind.input_tokens ?? 0} &rarr; {span.kind.output_tokens ?? 0}
 					</span>
 				</div>
@@ -447,32 +460,58 @@
 						{/if}
 					</div>
 				{:else}
-					<!-- Input section -->
+					<!-- Pretty messages: collapsible role sections (Laminar-style) -->
+					{#if formatMode === 'pretty' && (inputMessages || outputMessages)}
+						<div class="divide-y divide-border/30">
+							{#if inputMessages}
+								{#each inputMessages as msg, idx}
+									{@const key = `in-${msg.role}-${idx}`}
+									<div>
+										<!-- svelte-ignore a11y_no_static_element_interactions -->
+										<div class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-bg-secondary/20 transition-colors" onclick={() => { if (collapsedSections.has(key)) collapsedSections.delete(key); else collapsedSections.add(key); collapsedSections = new Set(collapsedSections); }}>
+											<svg class="w-2.5 h-2.5 text-text-muted/50 transition-transform {collapsedSections.has(key) ? '-rotate-90' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
+											<span class="text-[11px] font-semibold uppercase tracking-wide {roleColor(msg.role)}">{msg.role}</span>
+											<div class="flex-1"></div>
+											<button class="w-5 h-5 rounded flex items-center justify-center text-text-muted/30 hover:text-text-muted transition-colors" onclick={(e) => { e.stopPropagation(); copyText(msg.content); }} aria-label="Copy">
+												<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9.75a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184" /></svg>
+											</button>
+										</div>
+										{#if !collapsedSections.has(key)}
+											<div class="px-3 pb-3 text-[12px] text-text whitespace-pre-wrap break-words leading-relaxed">{typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}</div>
+										{/if}
+									</div>
+								{/each}
+							{/if}
+							{#if outputMessages}
+								{#each outputMessages as msg, idx}
+									{@const key = `out-${msg.role}-${idx}`}
+									<div>
+										<!-- svelte-ignore a11y_no_static_element_interactions -->
+										<div class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-bg-secondary/20 transition-colors" onclick={() => { if (collapsedSections.has(key)) collapsedSections.delete(key); else collapsedSections.add(key); collapsedSections = new Set(collapsedSections); }}>
+											<svg class="w-2.5 h-2.5 text-text-muted/50 transition-transform {collapsedSections.has(key) ? '-rotate-90' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
+											<span class="text-[11px] font-semibold uppercase tracking-wide {roleColor(msg.role)}">{msg.role}</span>
+											<div class="flex-1"></div>
+											<button class="w-5 h-5 rounded flex items-center justify-center text-text-muted/30 hover:text-text-muted transition-colors" onclick={(e) => { e.stopPropagation(); copyText(msg.content); }} aria-label="Copy">
+												<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9.75a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184" /></svg>
+											</button>
+										</div>
+										{#if !collapsedSections.has(key)}
+											<div class="px-3 pb-3 text-[12px] text-text whitespace-pre-wrap break-words leading-relaxed">{typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}</div>
+										{/if}
+									</div>
+								{/each}
+							{/if}
+						</div>
+					{:else}
+					<!-- Input section (raw) -->
 					<div class="border-b border-border/40">
-						<button class="flex items-center gap-2 px-4 py-2.5 w-full text-left text-[12px] text-text-muted hover:bg-bg-secondary/20 transition-colors" onclick={() => (inputExpanded = !inputExpanded)}>
-							<svg class="w-3 h-3 transition-transform {inputExpanded ? '' : '-rotate-90'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
+						<button class="flex items-center gap-2 px-3 py-2 w-full text-left text-[12px] text-text-muted hover:bg-bg-secondary/20 transition-colors" onclick={() => (inputExpanded = !inputExpanded)}>
+							<svg class="w-2.5 h-2.5 transition-transform {inputExpanded ? '' : '-rotate-90'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
 							Input
 						</button>
 						{#if inputExpanded}
-							<div class="px-4 pb-3">
-								{#if formatMode === 'pretty' && inputMessages}
-									{#each inputMessages as msg, idx}
-										<div class="flex gap-3 py-3 {idx > 0 ? 'border-t border-border/25' : ''}">
-											<div class="w-16 shrink-0 pt-0.5">
-												<span class="text-[12px] font-bold capitalize {roleColor(msg.role)}">{msg.role}</span>
-											</div>
-											<div class="flex-1 min-w-0">
-												<div class="text-[11px] text-text-muted mb-1">{wordCount(msg.content)}w &middot; {charCount(msg.content)}c</div>
-												<div class="text-[13px] text-text whitespace-pre-wrap break-words">{typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}</div>
-											</div>
-											<div class="flex items-start gap-0.5 shrink-0">
-												<button class="w-6 h-6 rounded flex items-center justify-center text-text-muted/40 hover:text-text-muted transition-colors" onclick={() => copyText(msg.content)} aria-label="Copy">
-													<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9.75a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184" /></svg>
-												</button>
-											</div>
-										</div>
-									{/each}
-								{:else if span.input !== undefined && span.input !== null}
+							<div class="px-3 pb-3">
+								{#if span.input !== undefined && span.input !== null}
 									<pre class="text-[12px] font-mono text-text whitespace-pre-wrap break-words">{renderValue(span.input)}</pre>
 								{:else}
 									<div class="text-[12px] text-text-muted py-4 text-center">No input data</div>
@@ -481,37 +520,15 @@
 						{/if}
 					</div>
 
-					<!-- Output section -->
+					<!-- Output section (raw) -->
 					<div class="border-b border-border/40">
-						<button class="flex items-center gap-2 px-4 py-2.5 w-full text-left text-[12px] text-text-muted hover:bg-bg-secondary/20 transition-colors" onclick={() => (outputExpanded = !outputExpanded)}>
-							<svg class="w-3 h-3 transition-transform {outputExpanded ? '' : '-rotate-90'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
+						<button class="flex items-center gap-2 px-3 py-2 w-full text-left text-[12px] text-text-muted hover:bg-bg-secondary/20 transition-colors" onclick={() => (outputExpanded = !outputExpanded)}>
+							<svg class="w-2.5 h-2.5 transition-transform {outputExpanded ? '' : '-rotate-90'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" /></svg>
 							Output
 						</button>
 						{#if outputExpanded}
-							<div class="px-4 pb-3">
-								{#if span.kind?.type === 'llm_call'}
-									<div class="flex items-center gap-2 mb-3 text-[11px]">
-										<span class="px-2 py-0.5 rounded bg-bg-tertiary border border-border text-text-secondary font-mono">Rerun {span.kind.model}</span>
-									</div>
-								{/if}
-								{#if formatMode === 'pretty' && outputMessages}
-									{#each outputMessages as msg, idx}
-										<div class="flex gap-3 py-3 {idx > 0 ? 'border-t border-border/25' : ''}">
-											<div class="w-16 shrink-0 pt-0.5">
-												<span class="text-[12px] font-bold capitalize {roleColor(msg.role)}">{msg.role}</span>
-											</div>
-											<div class="flex-1 min-w-0">
-												<div class="text-[11px] text-text-muted mb-1">{wordCount(msg.content)}w &middot; {charCount(msg.content)}c</div>
-												<div class="text-[13px] text-text whitespace-pre-wrap break-words">{typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}</div>
-											</div>
-											<div class="flex items-start gap-0.5 shrink-0">
-												<button class="w-6 h-6 rounded flex items-center justify-center text-text-muted/40 hover:text-text-muted transition-colors" onclick={() => copyText(msg.content)} aria-label="Copy">
-													<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9.75a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184" /></svg>
-												</button>
-											</div>
-										</div>
-									{/each}
-								{:else if span.output !== undefined && span.output !== null}
+							<div class="px-3 pb-3">
+								{#if span.output !== undefined && span.output !== null}
 									<pre class="text-[12px] font-mono text-text whitespace-pre-wrap break-words">{renderValue(span.output)}</pre>
 								{:else}
 									<div class="text-[12px] text-text-muted py-4 text-center">No output data</div>
@@ -522,11 +539,12 @@
 
 					<!-- Model footer -->
 					{#if span.kind?.type === 'llm_call'}
-						<div class="px-4 py-3 flex items-center gap-2 text-[12px] bg-bg-secondary/10">
-							<span class="text-text-secondary font-mono">{span.kind.model}</span>
-							<span class="text-text-muted">&middot;</span>
-							<span class="text-text-muted font-mono">{formatDuration(duration)}</span>
+						<div class="px-3 py-2 flex items-center gap-2 text-[11px] text-text-muted border-t border-border/20">
+							<span class="font-mono">{span.kind.model}</span>
+							<span class="text-border/40">·</span>
+							<span class="font-mono">{formatDuration(duration)}</span>
 						</div>
+					{/if}
 					{/if}
 				{/if}
 

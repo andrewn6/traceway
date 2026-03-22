@@ -395,6 +395,58 @@
 		return s.kind?.type === 'llm_call' && extractPreviewText(s) !== null;
 	}
 
+	// ── Aggregate stats ───────────────────────────────────────────────
+	const totalStats = $derived.by(() => {
+		let tokens = 0;
+		let cost = 0;
+		let depth = 0;
+		for (const s of spans) {
+			if (s.kind?.type === 'llm_call') {
+				tokens += (s.kind.input_tokens ?? 0) + (s.kind.output_tokens ?? 0);
+				cost += s.kind.cost ?? 0;
+			}
+			// rough depth calc
+			const d = flatTree.find(n => n.type === 'span' && n.span.id === s.id);
+			if (d && d.depth > depth) depth = d.depth;
+		}
+		const dur = timeRange.max - timeRange.min;
+		return { tokens, cost, durationMs: dur, maxDepth: depth };
+	});
+
+	// ── Mini waterfall bars ───────────────────────────────────────────
+	const waterfallBars = $derived.by(() => {
+		const range = timeRange.max - timeRange.min;
+		if (range <= 0) return [];
+		return spans.map(s => {
+			const start = new Date(spanStartedAt(s)).getTime();
+			const endStr = spanEndedAt(s);
+			const end = endStr ? new Date(endStr).getTime() : Date.now();
+			const leftPct = ((start - timeRange.min) / range) * 100;
+			const widthPct = Math.max(0.5, ((end - start) / range) * 100);
+			return { span: s, left: leftPct, width: widthPct, color: spanColor(s) };
+		});
+	});
+
+	// ── Waterfall time ticks ──────────────────────────────────────────
+	const waterfallTicks = $derived.by(() => {
+		const dur = timeRange.max - timeRange.min;
+		if (dur <= 0) return [];
+		const count = 5;
+		const step = dur / count;
+		const ticks: { pct: number; label: string }[] = [];
+		for (let i = 0; i <= count; i++) {
+			const ms = step * i;
+			const pct = (ms / dur) * 100;
+			let label: string;
+			if (ms === 0) label = '0';
+			else if (ms < 1000) label = `${Math.round(ms)}ms`;
+			else if (ms < 60000) label = `${(ms / 1000).toFixed(1)}s`;
+			else label = `${(ms / 60000).toFixed(1)}m`;
+			ticks.push({ pct, label });
+		}
+		return ticks;
+	});
+
 	// Scroll selected span into view
 	$effect(() => {
 		if (selectedId && scrollContainer) {
@@ -443,6 +495,55 @@
 	{:else if viewMode === 'reader'}
 		<ReaderView {spans} {selectedId} {onSelect} {searchQuery} />
 	{:else}
+		<!-- Mini waterfall overview -->
+		{#if waterfallBars.length > 0}
+			<div class="shrink-0 border-b border-border/30 bg-bg-secondary/20">
+				<!-- Time axis labels -->
+				<div class="relative h-4 px-2">
+					{#each waterfallTicks as tick}
+						<span class="absolute text-[8px] text-text-muted/50 font-mono" style="left: {tick.pct}%; transform: translateX(-50%)">{tick.label}</span>
+					{/each}
+				</div>
+				<!-- Bars -->
+				<div class="relative h-10 px-2 mb-1">
+					<!-- Grid lines -->
+					{#each waterfallTicks as tick}
+						<div class="absolute top-0 bottom-0 border-l border-border/15" style="left: calc({tick.pct}% + 8px)"></div>
+					{/each}
+					<!-- Span bars stacked vertically by index -->
+					{#each waterfallBars as bar, i}
+						{@const barH = Math.min(6, Math.max(2, 36 / Math.max(waterfallBars.length, 1)))}
+						<div
+							class="absolute rounded-[1px] cursor-pointer hover:brightness-125 transition-all"
+							style="left: {bar.left}%; width: max(2px, {bar.width}%); height: {barH}px; top: {(i * (barH + 1))}px; background-color: {bar.color}; opacity: 0.85"
+							role="button"
+							tabindex={-1}
+							onclick={() => onSelect?.(bar.span)}
+						></div>
+					{/each}
+				</div>
+			</div>
+		{/if}
+
+		<!-- Summary stats -->
+		<div class="flex items-center gap-3 px-2 py-1 border-b border-border/30 text-[10px] text-text-muted shrink-0">
+			<span class="font-mono tabular-nums">{spans.length} spans</span>
+			<span class="text-border/30">·</span>
+			<span class="font-mono tabular-nums">{totalStats.durationMs < 1000 ? `${Math.round(totalStats.durationMs)}ms` : `${(totalStats.durationMs / 1000).toFixed(2)}s`}</span>
+			{#if totalStats.tokens > 0}
+				<span class="text-border/30">·</span>
+				<span class="font-mono tabular-nums">{totalStats.tokens > 999 ? `${(totalStats.tokens / 1000).toFixed(1)}K` : totalStats.tokens} tok</span>
+			{/if}
+			{#if totalStats.cost > 0}
+				<span class="text-border/30">·</span>
+				<span class="font-mono tabular-nums text-success/70">${totalStats.cost.toFixed(4)}</span>
+			{/if}
+			{#if totalStats.maxDepth > 0}
+				<span class="text-border/30">·</span>
+				<span>depth {totalStats.maxDepth}</span>
+			{/if}
+		</div>
+
 		<!-- Virtual scroll area (tree/flat modes) -->
 		<div
 			bind:this={scrollContainer}
