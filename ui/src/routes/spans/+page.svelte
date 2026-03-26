@@ -8,7 +8,7 @@
 	let loading = $state(true);
 	let q = $state('');
 	let selectedSpan: Span | null = $state(null);
-	const tracesDocsHref = 'https://docs.traceway.ai/platform/viewing-traces';
+	const tracesDocsHref = 'https://docs.traceway.ai/docs/tracing';
 
 	const filtered = $derived.by(() => {
 		const query = q.trim().toLowerCase();

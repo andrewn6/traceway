@@ -134,7 +134,7 @@
 		avg_latency: 'Trace duration (p99)',
 	};
 
-	const analyticsDocsHref = 'https://docs.traceway.ai/platform/analytics';
+	const analyticsDocsHref = 'https://docs.traceway.ai/docs';
 
 	function loadLayout(): CardLayout[] {
 		if (typeof localStorage === 'undefined') return defaultLayout;

@@ -12,14 +12,17 @@
 	let selectedSession: SessionSummary | null = $state(null);
 	let selectedTraceId: string | null = $state(null);
 	let selectedSpan: Span | null = $state(null);
-	const sessionsDocsHref = 'https://docs.traceway.ai/platform/sessions';
-	const sessionSnippet = `from traceway import TracewayClient
+	const sessionsDocsHref = 'https://docs.traceway.ai/docs/tracing';
+	const sessionSnippet = `from traceway import Traceway
 
-client = TracewayClient()
-client.create_trace(
+client = Traceway()
+trace = client.create_trace(
     name="checkout-flow",
     tags=["session_id:checkout-42"]
-)`;
+)
+
+with client.span("load-cart", trace_id=trace.id):
+    pass`;
 
 	const sessionTraces = $derived.by(() => {
 		if (!selectedSession) return [];
@@ -263,7 +266,7 @@ client.create_trace(
 				{/if}
 			</div>
 		</div>
-	{:else}
+	{:else if sessions.length === 0}
 		<!-- Empty state -->
 		<div class="flex-1 flex items-center justify-center p-8">
 			<div class="max-w-xl w-full">
@@ -289,6 +292,50 @@ client.create_trace(
 					<div class="flex flex-wrap items-center justify-center gap-2">
 						<a href="/traces" class="btn-primary">Start tracing</a>
 						<a href="/spans" class="btn-secondary">Inspect spans</a>
+					</div>
+				</div>
+			</div>
+		</div>
+	{:else if filtered.length === 0 && q}
+		<div class="flex-1 flex items-center justify-center p-8">
+			<div class="max-w-lg w-full">
+				<div class="table-float p-6 text-center space-y-4 border border-border/55">
+					<div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-border/60 bg-bg-secondary/70 text-text-muted">
+						<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+							<path stroke-linecap="round" stroke-linejoin="round" d="m21 21-4.35-4.35m0 0A7.65 7.65 0 1 0 5.85 5.85a7.65 7.65 0 0 0 10.8 10.8Z" />
+						</svg>
+					</div>
+					<div class="space-y-2">
+						<div class="text-base font-semibold text-text">No matching sessions</div>
+						<div class="text-sm text-text-muted">
+							Clear the current search to browse existing sessions and inspect their traces.
+						</div>
+					</div>
+					<div class="flex flex-wrap items-center justify-center gap-2">
+						<button class="btn-primary" onclick={() => (q = '')}>Clear search</button>
+						<a href={sessionsDocsHref} target="_blank" rel="noopener" class="btn-secondary">Session docs</a>
+					</div>
+				</div>
+			</div>
+		</div>
+	{:else}
+		<div class="flex-1 flex items-center justify-center p-8">
+			<div class="max-w-lg w-full">
+				<div class="table-float p-6 text-center space-y-4 border border-border/55">
+					<div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-border/60 bg-bg-secondary/70 text-accent">
+						<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M9 5.25h10.5M9 9.75h10.5M9 14.25h10.5M9 18.75h10.5M4.5 5.25h.008v.008H4.5V5.25Zm0 4.5h.008v.008H4.5V9.75Zm0 4.5h.008v.008H4.5V14.25Zm0 4.5h.008v.008H4.5V18.75Z" />
+						</svg>
+					</div>
+					<div class="space-y-2">
+						<div class="text-base font-semibold text-text">Select a session to inspect</div>
+						<div class="text-sm text-text-muted">
+							Choose a session from the left to view its traces, compare span timelines, and drill into individual calls.
+						</div>
+					</div>
+					<div class="flex flex-wrap items-center justify-center gap-2">
+						<a href="/traces" class="btn-primary">Open traces</a>
+						<a href={sessionsDocsHref} target="_blank" rel="noopener" class="btn-secondary">Session docs</a>
 					</div>
 				</div>
 			</div>
