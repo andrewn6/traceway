@@ -243,7 +243,7 @@
 	<div class="flex items-center justify-between">
 		<div>
 			<h1 class="text-xl font-semibold tracking-tight">Review</h1>
-			<p class="text-xs text-text-muted mt-1">Human annotation queue across all datasets</p>
+			<p class="text-xs text-text-muted mt-1">Auto-demo check: review queue across all datasets</p>
 		</div>
 	</div>
 
