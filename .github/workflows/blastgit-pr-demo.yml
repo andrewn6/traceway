@@ -302,6 +302,55 @@ jobs:
             await page.waitForTimeout(900);
           }
 
+          async function applyDarkBackdrop(page) {
+            await page.evaluate(() => {
+              const bg = "#05060b";
+              document.documentElement.style.background = bg;
+              document.documentElement.style.backgroundColor = bg;
+              if (document.body) {
+                document.body.style.background = bg;
+                document.body.style.backgroundColor = bg;
+              }
+            });
+          }
+
+          function escapeRegex(text) {
+            return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          }
+
+          async function navigateViaSidebar(page, linkText, expectedPath, expectedSelector, contextLabel) {
+            const byRole = page.getByRole("link", {
+              name: new RegExp(`^${escapeRegex(linkText)}`, "i"),
+            }).first();
+
+            let link = byRole;
+            if (!(await link.count())) {
+              const hrefPrefix = expectedPath === "/" ? "/" : expectedPath;
+              link = page.locator(`a[href='${hrefPrefix}'], a[href^='${hrefPrefix}?'], a[href^='${hrefPrefix}#']`).first();
+            }
+            if (!(await link.count())) {
+              link = page.locator(`a:has-text("${linkText}")`).first();
+            }
+            if (!(await link.count())) {
+              throw new Error(`Sidebar link not found: ${linkText}`);
+            }
+
+            await Promise.all([
+              page.waitForURL((url) => {
+                const path = new URL(url.toString()).pathname;
+                return expectedPath === "/" ? path === "/" : path.startsWith(expectedPath);
+              }, { timeout: 20000 }),
+              link.click(),
+            ]);
+
+            if (expectedSelector) {
+              await page.waitForSelector(expectedSelector, { timeout: 20000 });
+            }
+            await assertNotAuth(page, contextLabel);
+            await applyDarkBackdrop(page);
+            await page.waitForTimeout(900);
+          }
+
           async function hoverFirstMatch(page, selectors, dwellMs = 900) {
             for (const selector of selectors) {
               const locator = page.locator(selector).first();
@@ -366,14 +415,38 @@ jobs:
               try {
                 localStorage.setItem("traceway:theme", "dark");
                 document.documentElement.dataset.theme = "dark";
+                const bg = "#05060b";
+                const style = document.createElement("style");
+                style.id = "blastgit-demo-dark-bg";
+                style.textContent = `
+                  html, body {
+                    background: ${bg} !important;
+                    background-color: ${bg} !important;
+                    color-scheme: dark !important;
+                  }
+                `;
+                document.documentElement.appendChild(style);
+                document.documentElement.style.background = bg;
+                document.documentElement.style.backgroundColor = bg;
+                if (document.body) {
+                  document.body.style.background = bg;
+                  document.body.style.backgroundColor = bg;
+                }
               } catch {
                 // Ignore localStorage errors.
               }
             });
             const page = await context.newPage();
             await playReviewSequence(page, base, prTitle, prNumber);
+            await applyDarkBackdrop(page);
 
-            await gotoStable(page, `${base}`, "h1:has-text('Dashboard')", "opening dashboard page");
+            await navigateViaSidebar(
+              page,
+              "Dashboard",
+              "/",
+              "h1:has-text('Dashboard')",
+              "opening dashboard page"
+            );
             await page.mouse.move(180, 118);
             await page.waitForTimeout(450);
             await page.evaluate(() => window.scrollTo({ top: 480, behavior: "smooth" }));
@@ -381,7 +454,13 @@ jobs:
             await page.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
             await page.waitForTimeout(1200);
 
-            await gotoStable(page, `${base}review`, "h1:has-text('Review')", "returning to review page");
+            await navigateViaSidebar(
+              page,
+              "Review",
+              "/review",
+              "h1:has-text('Review')",
+              "returning to review page"
+            );
             await hoverFirstMatch(page, ["tbody tr", "button:has-text('Claim')"], 800);
             await page.waitForTimeout(1600);
 
