@@ -383,10 +383,10 @@ jobs:
 
           async function gotoStable(page, url, selector, contextLabel) {
             await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+            await assertNotAuth(page, contextLabel);
             if (selector) {
               await page.waitForSelector(selector, { timeout: 20000 });
             }
-            await assertNotAuth(page, contextLabel);
             await page.waitForTimeout(900);
           }
 
@@ -468,9 +468,19 @@ jobs:
 
           async function playTargetSequence(page, base, targetPath, targetSelector, expectedText, prTitle, prNumber) {
             const path = targetPath.startsWith("/") ? targetPath : `/${targetPath}`;
-            const targetUrl = new URL(path, base).toString();
-
-            await gotoStable(page, targetUrl, targetSelector || null, `opening target page ${path}`);
+            if (path === "/") {
+              await gotoStable(page, `${base}review`, "h1:has-text('Review')", "opening review page before dashboard");
+              await navigateViaSidebar(
+                page,
+                "Dashboard",
+                "/",
+                targetSelector || "h1:has-text('Dashboard')",
+                "opening dashboard target page"
+              );
+            } else {
+              const targetUrl = new URL(path, base).toString();
+              await gotoStable(page, targetUrl, targetSelector || null, `opening target page ${path}`);
+            }
             await ensureExpectedText(page, expectedText, `verifying expected text on ${path}`);
 
             const prLabel = prNumber ? `#${prNumber}` : "";
