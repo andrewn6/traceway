@@ -66,8 +66,10 @@ jobs:
               { prefix: 'ui/src/routes/+page.svelte', path: '/', selector: "h1:has-text('Dashboard')", label: "Dashboard" },
             ];
 
-            let selectedRule = routeRules[0];
-            for (const file of files) {
+            const uiRouteFiles = files.filter((file) => file.filename.startsWith('ui/src/routes/'));
+
+            let selectedRule = routeRules.find((rule) => rule.path === '/') || routeRules[0];
+            for (const file of uiRouteFiles) {
               const match = routeRules.find((rule) => file.filename.startsWith(rule.prefix));
               if (match) {
                 selectedRule = match;
@@ -109,8 +111,8 @@ jobs:
             }
 
             const prioritizedFiles = [
-              ...files.filter((file) => file.filename.startsWith(selectedRule.prefix)),
-              ...files.filter((file) => !file.filename.startsWith(selectedRule.prefix)),
+              ...uiRouteFiles.filter((file) => file.filename.startsWith(selectedRule.prefix)),
+              ...uiRouteFiles.filter((file) => !file.filename.startsWith(selectedRule.prefix)),
             ];
 
             const candidates = [];
@@ -581,29 +583,7 @@ jobs:
             await playTargetSequence(page, base, demoPath, demoSelector, demoNavLabel, expectedText, prTitle, prNumber);
             await applyDarkBackdrop(page);
 
-            if (demoPath !== "/") {
-              await navigateViaSidebar(
-                page,
-                "Dashboard",
-                "/",
-                "h1:has-text('Dashboard')",
-                "opening dashboard page"
-              );
-              await page.mouse.move(180, 118);
-              await page.waitForTimeout(450);
-            }
-
-            if (!demoPath.startsWith("/review")) {
-              await navigateViaSidebar(
-                page,
-                "Review",
-                "/review",
-                "h1:has-text('Review')",
-                "opening review page"
-              );
-              await hoverFirstMatch(page, ["tbody tr", "button:has-text('Claim')"], 800);
-              await page.waitForTimeout(1100);
-            }
+            await page.waitForTimeout(1400);
 
             const video = page.video();
             await context.close();
