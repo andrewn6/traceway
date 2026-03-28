@@ -23,42 +23,640 @@ jobs:
     name: Render PR demo video
     if: github.event_name != 'pull_request' || github.event.action != 'closed' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 18
 
     steps:
-      - name: Resolve PR metadata
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve PR metadata and demo target
         id: meta
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
-            const prNumberInput = core.getInput('pr_number');
-            const prNumber = context.payload.pull_request?.number ?? (prNumberInput ? Number(prNumberInput) : null);
+            const { owner, repo } = context.repo;
+            const rawPrInput = String(core.getInput('pr_number') || context.payload.inputs?.pr_number || '').trim();
+            const parsedInput = rawPrInput ? Number(rawPrInput) : null;
+            let prNumber = context.payload.pull_request?.number ?? (Number.isFinite(parsedInput) && parsedInput > 0 ? parsedInput : null);
+
+            if (!prNumber && context.sha) {
+              const { data: associatedPulls } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner,
+                repo,
+                commit_sha: context.sha,
+              });
+              const openAssociated = associatedPulls.find((pull) => pull.state === 'open') ?? associatedPulls[0];
+              if (openAssociated?.number) {
+                prNumber = openAssociated.number;
+              }
+            }
+
+            if (!prNumber) {
+              const refName = String(context.ref || '').replace('refs/heads/', '').trim();
+              if (refName) {
+                const { data: refPulls } = await github.rest.pulls.list({
+                  owner,
+                  repo,
+                  state: 'open',
+                  head: `${owner}:${refName}`,
+                  per_page: 1,
+                });
+                if (refPulls[0]?.number) {
+                  prNumber = refPulls[0].number;
+                }
+              }
+            }
+
             if (!prNumber || Number.isNaN(prNumber)) {
-              core.setFailed('Missing pull request number');
+              core.setFailed('Missing pull request number (event, workflow input, and SHA association all failed)');
               return;
             }
 
-            const { owner, repo } = context.repo;
             const { data: pr } = await github.rest.pulls.get({
               owner,
               repo,
               pull_number: prNumber,
             });
 
-            const clean = (value, max = 120) => String(value || '').replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
-            const state = pr.merged ? 'MERGED' : String(pr.state || 'open').toUpperCase();
-            const changed = Number(pr.changed_files || 0);
-            const additions = Number(pr.additions || 0);
-            const deletions = Number(pr.deletions || 0);
-            const headSha = String(pr.head?.sha || '').slice(0, 7) || 'unknown';
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            const routeRules = [
+              { prefix: 'ui/src/routes/review/', path: '/review', selector: 'main', label: 'Review', action: '' },
+              { prefix: 'ui/src/routes/approvals/', path: '/approvals', selector: 'main', label: 'Approvals', action: '' },
+              { prefix: 'ui/src/routes/traces/', path: '/traces', selector: 'main', label: 'Traces', action: '' },
+              { prefix: 'ui/src/routes/spans/', path: '/spans', selector: 'main', label: 'Spans', action: '' },
+              { prefix: 'ui/src/routes/datasets/', path: '/datasets', selector: 'main', label: 'Datasets', action: '' },
+              { prefix: 'ui/src/routes/sessions/', path: '/sessions', selector: 'main', label: 'Sessions', action: '' },
+              { prefix: 'ui/src/routes/replay/', path: '/traces', selector: 'main', label: 'Traces', action: 'open_replay' },
+              { prefix: 'ui/src/routes/query/', path: '/query', selector: 'main', label: 'Query', action: '' },
+              { prefix: 'ui/src/routes/analytics/', path: '/analytics', selector: 'main', label: 'Analytics', action: '' },
+              { prefix: 'ui/src/routes/settings/', path: '/settings', selector: 'main', label: 'Settings', action: '' },
+              { prefix: 'ui/src/routes/+page.svelte', path: '/', selector: 'main', label: 'Dashboard', action: '' },
+            ];
+
+            const uiFiles = files.filter((file) => file.filename.startsWith('ui/src/'));
+            const uiRouteFiles = uiFiles.filter((file) => file.filename.startsWith('ui/src/routes/'));
+            const defaultRule = routeRules.find((rule) => rule.path === '/') || routeRules[0];
+            let selectedRule = defaultRule;
+
+            if (uiFiles.length === 0) {
+              core.warning('No ui/src changes in this PR; using dashboard fallback for real UI capture');
+            } else if (uiRouteFiles.length > 0) {
+              for (const file of uiRouteFiles) {
+                const match = routeRules.find((rule) => file.filename.startsWith(rule.prefix));
+                if (match) {
+                  selectedRule = match;
+                  break;
+                }
+              }
+            }
+
+            function normalizeCandidate(raw) {
+              let value = String(raw || '').replace(/\{[^}]*\}/g, ' ');
+              value = value.replace(/https?:\/\/\S+/g, ' ');
+              value = value.replace(/[<>]/g, ' ');
+              value = value.replace(/\s+/g, ' ').trim();
+              if (value.length < 12 || value.length > 110) return null;
+              if (!/[a-zA-Z]/.test(value)) return null;
+              if (value.split(/\s+/).length < 3) return null;
+              if (/^(const|let|var|import|export|return|if|for|while|class|function)\b/.test(value)) return null;
+              if (/[{};]/.test(value)) return null;
+              return value;
+            }
+
+            function extractCandidatesFromPatch(patch) {
+              if (!patch) return [];
+              const out = [];
+              for (const line of patch.split('\n')) {
+                if (!line.startsWith('+') || line.startsWith('+++')) continue;
+                const body = line.slice(1);
+
+                for (const match of body.matchAll(/>([^<>]{4,180})</g)) {
+                  const cleaned = normalizeCandidate(match[1]);
+                  if (cleaned) out.push(cleaned);
+                }
+
+                for (const match of body.matchAll(/["'`]([^"'`]{6,180})["'`]/g)) {
+                  const cleaned = normalizeCandidate(match[1]);
+                  if (cleaned) out.push(cleaned);
+                }
+              }
+              return out;
+            }
+
+            const prioritizedFiles = uiFiles.length === 0
+              ? []
+              : uiRouteFiles.length > 0
+                ? [
+                    ...uiRouteFiles.filter((file) => file.filename.startsWith(selectedRule.prefix)),
+                    ...uiRouteFiles.filter((file) => !file.filename.startsWith(selectedRule.prefix)),
+                    ...uiFiles.filter((file) => !file.filename.startsWith('ui/src/routes/')),
+                  ]
+                : uiFiles;
+
+            const candidates = [];
+            for (const file of prioritizedFiles) {
+              for (const candidate of extractCandidatesFromPatch(file.patch)) {
+                candidates.push(candidate);
+              }
+            }
+
+            const seen = new Set();
+            const uniqueCandidates = candidates.filter((candidate) => {
+              const key = candidate.toLowerCase();
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
+
+            const expectedText = uniqueCandidates[0] || '';
+            if (!expectedText && uiFiles.length > 0 && uiRouteFiles.length === 0) {
+              core.warning('No visible text candidate extracted from non-route UI changes; targeting root UI path.');
+            }
 
             core.setOutput('pr_number', String(prNumber));
-            core.setOutput('line_repo', clean(`${owner}/${repo}`, 80));
-            core.setOutput('line_status', clean(`PR #${prNumber} ${state}`, 80));
-            core.setOutput('line_title', clean(pr.title, 150) || '(no title)');
-            core.setOutput('line_author', clean(`by @${pr.user?.login || 'unknown'}`, 80));
-            core.setOutput('line_stats', clean(`${changed} files  +${additions}  -${deletions}  sha ${headSha}`, 120));
-            core.setOutput('line_url', clean(pr.html_url, 180));
+            core.setOutput('pr_title', String(pr.title || ''));
+            core.setOutput('demo_path', selectedRule.path);
+            core.setOutput('demo_selector', selectedRule.selector);
+            core.setOutput('demo_nav_label', selectedRule.label || '');
+            core.setOutput('demo_action', selectedRule.action || '');
+            core.setOutput('expected_text', expectedText);
+
+      - name: Install UI dependencies
+        working-directory: ui
+        shell: bash
+        run: |
+          npm ci
+          npm install --no-save playwright
+
+      - name: Install browser dependencies
+        working-directory: ui
+        shell: bash
+        run: |
+          npx playwright install --with-deps chromium
+
+      - name: Start mock API server
+        shell: bash
+        env:
+          PR_TITLE: ${{ steps.meta.outputs.pr_title }}
+          PR_NUMBER: ${{ steps.meta.outputs.pr_number }}
+        run: |
+          node <<'NODE' > /tmp/blastgit-demo-mock.log 2>&1 &
+          const http = require("node:http");
+
+          const prTitle = (process.env.PR_TITLE || "Traceway PR").trim();
+          const prNumber = (process.env.PR_NUMBER || "0").trim();
+          const nowIso = new Date().toISOString();
+
+          const demoProject = {
+            id: "project-demo-1",
+            org_id: "org-demo-1",
+            name: "Blastgit Demo",
+            slug: "blastgit-demo",
+            created_at: nowIso,
+            updated_at: nowIso,
+          };
+
+          const demoQueueItem = {
+            id: "queue-item-demo-1",
+            dataset_id: "dataset-demo-1",
+            status: "pending",
+            claimed_by: null,
+            original_data: {
+              type: "generic",
+              input: `PR #${prNumber}: ${prTitle}`,
+              expected_output: "Show merged PR preview with hover video",
+            },
+            edited_data: null,
+            created_at: nowIso,
+            updated_at: nowIso,
+          };
+
+          const demoDataset = {
+            id: "dataset-demo-1",
+            name: "PR Review Queue",
+            description: "Mocked queue for CI demo capture",
+            datapoint_count: 1,
+          };
+
+          const demoSpan = {
+            id: "span-demo-1",
+            trace_id: "trace-demo-1",
+            parent_id: null,
+            name: `Review ${prTitle}`,
+            status: "completed",
+            kind: { type: "llm_call", provider: "openai", model: "gpt-4o-mini" },
+            input: "Inspect PR changes",
+            output: "Looks good",
+            started_at: nowIso,
+            ended_at: nowIso,
+            tags: [],
+          };
+
+          function sendJson(res, status, payload) {
+            res.writeHead(status, {
+              "content-type": "application/json; charset=utf-8",
+              "access-control-allow-origin": "*",
+            });
+            res.end(JSON.stringify(payload));
+          }
+
+          function sendSse(req, res) {
+            res.writeHead(200, {
+              "content-type": "text/event-stream",
+              "cache-control": "no-cache, no-transform",
+              connection: "keep-alive",
+              "access-control-allow-origin": "*",
+            });
+            res.write("id: 1\n");
+            res.write(`data: ${JSON.stringify({ type: "span_created", span: demoSpan })}\n\n`);
+            const heartbeat = setInterval(() => {
+              res.write(": ping\n\n");
+            }, 15000);
+            req.on("close", () => clearInterval(heartbeat));
+          }
+
+          const server = http.createServer((req, res) => {
+            if (!req.url) return sendJson(res, 400, { error: "missing url" });
+            const url = new URL(req.url, "http://127.0.0.1:4000");
+            const rawPath = url.pathname;
+            const path = rawPath === "/api" ? "/" : rawPath.replace(/^\/api(?=\/)/, "");
+
+            if (req.method === "GET" && path === "/auth/config") {
+              return sendJson(res, 200, { mode: "cloud", features: ["auth", "teams", "api_keys"] });
+            }
+
+            if (req.method === "GET" && path === "/auth/me") {
+              return sendJson(res, 200, {
+                org_id: "org-demo-1",
+                project_id: "project-demo-1",
+                user_id: "user-demo-1",
+                scopes: ["traces_read", "traces_write", "datasets_read", "datasets_write", "analytics_read", "admin"],
+                is_local_mode: false,
+              });
+            }
+
+            if (req.method === "GET" && path === "/projects") {
+              return sendJson(res, 200, [demoProject]);
+            }
+
+            if (req.method === "GET" && path === "/stats") {
+              return sendJson(res, 200, { trace_count: 14, span_count: 67 });
+            }
+
+            if (req.method === "GET" && path === "/analytics/summary") {
+              return sendJson(res, 200, {
+                total_traces: 14,
+                total_spans: 67,
+                avg_latency_ms: 412,
+                total_llm_calls: 24,
+                total_tokens: 58221,
+                total_cost: 12.74,
+                error_count: 1,
+                models_used: ["gpt-4o-mini"],
+                providers_used: ["openai"],
+                cost_by_model: [{ model: "gpt-4o-mini", span_count: 24, cost: 12.74 }],
+                tokens_by_model: [{ model: "gpt-4o-mini", input_tokens: 30112, output_tokens: 28109, total_tokens: 58221 }],
+              });
+            }
+
+            if (req.method === "GET" && path === "/spans") {
+              return sendJson(res, 200, {
+                items: [demoSpan],
+                total: 1,
+                next_cursor: null,
+                has_more: false,
+              });
+            }
+
+            if (req.method === "GET" && path === "/traces") {
+              return sendJson(res, 200, {
+                items: [{
+                  id: "trace-demo-1",
+                  name: `PR #${prNumber} Demo`,
+                  status: "completed",
+                  started_at: nowIso,
+                  ended_at: nowIso,
+                  tags: ["blastgit", `pr:${prNumber}`],
+                }],
+                total: 1,
+                next_cursor: null,
+                has_more: false,
+              });
+            }
+
+            if (req.method === "GET" && path === "/datasets") {
+              return sendJson(res, 200, { datasets: [demoDataset], count: 1 });
+            }
+
+            if (req.method === "GET" && path === "/queue") {
+              return sendJson(res, 200, {
+                items: [demoQueueItem],
+                total: 1,
+                next_cursor: null,
+                has_more: false,
+              });
+            }
+
+            if (req.method === "POST" && /^\/queue\/[^/]+\/claim$/.test(path)) {
+              return sendJson(res, 200, { ...demoQueueItem, status: "claimed", claimed_by: "blastgit-demo" });
+            }
+
+            if (req.method === "POST" && /^\/queue\/[^/]+\/submit$/.test(path)) {
+              return sendJson(res, 200, { ...demoQueueItem, status: "completed", claimed_by: "blastgit-demo" });
+            }
+
+            if (req.method === "GET" && path === "/org/members") {
+              return sendJson(res, 200, [{ id: "user-demo-1", email: "demo@blastgit.ai", name: "Blastgit Demo", role: "owner" }]);
+            }
+
+            if (req.method === "GET" && path === "/events") {
+              return sendSse(req, res);
+            }
+
+            return sendJson(res, 404, { code: "not_found", message: "endpoint not found", details: null });
+          });
+
+          server.listen(4000, "127.0.0.1");
+          NODE
+          echo $! > /tmp/blastgit-demo-mock.pid
+
+      - name: Start UI dev server
+        working-directory: ui
+        shell: bash
+        run: |
+          npm run dev -- --host 127.0.0.1 --port 4173 > /tmp/blastgit-demo-server.log 2>&1 &
+          echo $! > /tmp/blastgit-demo-server.pid
+
+      - name: Wait for app
+        shell: bash
+        run: |
+          for i in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Dev server never became ready"
+          cat /tmp/blastgit-demo-server.log || true
+          exit 1
+
+      - name: Capture real UI demo (strict)
+        working-directory: ui
+        env:
+          DEMO_URL: http://127.0.0.1:4173/
+          PR_TITLE: ${{ steps.meta.outputs.pr_title }}
+          PR_NUMBER: ${{ steps.meta.outputs.pr_number }}
+          DEMO_PATH: ${{ steps.meta.outputs.demo_path }}
+          DEMO_SELECTOR: ${{ steps.meta.outputs.demo_selector }}
+          DEMO_NAV_LABEL: ${{ steps.meta.outputs.demo_nav_label }}
+          DEMO_ACTION: ${{ steps.meta.outputs.demo_action }}
+          DEMO_EXPECTED_TEXT: ${{ steps.meta.outputs.expected_text }}
+          OUT_WEBM: ${{ github.workspace }}/pr-demo.webm
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const { chromium } = require("playwright");
+
+          function escapeRegex(text) {
+            return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          }
+
+          async function assertNotAuth(page, contextLabel) {
+            const currentPath = new URL(page.url()).pathname;
+            if (["/login", "/signup"].includes(currentPath)) {
+              throw new Error(`Redirected to auth while ${contextLabel}`);
+            }
+          }
+
+          async function gotoStable(page, url, selector, contextLabel) {
+            await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+            await assertNotAuth(page, contextLabel);
+            if (selector) {
+              await page.waitForSelector(selector, { timeout: 20000 });
+            }
+            await page.waitForTimeout(900);
+          }
+
+          async function applyDarkBackdrop(page) {
+            await page.evaluate(() => {
+              const bg = "#05060b";
+              document.documentElement.style.background = bg;
+              document.documentElement.style.backgroundColor = bg;
+              if (document.body) {
+                document.body.style.background = bg;
+                document.body.style.backgroundColor = bg;
+              }
+            });
+          }
+
+          async function ensureExpectedText(page, expectedText, contextLabel) {
+            if (!expectedText) return;
+            const expected = page.getByText(new RegExp(escapeRegex(expectedText), "i")).first();
+            await expected.waitFor({ state: "visible", timeout: 15000 });
+            await expected.scrollIntoViewIfNeeded();
+            await page.waitForTimeout(900);
+            await assertNotAuth(page, contextLabel);
+          }
+
+          async function hoverFirstMatch(page, selectors, dwellMs = 900) {
+            for (const selector of selectors) {
+              const locator = page.locator(selector).first();
+              if (await locator.count()) {
+                const box = await locator.boundingBox();
+                if (!box) continue;
+                await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+                await page.waitForTimeout(dwellMs);
+                return true;
+              }
+            }
+            return false;
+          }
+
+          async function clickIfPresent(page, selector) {
+            const locator = page.locator(selector).first();
+            if (!(await locator.count())) return false;
+            await locator.click({ timeout: 5000 });
+            await page.waitForTimeout(650);
+            return true;
+          }
+
+          async function navigateViaSidebar(page, linkText, expectedPath, expectedSelector, contextLabel) {
+            const byRole = page.getByRole("link", {
+              name: new RegExp(`^${escapeRegex(linkText)}`, "i"),
+            }).first();
+
+            let link = byRole;
+            if (!(await link.count())) {
+              const hrefPrefix = expectedPath === "/" ? "/" : expectedPath;
+              link = page.locator(`a[href='${hrefPrefix}'], a[href^='${hrefPrefix}?'], a[href^='${hrefPrefix}#']`).first();
+            }
+            if (!(await link.count())) {
+              link = page.locator(`a:has-text("${linkText}")`).first();
+            }
+            if (!(await link.count())) {
+              throw new Error(`Sidebar link not found: ${linkText}`);
+            }
+
+            await Promise.all([
+              page.waitForURL((url) => {
+                const path = new URL(url.toString()).pathname;
+                return expectedPath === "/" ? path === "/" : path.startsWith(expectedPath);
+              }, { timeout: 20000 }),
+              link.click(),
+            ]);
+
+            if (expectedSelector) {
+              await page.waitForSelector(expectedSelector, { timeout: 20000 });
+            }
+            await assertNotAuth(page, contextLabel);
+            await applyDarkBackdrop(page);
+            await page.waitForTimeout(900);
+          }
+
+          async function playTargetSequence(page, base, targetPath, targetSelector, targetNavLabel, demoAction, expectedText, prTitle, prNumber) {
+            const path = targetPath.startsWith("/") ? targetPath : `/${targetPath}`;
+            if (path === "/") {
+              await gotoStable(page, base, null, "opening app root");
+              if (targetSelector) {
+                try {
+                  await page.waitForSelector(targetSelector, { timeout: 8000 });
+                } catch {
+                  await navigateViaSidebar(
+                    page,
+                    targetNavLabel || "Dashboard",
+                    "/",
+                    targetSelector || "h1:has-text('Dashboard')",
+                    "opening dashboard target page"
+                  );
+                }
+              }
+            } else {
+              const targetUrl = new URL(path, base).toString();
+              try {
+                await gotoStable(page, targetUrl, targetSelector || null, `opening target page ${path}`);
+              } catch {
+                if (!targetNavLabel) throw new Error(`Unable to open target path ${path} and no sidebar label fallback`);
+                await gotoStable(page, base, null, "opening app root before sidebar fallback");
+                await navigateViaSidebar(
+                  page,
+                  targetNavLabel,
+                  path,
+                  targetSelector || null,
+                  `opening target page ${path} via sidebar`
+                );
+              }
+            }
+            await ensureExpectedText(page, expectedText, `verifying expected text on ${path}`);
+
+            if (demoAction === "open_replay") {
+              const replayUrl = new URL("/replay/trace-demo-1", base).toString();
+              await gotoStable(page, replayUrl, "main", "opening replay target page");
+            }
+
+            const prLabel = prNumber ? `#${prNumber}` : "";
+            await hoverFirstMatch(page, [
+              `[data-pr-number='${prNumber}']`,
+              `a:has-text("${prLabel}")`,
+              `a:has-text("${prTitle}")`,
+              `text=${prLabel}`,
+              "tbody tr",
+              "button:has-text('Claim')",
+              "a,button,[role='button']",
+            ], 1100);
+
+            if (path.startsWith("/review") || path.startsWith("/approvals")) {
+              await clickIfPresent(page, "button:has-text('Claimed')");
+              await clickIfPresent(page, "button:has-text('Completed')");
+              await clickIfPresent(page, "button:has-text('Pending')");
+            }
+
+            await page.evaluate(() => window.scrollTo({ top: 260, behavior: "smooth" }));
+            await page.waitForTimeout(700);
+            await page.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+            await page.waitForTimeout(900);
+          }
+
+          (async () => {
+            const outWebm = process.env.OUT_WEBM;
+            const base = process.env.DEMO_URL;
+            const prTitle = (process.env.PR_TITLE || "").trim();
+            const prNumber = (process.env.PR_NUMBER || "").trim();
+            const demoPath = (process.env.DEMO_PATH || "/review").trim();
+            const demoSelector = (process.env.DEMO_SELECTOR || "").trim();
+            const demoNavLabel = (process.env.DEMO_NAV_LABEL || "").trim();
+            const demoAction = (process.env.DEMO_ACTION || "").trim();
+            const expectedText = (process.env.DEMO_EXPECTED_TEXT || "").trim();
+
+            const browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext({
+              viewport: { width: 1280, height: 720 },
+              colorScheme: "dark",
+              recordVideo: {
+                dir: process.cwd(),
+                size: { width: 1280, height: 720 },
+              },
+            });
+            await context.addInitScript(() => {
+              try {
+                localStorage.setItem("traceway:theme", "dark");
+                document.documentElement.dataset.theme = "dark";
+                const bg = "#05060b";
+                const style = document.createElement("style");
+                style.id = "blastgit-demo-dark-bg";
+                style.textContent = `
+                  html, body {
+                    background: ${bg} !important;
+                    background-color: ${bg} !important;
+                    color-scheme: dark !important;
+                  }
+                `;
+                document.documentElement.appendChild(style);
+                document.documentElement.style.background = bg;
+                document.documentElement.style.backgroundColor = bg;
+                if (document.body) {
+                  document.body.style.background = bg;
+                  document.body.style.backgroundColor = bg;
+                }
+              } catch {
+                // Ignore localStorage errors.
+              }
+            });
+
+            const page = await context.newPage();
+            await page.setContent(
+              "<!doctype html><html><head><style>html,body{margin:0;background:#05060b!important;height:100%}</style></head><body></body></html>",
+              { waitUntil: "domcontentloaded" }
+            );
+            await page.waitForTimeout(140);
+
+            await playTargetSequence(page, base, demoPath, demoSelector, demoNavLabel, demoAction, expectedText, prTitle, prNumber);
+            await applyDarkBackdrop(page);
+
+            await page.waitForTimeout(1400);
+
+            const video = page.video();
+            await context.close();
+            await browser.close();
+            if (!video) throw new Error("No video captured");
+            const path = await video.path();
+            fs.copyFileSync(path, outWebm);
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
 
       - name: Ensure ffmpeg is available
         shell: bash
@@ -68,40 +666,33 @@ jobs:
             sudo apt-get install -y ffmpeg
           fi
 
-      - name: Build demo frame text files
+      - name: Convert demo to mp4
         shell: bash
         run: |
-          printf '%s\n' "${{ steps.meta.outputs.line_repo }}" > line_repo.txt
-          printf '%s\n' "${{ steps.meta.outputs.line_status }}" > line_status.txt
-          printf '%s\n' "${{ steps.meta.outputs.line_title }}" > line_title.txt
-          printf '%s\n' "${{ steps.meta.outputs.line_author }}" > line_author.txt
-          printf '%s\n' "${{ steps.meta.outputs.line_stats }}" > line_stats.txt
-          printf '%s\n' "${{ steps.meta.outputs.line_url }}" > line_url.txt
+          ffmpeg -y -ss 1.00 -i pr-demo.webm -r 30 -c:v libx264 -crf 23 -pix_fmt yuv420p -movflags +faststart pr-demo.mp4
 
-      - name: Render mp4 demo
+      - name: Stop dev server
+        if: always()
         shell: bash
         run: |
-          ffmpeg -y \
-            -f lavfi -i color=c=0x05060b:s=1280x720:d=8 \
-            -vf "
-              drawbox=x=64:y=72:w=1152:h=576:color=0x0c1019@1:t=fill,
-              drawbox=x=64:y=72:w=1152:h=576:color=0x2b3347@0.8:t=2,
-              drawbox=x=64:y=72:w=1152:h=6:color=0xea580c@1:t=fill,
-              drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='MERGED PR DEMO PREVIEW':fontcolor=0xffffff@0.78:fontsize=28:x=96:y=104,
-              drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:textfile=line_repo.txt:fontcolor=0xffffff@0.9:fontsize=46:x=96:y=178,
-              drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:textfile=line_status.txt:fontcolor=0xf97316@1:fontsize=40:x=96:y=246,
-              drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:textfile=line_title.txt:fontcolor=0xffffff@0.95:fontsize=40:x=96:y=316,
-              drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:textfile=line_author.txt:fontcolor=0xffffff@0.72:fontsize=34:x=96:y=384,
-              drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf:textfile=line_stats.txt:fontcolor=0xffffff@0.62:fontsize=30:x=96:y=448,
-              drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf:text='Auto-generated by Blastgit. No contributor action required.':fontcolor=0xffffff@0.56:fontsize=24:x=96:y=520,
-              drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf:textfile=line_url.txt:fontcolor=0xffffff@0.44:fontsize=20:x=96:y=560
-            " \
-            -c:v libx264 -pix_fmt yuv420p -profile:v main -level 4.0 -r 30 \
-            -movflags +faststart \
-            pr-demo.mp4
+          if [ -f /tmp/blastgit-demo-server.pid ]; then
+            kill "$(cat /tmp/blastgit-demo-server.pid)" >/dev/null 2>&1 || true
+          fi
+          if [ -f /tmp/blastgit-demo-mock.pid ]; then
+            kill "$(cat /tmp/blastgit-demo-mock.pid)" >/dev/null 2>&1 || true
+          fi
+
+      - name: Upload server log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: blastgit-pr-demo-server-log
+          path: |
+            /tmp/blastgit-demo-server.log
+            /tmp/blastgit-demo-mock.log
 
       - name: Upload demo artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: blastgit-pr-demo-video
           path: pr-demo.mp4
