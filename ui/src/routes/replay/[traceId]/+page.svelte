@@ -2,6 +2,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { shortId } from '$lib/api';
+	import { tick } from 'svelte';
 
 	interface PageParams {
 		traceId?: string;
@@ -38,6 +39,7 @@
 	let selectedCall: string | null = $state(null);
 
 	const traceId = $derived(($page.params as PageParams).traceId ?? '');
+	const focusSpanId = $derived($page.url.searchParams.get('span') ?? '');
 
 	async function loadTrace() {
 		loading = true;
@@ -49,6 +51,18 @@
 				throw new Error(data.error || 'Failed to load trace');
 			}
 			trace = await res.json();
+
+			// Auto-focus span from ?span= param
+			if (focusSpanId && trace) {
+				const match = trace.llm_calls.find(c => c.span_id === focusSpanId);
+				if (match) {
+					expandedCalls.add(match.span_id);
+					expandedCalls = new Set(expandedCalls);
+					selectedCall = match.span_id;
+					await tick();
+					document.getElementById(`replay-call-${match.span_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+				}
+			}
 		} catch (e: any) {
 			error = e?.message || 'Failed to load trace';
 		}
@@ -163,7 +177,7 @@
 						{@const hasModification = modifiedInputs.has(call.span_id)}
 						{@const isExpanded = expandedCalls.has(call.span_id)}
 						{@const isSelected = selectedCall === call.span_id}
-						<div class="surface-panel rounded-lg border border-border/50 overflow-hidden">
+						<div id="replay-call-{call.span_id}" class="surface-panel rounded-lg border {isSelected ? 'border-accent/50' : 'border-border/50'} overflow-hidden motion-row">
 							<!-- Call header -->
 							<button
 								class="w-full flex items-center gap-3 px-4 py-3 hover:bg-bg-tertiary/30 transition-colors"
