@@ -141,6 +141,7 @@ jobs:
         shell: bash
         run: |
           npm ci
+          npm install --no-save playwright
 
       - name: Install browser dependencies
         working-directory: ui
