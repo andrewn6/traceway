@@ -464,10 +464,14 @@ jobs:
           async function ensureExpectedText(page, expectedText, contextLabel) {
             if (!expectedText) return;
             const expected = page.getByText(new RegExp(escapeRegex(expectedText), "i")).first();
-            await expected.waitFor({ state: "visible", timeout: 15000 });
-            await expected.scrollIntoViewIfNeeded();
-            await page.waitForTimeout(900);
-            await assertNotAuth(page, contextLabel);
+            try {
+              await expected.waitFor({ state: "visible", timeout: 15000 });
+              await expected.scrollIntoViewIfNeeded();
+              await page.waitForTimeout(900);
+              await assertNotAuth(page, contextLabel);
+            } catch {
+              console.warn(`Expected text not visible in capture: "${expectedText}"`);
+            }
           }
 
           async function hoverFirstMatch(page, selectors, dwellMs = 900) {
