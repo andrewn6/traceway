@@ -97,7 +97,7 @@ jobs:
               { prefix: 'ui/src/routes/spans/', path: '/spans', selector: 'main', label: 'Spans' },
               { prefix: 'ui/src/routes/datasets/', path: '/datasets', selector: 'main', label: 'Datasets' },
               { prefix: 'ui/src/routes/sessions/', path: '/sessions', selector: 'main', label: 'Sessions' },
-              { prefix: 'ui/src/routes/replay/', path: '/replay', selector: 'main', label: 'Replay' },
+              { prefix: 'ui/src/routes/replay/', path: '/replay/trace-demo-1', selector: 'main', label: 'Replay' },
               { prefix: 'ui/src/routes/query/', path: '/query', selector: 'main', label: 'Query' },
               { prefix: 'ui/src/routes/analytics/', path: '/analytics', selector: 'main', label: 'Analytics' },
               { prefix: 'ui/src/routes/settings/', path: '/settings', selector: 'main', label: 'Settings' },
