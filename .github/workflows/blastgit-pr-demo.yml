@@ -69,12 +69,16 @@ jobs:
             const uiRouteFiles = files.filter((file) => file.filename.startsWith('ui/src/routes/'));
 
             let selectedRule = routeRules.find((rule) => rule.path === '/') || routeRules[0];
-            for (const file of uiRouteFiles) {
-              const match = routeRules.find((rule) => file.filename.startsWith(rule.prefix));
-              if (match) {
-                selectedRule = match;
-                break;
+            if (uiRouteFiles.length > 0) {
+              for (const file of uiRouteFiles) {
+                const match = routeRules.find((rule) => file.filename.startsWith(rule.prefix));
+                if (match) {
+                  selectedRule = match;
+                  break;
+                }
               }
+            } else {
+              selectedRule = { path: '/', selector: '', label: '' };
             }
 
             function normalizeCandidate(raw) {
