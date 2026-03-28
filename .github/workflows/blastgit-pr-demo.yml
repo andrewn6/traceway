@@ -61,9 +61,9 @@ jobs:
             });
 
             const routeRules = [
-              { prefix: 'ui/src/routes/review/', path: '/review', selector: "h1:has-text('Review')" },
-              { prefix: 'ui/src/routes/approvals/', path: '/approvals', selector: "h1:has-text('Approvals')" },
-              { prefix: 'ui/src/routes/+page.svelte', path: '/', selector: "h1:has-text('Dashboard')" },
+              { prefix: 'ui/src/routes/review/', path: '/review', selector: "h1:has-text('Review')", label: "Review" },
+              { prefix: 'ui/src/routes/approvals/', path: '/approvals', selector: "h1:has-text('Approvals')", label: "Approvals" },
+              { prefix: 'ui/src/routes/+page.svelte', path: '/', selector: "h1:has-text('Dashboard')", label: "Dashboard" },
             ];
 
             let selectedRule = routeRules[0];
@@ -134,6 +134,7 @@ jobs:
             core.setOutput('pr_title', String(pr.title || ''));
             core.setOutput('demo_path', selectedRule.path);
             core.setOutput('demo_selector', selectedRule.selector);
+            core.setOutput('demo_nav_label', selectedRule.label || '');
             core.setOutput('expected_text', expectedText);
 
       - name: Install UI dependencies
@@ -362,6 +363,7 @@ jobs:
           PR_NUMBER: ${{ steps.meta.outputs.pr_number }}
           DEMO_PATH: ${{ steps.meta.outputs.demo_path }}
           DEMO_SELECTOR: ${{ steps.meta.outputs.demo_selector }}
+          DEMO_NAV_LABEL: ${{ steps.meta.outputs.demo_nav_label }}
           DEMO_EXPECTED_TEXT: ${{ steps.meta.outputs.expected_text }}
           OUT_WEBM: ${{ github.workspace }}/pr-demo.webm
         shell: bash
@@ -466,20 +468,38 @@ jobs:
             await page.waitForTimeout(900);
           }
 
-          async function playTargetSequence(page, base, targetPath, targetSelector, expectedText, prTitle, prNumber) {
+          async function playTargetSequence(page, base, targetPath, targetSelector, targetNavLabel, expectedText, prTitle, prNumber) {
             const path = targetPath.startsWith("/") ? targetPath : `/${targetPath}`;
             if (path === "/") {
-              await gotoStable(page, `${base}review`, "h1:has-text('Review')", "opening review page before dashboard");
-              await navigateViaSidebar(
-                page,
-                "Dashboard",
-                "/",
-                targetSelector || "h1:has-text('Dashboard')",
-                "opening dashboard target page"
-              );
+              await gotoStable(page, base, null, "opening app root");
+              if (targetSelector) {
+                try {
+                  await page.waitForSelector(targetSelector, { timeout: 8000 });
+                } catch {
+                  await navigateViaSidebar(
+                    page,
+                    targetNavLabel || "Dashboard",
+                    "/",
+                    targetSelector || "h1:has-text('Dashboard')",
+                    "opening dashboard target page"
+                  );
+                }
+              }
             } else {
               const targetUrl = new URL(path, base).toString();
-              await gotoStable(page, targetUrl, targetSelector || null, `opening target page ${path}`);
+              try {
+                await gotoStable(page, targetUrl, targetSelector || null, `opening target page ${path}`);
+              } catch {
+                if (!targetNavLabel) throw new Error(`Unable to open target path ${path} and no sidebar label fallback`);
+                await gotoStable(page, base, null, "opening app root before sidebar fallback");
+                await navigateViaSidebar(
+                  page,
+                  targetNavLabel,
+                  path,
+                  targetSelector || null,
+                  `opening target page ${path} via sidebar`
+                );
+              }
             }
             await ensureExpectedText(page, expectedText, `verifying expected text on ${path}`);
 
@@ -513,6 +533,7 @@ jobs:
             const prNumber = (process.env.PR_NUMBER || "").trim();
             const demoPath = (process.env.DEMO_PATH || "/review").trim();
             const demoSelector = (process.env.DEMO_SELECTOR || "").trim();
+            const demoNavLabel = (process.env.DEMO_NAV_LABEL || "").trim();
             const expectedText = (process.env.DEMO_EXPECTED_TEXT || "").trim();
 
             const browser = await chromium.launch({ headless: true });
@@ -557,7 +578,7 @@ jobs:
             );
             await page.waitForTimeout(140);
 
-            await playTargetSequence(page, base, demoPath, demoSelector, expectedText, prTitle, prNumber);
+            await playTargetSequence(page, base, demoPath, demoSelector, demoNavLabel, expectedText, prTitle, prNumber);
             await applyDarkBackdrop(page);
 
             if (demoPath !== "/") {
