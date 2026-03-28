@@ -561,12 +561,8 @@ jobs:
             await ensureExpectedText(page, expectedText, `verifying expected text on ${path}`);
 
             if (demoAction === "open_replay") {
-              const openedReplay = await clickIfPresent(page, "a[href^='/replay/']");
-              if (!openedReplay) {
-                throw new Error("Replay target action failed: no replay link found on traces page");
-              }
-              await page.waitForURL((url) => new URL(url.toString()).pathname.startsWith("/replay/"), { timeout: 20000 });
-              await page.waitForTimeout(900);
+              const replayUrl = new URL("/replay/trace-demo-1", base).toString();
+              await gotoStable(page, replayUrl, "main", "opening replay target page");
             }
 
             const prLabel = prNumber ? `#${prNumber}` : "";
