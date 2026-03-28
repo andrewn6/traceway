@@ -286,59 +286,66 @@ jobs:
           const fs = require("node:fs");
           const { chromium } = require("playwright");
 
-          async function gotoFirstReachable(page, urls) {
-            for (const url of urls) {
-              try {
-                await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
-                await page.waitForTimeout(1200);
-                return url;
-              } catch {
-                // Try next path.
-              }
+          async function assertNotAuth(page, contextLabel) {
+            const currentPath = new URL(page.url()).pathname;
+            if (["/login", "/signup"].includes(currentPath)) {
+              throw new Error(`Redirected to auth while ${contextLabel}`);
             }
-            throw new Error("No reachable demo route");
           }
 
-          async function visitRoutes(page, base, prTitle, prNumber) {
-            const routes = ["/", "/review"];
-            for (const route of routes) {
-              try {
-                await page.goto(`${base}${route.slice(1)}`, { waitUntil: "domcontentloaded", timeout: 45000 });
-                const redirectedToAuth = await page.evaluate(() =>
-                  ["/login", "/signup"].includes(window.location.pathname)
-                );
-                if (redirectedToAuth) {
-                  throw new Error(`Auth session lost while visiting ${route}`);
-                }
-                await page.waitForTimeout(800);
-              } catch (error) {
-                if (error instanceof Error && error.message.includes("Auth session lost")) {
-                  throw error;
-                }
-                // Continue through best-effort route walkthrough.
+          async function gotoStable(page, url, selector, contextLabel) {
+            await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+            if (selector) {
+              await page.waitForSelector(selector, { timeout: 20000 });
+            }
+            await assertNotAuth(page, contextLabel);
+            await page.waitForTimeout(900);
+          }
+
+          async function hoverFirstMatch(page, selectors, dwellMs = 900) {
+            for (const selector of selectors) {
+              const locator = page.locator(selector).first();
+              if (await locator.count()) {
+                const box = await locator.boundingBox();
+                if (!box) continue;
+                await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+                await page.waitForTimeout(dwellMs);
+                return true;
               }
             }
+            return false;
+          }
 
-            const prLabel = `#${prNumber || ""}`.trim();
-            const hoverCandidates = [
+          async function clickIfPresent(page, selector) {
+            const locator = page.locator(selector).first();
+            if (!(await locator.count())) return false;
+            await locator.click({ timeout: 5000 });
+            await page.waitForTimeout(650);
+            return true;
+          }
+
+          async function playReviewSequence(page, base, prTitle, prNumber) {
+            await gotoStable(page, `${base}review`, "h1:has-text('Review')", "opening review page");
+
+            const prLabel = prNumber ? `#${prNumber}` : "";
+            await hoverFirstMatch(page, [
               `[data-pr-number='${prNumber}']`,
               `a:has-text("${prLabel}")`,
               `a:has-text("${prTitle}")`,
               `text=${prLabel}`,
-              "a,button,[role='button']"
-            ];
+              "tbody tr",
+              "button:has-text('Claim')",
+              "a,button,[role='button']",
+            ], 1100);
 
-            for (const selector of hoverCandidates) {
-              const match = page.locator(selector).first();
-              if (await match.count()) {
-                const box = await match.boundingBox();
-                if (box) {
-                  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-                  await page.waitForTimeout(900);
-                  break;
-                }
-              }
-            }
+            await clickIfPresent(page, "button:has-text('Claimed')");
+            await clickIfPresent(page, "button:has-text('Completed')");
+            await clickIfPresent(page, "button:has-text('Pending')");
+
+            await page.evaluate(() => window.scrollTo({ top: 220, behavior: "smooth" }));
+            await page.waitForTimeout(700);
+            await page.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+            await page.waitForTimeout(900);
           }
 
           (async () => {
@@ -349,21 +356,34 @@ jobs:
             const browser = await chromium.launch({ headless: true });
             const context = await browser.newContext({
               viewport: { width: 1280, height: 720 },
+              colorScheme: "dark",
               recordVideo: {
                 dir: process.cwd(),
                 size: { width: 1280, height: 720 },
               },
             });
+            await context.addInitScript(() => {
+              try {
+                localStorage.setItem("traceway:theme", "dark");
+                document.documentElement.dataset.theme = "dark";
+              } catch {
+                // Ignore localStorage errors.
+              }
+            });
             const page = await context.newPage();
-            await gotoFirstReachable(page, [base, `${base}review`, `${base}traces`, `${base}docs`]);
-            await visitRoutes(page, base, prTitle, prNumber);
+            await playReviewSequence(page, base, prTitle, prNumber);
 
-            await page.evaluate(() => window.scrollTo({ top: 420, behavior: "smooth" }));
-            await page.waitForTimeout(800);
-            await page.evaluate(() => window.scrollTo({ top: 980, behavior: "smooth" }));
-            await page.waitForTimeout(800);
+            await gotoStable(page, `${base}`, "h1:has-text('Dashboard')", "opening dashboard page");
+            await page.mouse.move(180, 118);
+            await page.waitForTimeout(450);
+            await page.evaluate(() => window.scrollTo({ top: 480, behavior: "smooth" }));
+            await page.waitForTimeout(900);
             await page.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
-            await page.waitForTimeout(2200);
+            await page.waitForTimeout(1200);
+
+            await gotoStable(page, `${base}review`, "h1:has-text('Review')", "returning to review page");
+            await hoverFirstMatch(page, ["tbody tr", "button:has-text('Claim')"], 800);
+            await page.waitForTimeout(1600);
 
             const video = page.video();
             await context.close();
@@ -388,7 +408,7 @@ jobs:
       - name: Convert demo to mp4
         shell: bash
         run: |
-          ffmpeg -y -i pr-demo.webm -c:v libx264 -pix_fmt yuv420p -movflags +faststart pr-demo.mp4
+          ffmpeg -y -ss 0.35 -i pr-demo.webm -r 30 -c:v libx264 -crf 23 -pix_fmt yuv420p -movflags +faststart pr-demo.mp4
 
       - name: Stop dev server
         if: always()
