@@ -437,6 +437,11 @@ jobs:
               }
             });
             const page = await context.newPage();
+            await page.setContent(
+              "<!doctype html><html><head><style>html,body{margin:0;background:#05060b!important;height:100%}</style></head><body></body></html>",
+              { waitUntil: "domcontentloaded" }
+            );
+            await page.waitForTimeout(140);
             await playReviewSequence(page, base, prTitle, prNumber);
             await applyDarkBackdrop(page);
 
