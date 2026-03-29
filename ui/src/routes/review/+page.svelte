@@ -242,7 +242,7 @@
 	<!-- Header -->
 	<div class="flex items-center justify-between">
 		<div>
-			<h1 class="text-xl font-semibold tracking-tight">Review</h1>
+			<h1 class="text-xl font-semibold tracking-tight">Review Smoke Marker 2026-03-29</h1>
 			<p class="text-xs text-text-muted mt-1">Human annotation queue across all datasets</p>
 		</div>
 	</div>
