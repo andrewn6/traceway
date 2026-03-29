@@ -109,9 +109,11 @@ jobs:
             const uiRouteFiles = uiFiles.filter((file) => file.filename.startsWith('ui/src/routes/'));
             const defaultRule = routeRules.find((rule) => rule.path === '/') || routeRules[0];
             let selectedRule = defaultRule;
+            let demoEnabled = true;
 
             if (uiFiles.length === 0) {
-              core.warning('No ui/src changes in this PR; using dashboard fallback for real UI capture');
+              demoEnabled = false;
+              core.warning('No ui/src changes in this PR; skipping demo generation');
             } else if (uiRouteFiles.length > 0) {
               for (const file of uiRouteFiles) {
                 const match = routeRules.find((rule) => file.filename.startsWith(rule.prefix));
@@ -120,6 +122,9 @@ jobs:
                   break;
                 }
               }
+            } else {
+              demoEnabled = false;
+              core.warning('No route-level UI changes detected; skipping demo generation');
             }
 
             function normalizeCandidate(raw) {
@@ -181,8 +186,9 @@ jobs:
             });
 
             const expectedText = uniqueCandidates[0] || '';
-            if (!expectedText && uiFiles.length > 0 && uiRouteFiles.length === 0) {
-              core.warning('No visible text candidate extracted from non-route UI changes; targeting root UI path.');
+            if (!expectedText) {
+              demoEnabled = false;
+              core.warning('No targetable UI text extracted from this PR; skipping demo generation');
             }
 
             core.setOutput('pr_number', String(prNumber));
@@ -192,8 +198,16 @@ jobs:
             core.setOutput('demo_nav_label', selectedRule.label || '');
             core.setOutput('demo_action', selectedRule.action || '');
             core.setOutput('expected_text', expectedText);
+            core.setOutput('demo_enabled', demoEnabled ? 'true' : 'false');
+
+      - name: Skip non-targetable PR demo
+        if: steps.meta.outputs.demo_enabled != 'true'
+        shell: bash
+        run: |
+          echo "Skipping PR demo: no route-level UI change target was detected."
 
       - name: Install UI dependencies
+        if: steps.meta.outputs.demo_enabled == 'true'
         working-directory: ui
         shell: bash
         run: |
@@ -201,12 +215,14 @@ jobs:
           npm install --no-save playwright
 
       - name: Install browser dependencies
+        if: steps.meta.outputs.demo_enabled == 'true'
         working-directory: ui
         shell: bash
         run: |
           npx playwright install --with-deps chromium
 
       - name: Start mock API server
+        if: steps.meta.outputs.demo_enabled == 'true'
         shell: bash
         env:
           PR_TITLE: ${{ steps.meta.outputs.pr_title }}
@@ -393,6 +409,7 @@ jobs:
           echo $! > /tmp/blastgit-demo-mock.pid
 
       - name: Start UI dev server
+        if: steps.meta.outputs.demo_enabled == 'true'
         working-directory: ui
         shell: bash
         run: |
@@ -400,6 +417,7 @@ jobs:
           echo $! > /tmp/blastgit-demo-server.pid
 
       - name: Wait for app
+        if: steps.meta.outputs.demo_enabled == 'true'
         shell: bash
         run: |
           for i in $(seq 1 120); do
@@ -413,6 +431,7 @@ jobs:
           exit 1
 
       - name: Capture real UI demo (strict)
+        if: steps.meta.outputs.demo_enabled == 'true'
         working-directory: ui
         env:
           DEMO_URL: http://127.0.0.1:4173/
@@ -463,16 +482,14 @@ jobs:
           }
 
           async function ensureExpectedText(page, expectedText, contextLabel) {
-            if (!expectedText) return;
-            const expected = page.getByText(new RegExp(escapeRegex(expectedText), "i")).first();
-            try {
-              await expected.waitFor({ state: "visible", timeout: 15000 });
-              await expected.scrollIntoViewIfNeeded();
-              await page.waitForTimeout(900);
-              await assertNotAuth(page, contextLabel);
-            } catch {
-              console.warn(`Expected text not visible in capture: "${expectedText}"`);
+            if (!expectedText) {
+              throw new Error("Missing required expected text target for PR demo capture");
             }
+            const expected = page.getByText(new RegExp(escapeRegex(expectedText), "i")).first();
+            await expected.waitFor({ state: "visible", timeout: 15000 });
+            await expected.scrollIntoViewIfNeeded();
+            await page.waitForTimeout(900);
+            await assertNotAuth(page, contextLabel);
           }
 
           async function hoverFirstMatch(page, selectors, dwellMs = 900) {
@@ -664,6 +681,7 @@ jobs:
           NODE
 
       - name: Ensure ffmpeg is available
+        if: steps.meta.outputs.demo_enabled == 'true'
         shell: bash
         run: |
           if ! command -v ffmpeg >/dev/null 2>&1; then
@@ -672,12 +690,34 @@ jobs:
           fi
 
       - name: Convert demo to mp4
+        if: steps.meta.outputs.demo_enabled == 'true'
         shell: bash
         run: |
           ffmpeg -y -ss 1.00 -i pr-demo.webm -r 30 -c:v libx264 -crf 23 -pix_fmt yuv420p -movflags +faststart pr-demo.mp4
 
+      - name: Write demo metadata
+        if: steps.meta.outputs.demo_enabled == 'true'
+        shell: bash
+        env:
+          PR_NUMBER: ${{ steps.meta.outputs.pr_number }}
+          EXPECTED_TEXT: ${{ steps.meta.outputs.expected_text }}
+          DEMO_PATH: ${{ steps.meta.outputs.demo_path }}
+          DEMO_SELECTOR: ${{ steps.meta.outputs.demo_selector }}
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const metadata = {
+            prNumber: Number(process.env.PR_NUMBER || "0"),
+            expectedText: String(process.env.EXPECTED_TEXT || ""),
+            demoPath: String(process.env.DEMO_PATH || ""),
+            demoSelector: String(process.env.DEMO_SELECTOR || ""),
+            generatedAt: new Date().toISOString(),
+          };
+          fs.writeFileSync("pr-demo-meta.json", JSON.stringify(metadata, null, 2));
+          NODE
+
       - name: Stop dev server
-        if: always()
+        if: always() && steps.meta.outputs.demo_enabled == 'true'
         shell: bash
         run: |
           if [ -f /tmp/blastgit-demo-server.pid ]; then
@@ -697,8 +737,11 @@ jobs:
             /tmp/blastgit-demo-mock.log
 
       - name: Upload demo artifact
+        if: steps.meta.outputs.demo_enabled == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: blastgit-pr-demo-video-pr-${{ steps.meta.outputs.pr_number }}
-          path: pr-demo.mp4
+          path: |
+            pr-demo.mp4
+            pr-demo-meta.json
           retention-days: 30
